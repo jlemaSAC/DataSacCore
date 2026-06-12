@@ -34,6 +34,27 @@ def _optional_int(name: str, default: int) -> int:
         raise SettingsError(f"Variable de entorno invalida para entero: {name}") from exc
 
 
+def _optional_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+
+    raise SettingsError(f"Variable de entorno invalida para booleano: {name}")
+
+
+@dataclass(frozen=True)
+class AppSettings:
+    name: str
+    version: str
+    check_database_on_startup: bool
+
+
 @dataclass(frozen=True)
 class DatabaseSettings:
     user: str
@@ -49,6 +70,15 @@ class DatabaseSettings:
     pool_timeout: int
     pool_recycle: int
     query_timeout: int
+
+
+@lru_cache
+def get_app_settings() -> AppSettings:
+    return AppSettings(
+        name=_optional("APP_NAME", "DataSacCore"),
+        version=_optional("APP_VERSION", "0.1.0"),
+        check_database_on_startup=_optional_bool("CHECK_DATABASE_ON_STARTUP", True),
+    )
 
 
 @lru_cache
