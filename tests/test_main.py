@@ -18,3 +18,9 @@ def test_health_check() -> None:
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
+
+def test_database_health_check_without_settings() -> None:
+    response = client.get("/health/db")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["message"] == "Base de datos no configurada"

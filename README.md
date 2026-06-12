@@ -26,6 +26,16 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
+## Configurar conexion a SQL Server
+
+Copia `.env.example` a `.env` y completa las variables de conexion:
+
+```bash
+cp .env.example .env
+```
+
+La configuracion usa SQLAlchemy con `mssql+pyodbc` y el driver ODBC de SQL Server. El endpoint `/health/db` ejecuta `SELECT 1` para validar la conexion real.
+
 ## Ejecutar en desarrollo
 
 ```bash
@@ -37,6 +47,11 @@ La API queda disponible en:
 - http://127.0.0.1:8000
 - http://127.0.0.1:8000/docs
 - http://127.0.0.1:8000/redoc
+
+Healthchecks:
+
+- http://127.0.0.1:8000/health
+- http://127.0.0.1:8000/health/db
 
 ## Ejecutar pruebas
 
@@ -50,6 +65,10 @@ pytest
 .
 ├── app
 │   ├── __init__.py
+│   ├── core
+│   │   └── settings.py
+│   ├── db
+│   │   └── session.py
 │   ├── main.py
 │   └── routers
 │       ├── __init__.py
@@ -60,4 +79,3 @@ pytest
 ├── requirements.txt
 └── README.md
 ```
-
