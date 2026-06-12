@@ -92,8 +92,15 @@ pytest
 │   ├── core
 │   │   └── settings.py
 │   ├── db
+│   │   ├── base.py
+│   │   ├── mongo.py
 │   │   └── session.py
 │   ├── main.py
+│   ├── models
+│   │   └── ...
+│   ├── repositories
+│   │   ├── mongo
+│   │   └── sql
 │   └── routers
 │       ├── __init__.py
 │       └── health.py
@@ -103,3 +110,9 @@ pytest
 ├── requirements.txt
 └── README.md
 ```
+
+## Modelos
+
+`app/models` contiene los modelos de persistencia SQLAlchemy migrados desde `DataSacService`, organizados por dominio. Los modelos importan `Base` o `BaseSecundaria` desde `app.db.base`; no deben abrir conexiones ni contener reglas de negocio.
+
+Las consultas deben vivir en `app/repositories/sql` o `app/repositories/mongo`, y la logica de negocio debe construirse encima en servicios.

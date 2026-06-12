@@ -1,0 +1,148 @@
+from sqlalchemy import Column, Integer, DateTime, Boolean, ForeignKey, Numeric, text
+from sqlalchemy.dialects.mssql import NVARCHAR, VARCHAR
+from sqlalchemy.orm import relationship
+
+from app.db.base import Base
+
+
+class InversionPortafolio(Base):
+    __tablename__ = "INVERSIONPORTAFOLIO"
+    __table_args__ = {"schema": "PORTAFOLIO"}
+
+    id = Column("ID", Integer, primary_key=True, autoincrement=True, nullable=False)
+    codigo_producto = Column(
+        "CODIGOPRODUCTO",
+        NVARCHAR(50),
+        ForeignKey("FINANCIERO.PRODUCTO.CODIGO"),
+        nullable=False,
+    )
+    codigo_tipo_documento = Column(
+        "CODIGOTIPODOCUMENTO",
+        NVARCHAR(5),
+        ForeignKey("PORTAFOLIO.TIPODOCUMENTO.CODIGO"),
+        nullable=False,
+    )
+    id_custodio = Column(
+        "IDCUSTODIO",
+        Integer,
+        ForeignKey("PORTAFOLIO.CUSTODIO.ID"),
+        nullable=False,
+    )
+    codigo_tipo_inversion = Column(
+        "CODIGOTIPOINVERSION",
+        NVARCHAR(5),
+        ForeignKey("PORTAFOLIO.TIPO_INVERSION.CODIGO"),
+        nullable=False,
+    )
+    codigo_institucion = Column(
+        "CODIGOINSTITUCION",
+        NVARCHAR(5),
+        ForeignKey("PORTAFOLIO.INSTITUCION.CODIGO"),
+        nullable=False,
+    )
+    codigo_estado_inversion = Column(
+        "CODIGOESTADOINVERSION",
+        NVARCHAR(5),
+        ForeignKey("PORTAFOLIO.ESTADOINVERSION.CODIGO"),
+        nullable=False,
+    )
+    codigo_usuario_ingreso = Column(
+        "CODIGOUSUARIOINGRESO",
+        NVARCHAR(100),
+        ForeignKey("SEGURIDAD.USUARIO.USUARIO"),
+        nullable=False,
+    )
+    codigo_estado_titulo = Column(
+        "CODIGOESTADOTITULO",
+        NVARCHAR(5),
+        ForeignKey("PORTAFOLIO.ESTADOTITULO.CODIGO"),
+        nullable=False,
+    )
+    codigo_opcionalidad = Column(
+        "CODIGOOPCIONALIDAD",
+        NVARCHAR(5),
+        ForeignKey("PORTAFOLIO.OPCIONALIDAD.CODIGO"),
+        nullable=False,
+    )
+    codigo_identificador_instrumento = Column(
+        "CODIGOIDENTIFICADORINSTRUMENTO",
+        NVARCHAR(5),
+        ForeignKey("PORTAFOLIO.IDENTIFICADORINSTRUMENTO.CODIGO"),
+        nullable=False,
+    )
+    codigo_tasa_base = Column(
+        "CODIGOTASABASE",
+        NVARCHAR(5),
+        ForeignKey("PORTAFOLIO.TASABASE.CODIGO"),
+        nullable=False,
+    )
+    id_agencia = Column(
+        "IDAGENCIA",
+        Integer,
+        ForeignKey("GENERAL.AGENCIA.ID"),
+        nullable=False,
+    )
+    id_empresa = Column(
+        "IDEMPRESA",
+        Integer,
+        ForeignKey("GENERAL.EMPRESA.ID"),
+        nullable=False,
+    )
+    id_moneda = Column(
+        "IDMONEDA",
+        Integer,
+        ForeignKey("GENERAL.MONEDA.ID"),
+        nullable=False,
+    )
+    id_casa_valor = Column(
+        "IDCASAVALOR",
+        Integer,
+        ForeignKey("PORTAFOLIO.CASAVALOR.ID"),
+        nullable=False,
+    )
+    id_factor_calculo_dias = Column(
+        "IDFACTORCALCULODIAS",
+        Integer,
+        ForeignKey("PORTAFOLIO.FACTORCALCULODIAS.ID"),
+        nullable=False,
+    )
+    dias_frecuencia = Column("DIASFRECUENCIA", Integer, nullable=False)
+    documento = Column("DOCUMENTO", NVARCHAR(50), nullable=False)
+    documento_preimpreso = Column("DOCUMENTOPREIMPRESO", NVARCHAR(50), nullable=False)
+    tasa = Column("TASA", Numeric(18, 2), nullable=False)
+    valor_nominal = Column("VALORNOMINAL", Numeric(18, 2), nullable=False)
+    valor_compra = Column("VALORCOMPRA", Numeric(18, 2), nullable=False)
+    valor_mercado = Column("VALORMERCADO", Numeric(18, 2), nullable=False)
+    comision_bolsa_valores = Column("COMISIONBOLSAVALORES", Numeric(18, 2), nullable=False)
+    comision_casa_valor = Column("COMISIONCASAVALOR", Numeric(18, 2), nullable=False)
+    porcentaje_retencion = Column("PORCENTAJERETENCION", Numeric(18, 2), nullable=False)
+    porcentaje_rendimiento = Column("PORCENTAJERENDIMIENTO", Numeric(18, 2), nullable=False)
+    dias_plazo_por_vencer = Column("DIASPLAZOPORVENCER", Integer, nullable=False)
+    dias_plazo_por_vencer_real = Column("DIASPLAZOPORVENCERREAL", Integer, nullable=False)
+    fecha_proceso = Column("FECHAPROCESO", DateTime, nullable=False)
+    fecha_creacion = Column("FECHACREACION", DateTime, nullable=False)
+    fecha_compra = Column("FECHACOMPRA", DateTime, nullable=False)
+    fecha_vencimiento = Column("FECHAVENCIMIENTO", DateTime, nullable=False)
+    es_excenta_impuestos = Column("ESEXCENTAIMPUESTOS", Boolean, nullable=False)
+    con_prorrateo_agencias = Column("CONPRORRATEOAGENCIAS", Boolean, nullable=False)
+    fecha_fin_dia = Column("FECHAFINDIA", DateTime, nullable=False)
+    periodicidad_pago_cupon = Column("PERIODICIDADPAGOCUPON", Boolean, nullable=False)
+    califica_por_inversion = Column("CALIFICAPORINVERSION", Boolean, nullable=False)
+    es_materializada = Column("ESMATERIALIZADA", Boolean, nullable=False)
+    es_primario = Column("ESPRIMARIO", Boolean, nullable=False)
+    cupon_afecta_capital = Column("CUPONAFECTACAPITAL", Boolean, nullable=False)
+    cupon_afecta_interes = Column("CUPONAFECTAINTERES", Boolean, nullable=False)
+    requiere_vector_precio = Column("REQUIEREVECTORPRECIO", Boolean, nullable=False)
+    es_cobro_al_vencimiento = Column("ESCOBROALVENCIMIENTO", Boolean, nullable=False)
+    afecta_interes = Column("AFECTAINTERES", Boolean, nullable=False)
+    afecta_capital = Column("AFECTACAPITAL", Boolean, nullable=False)
+    tea = Column("TEA", Numeric(18, 2), nullable=True)
+    tir = Column("TIR", Numeric(18, 2), nullable=True)
+    valor_efectivo = Column("VALOREFECTIVO", Numeric(18, 2), nullable=True)
+    precio_compra = Column("PRECIOCOMPRA", Numeric(18, 2), nullable=True)
+    numero_portafolio = Column("NUMEROPORTAFOLIO", VARCHAR(100), nullable=False)
+    fecha_emision = Column("FECHAEMISION", DateTime, nullable=True)
+    es_bono = Column("ESBONO", Boolean, nullable=False, server_default=text("0"))
+
+    items = relationship("InversionItemInversion", back_populates="inversion")
+

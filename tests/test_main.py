@@ -5,6 +5,7 @@ from app.db.mongo import get_mongo_client, get_mongo_client_sync
 from app.db.session import get_engine, get_session_factory
 from app.main import app
 from app.main import verify_database_on_startup, verify_mongo_on_startup
+from app.models import import_all_models
 
 client = TestClient(app)
 
@@ -102,3 +103,11 @@ def test_startup_mongo_check_can_be_disabled(monkeypatch) -> None:
 
     get_app_settings.cache_clear()
     clear_mongo_caches()
+
+
+def test_import_all_models_without_database_connection(monkeypatch) -> None:
+    for env_var in DB_ENV_VARS:
+        monkeypatch.delenv(env_var, raising=False)
+    clear_database_caches()
+
+    import_all_models()
