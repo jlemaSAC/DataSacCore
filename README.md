@@ -36,16 +36,27 @@ cp .env.example .env
 
 La configuracion usa SQLAlchemy con `mssql+pyodbc` y el driver ODBC de SQL Server. El endpoint `/health/db` ejecuta `SELECT 1` para validar la conexion real.
 
+La conexion a MongoDB usa `pymongo` y mantiene las bases usadas por `DataSacService`:
+
+- `logs`
+- `DataSac`
+- `MayorAuxiliar`
+- `AnalyticSac`
+
+El endpoint `/health/mongo` ejecuta `ping` para validar la conexion real.
+
 Al iniciar, la aplicacion valida la conexion y muestra en consola:
 
 ```text
 Conexion con la base de datos establecida correctamente. Check=1
+Conexion con MongoDB establecida correctamente. Check=1
 ```
 
-Si la conexion falla, el servicio no arranca. Para desactivar temporalmente esta validacion:
+Si alguna conexion falla, el servicio no arranca. Para desactivar temporalmente estas validaciones:
 
 ```env
 CHECK_DATABASE_ON_STARTUP=false
+CHECK_MONGO_ON_STARTUP=false
 ```
 
 ## Ejecutar en desarrollo
@@ -64,6 +75,7 @@ Healthchecks:
 
 - http://127.0.0.1:8000/health
 - http://127.0.0.1:8000/health/db
+- http://127.0.0.1:8000/health/mongo
 
 ## Ejecutar pruebas
 

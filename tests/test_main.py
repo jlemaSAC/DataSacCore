@@ -1,9 +1,10 @@
 from fastapi.testclient import TestClient
 
-from app.core.settings import get_app_settings, get_database_settings
+from app.core.settings import get_app_settings, get_database_settings, get_mongo_settings
+from app.db.mongo import get_mongo_client, get_mongo_client_sync
 from app.db.session import get_engine, get_session_factory
 from app.main import app
-from app.main import verify_database_on_startup
+from app.main import verify_database_on_startup, verify_mongo_on_startup
 
 client = TestClient(app)
 
@@ -23,11 +24,26 @@ DB_ENV_VARS = (
     "DB_QUERY_TIMEOUT",
 )
 
+MONGO_ENV_VARS = (
+    "MONGO_URI",
+    "MONGO_SERVER_SELECTION_TIMEOUT_MS",
+    "MONGO_LOGS_DB_NAME",
+    "MONGO_DATASAC_DB_NAME",
+    "MONGO_MAYOR_AUXILIAR_DB_NAME",
+    "MONGO_ANALYTIC_SAC_DB_NAME",
+)
+
 
 def clear_database_caches() -> None:
     get_database_settings.cache_clear()
     get_engine.cache_clear()
     get_session_factory.cache_clear()
+
+
+def clear_mongo_caches() -> None:
+    get_mongo_settings.cache_clear()
+    get_mongo_client.cache_clear()
+    get_mongo_client_sync.cache_clear()
 
 
 def test_root() -> None:
@@ -55,6 +71,17 @@ def test_database_health_check_without_settings(monkeypatch) -> None:
     assert response.json()["detail"]["message"] == "Base de datos no configurada"
 
 
+def test_mongo_health_check_without_settings(monkeypatch) -> None:
+    for env_var in MONGO_ENV_VARS:
+        monkeypatch.delenv(env_var, raising=False)
+    clear_mongo_caches()
+
+    response = client.get("/health/mongo")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["message"] == "MongoDB no configurado"
+
+
 def test_startup_database_check_can_be_disabled(monkeypatch) -> None:
     monkeypatch.setenv("CHECK_DATABASE_ON_STARTUP", "false")
     get_app_settings.cache_clear()
@@ -64,3 +91,14 @@ def test_startup_database_check_can_be_disabled(monkeypatch) -> None:
 
     get_app_settings.cache_clear()
     clear_database_caches()
+
+
+def test_startup_mongo_check_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("CHECK_MONGO_ON_STARTUP", "false")
+    get_app_settings.cache_clear()
+    clear_mongo_caches()
+
+    verify_mongo_on_startup()
+
+    get_app_settings.cache_clear()
+    clear_mongo_caches()

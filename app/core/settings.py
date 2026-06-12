@@ -53,6 +53,7 @@ class AppSettings:
     name: str
     version: str
     check_database_on_startup: bool
+    check_mongo_on_startup: bool
 
 
 @dataclass(frozen=True)
@@ -72,12 +73,23 @@ class DatabaseSettings:
     query_timeout: int
 
 
+@dataclass(frozen=True)
+class MongoSettings:
+    uri: str
+    server_selection_timeout_ms: int
+    logs_db: str
+    datasac_db: str
+    mayor_auxiliar_db: str
+    analytic_sac_db: str
+
+
 @lru_cache
 def get_app_settings() -> AppSettings:
     return AppSettings(
         name=_optional("APP_NAME", "DataSacCore"),
         version=_optional("APP_VERSION", "0.1.0"),
         check_database_on_startup=_optional_bool("CHECK_DATABASE_ON_STARTUP", True),
+        check_mongo_on_startup=_optional_bool("CHECK_MONGO_ON_STARTUP", True),
     )
 
 
@@ -97,4 +109,16 @@ def get_database_settings() -> DatabaseSettings:
         pool_timeout=_optional_int("DB_POOL_TIMEOUT", 30),
         pool_recycle=_optional_int("DB_POOL_RECYCLE", 1800),
         query_timeout=_optional_int("DB_QUERY_TIMEOUT", 30),
+    )
+
+
+@lru_cache
+def get_mongo_settings() -> MongoSettings:
+    return MongoSettings(
+        uri=_required("MONGO_URI"),
+        server_selection_timeout_ms=_optional_int("MONGO_SERVER_SELECTION_TIMEOUT_MS", 5000),
+        logs_db=_optional("MONGO_LOGS_DB_NAME", "logs"),
+        datasac_db=_optional("MONGO_DATASAC_DB_NAME", "DataSac"),
+        mayor_auxiliar_db=_optional("MONGO_MAYOR_AUXILIAR_DB_NAME", "MayorAuxiliar"),
+        analytic_sac_db=_optional("MONGO_ANALYTIC_SAC_DB_NAME", "AnalyticSac"),
     )
