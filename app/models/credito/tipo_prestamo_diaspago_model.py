@@ -8,12 +8,7 @@ class TipoPrestamoDiasPago(Base):
     __tablename__ = "TIPO_PRESTAMO_DIASPAGO"
     __table_args__ = {"schema": "CREDITO"}
 
-    id = Column("ID", Integer, primary_key=True, autoincrement=True, nullable=False)
-    codigo_tipo_prestamo = Column(
-        "CODIGOTIPOPRESTAMO",
-        NVARCHAR(30),
-        ForeignKey("CREDITO.TIPO_PRESTAMO.CODIGO"),
-        nullable=False,
-    )
-    dia_inicio = Column("DIAINICIO", Integer, nullable=False)
-    dia_fin = Column("DIAFIN", Integer, nullable=False)
+    id = Column('ID', Integer, primary_key=True, autoincrement=True, nullable=False)
+    codigo_tipo_prestamo = Column('CODIGOTIPOPRESTAMO', NVARCHAR(30), ForeignKey('CREDITO.TIPO_PRESTAMO.CODIGO'), nullable=False)
+    dia_inicio = Column('DIAINICIO', Integer, nullable=False)
+    dia_fin = Column('DIAFIN', Integer, nullable=False)

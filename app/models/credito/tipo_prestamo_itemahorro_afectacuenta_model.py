@@ -8,18 +8,8 @@ class TipoPrestamoItemAhorroAfectaCuenta(Base):
     __tablename__ = "TIPO_PRESTAMO_ITEMAHORRO_AFECTACUENTA"
     __table_args__ = {"schema": "CREDITO"}
 
-    id = Column("ID", Integer, primary_key=True, autoincrement=True, nullable=False)
-    id_tipo_prestamo_item_ahorro = Column(
-        "IDTIPOPRESTAMOITEMAHORRO",
-        Integer,
-        ForeignKey("CREDITO.TIPO_PRESTAMO_ITEMAHORRO.ID"),
-        nullable=False,
-    )
-    codigo_tipo_cuenta = Column(
-        "CODIGOTIPOCUENTA",
-        NVARCHAR(50),
-        ForeignKey("AHORROS.TIPO_CUENTA.CODIGO"),
-        nullable=False,
-    )
-    id_item_saldo = Column("IDITEMSALDO", Integer, ForeignKey("AHORROS.ITEMSALDO.ID"), nullable=False)
-    activo = Column("ACTIVO", Boolean, nullable=False)
+    id = Column('ID', Integer, primary_key=True, autoincrement=True, nullable=False)
+    id_tipo_prestamo_item_ahorro = Column('IDTIPOPRESTAMOITEMAHORRO', Integer, ForeignKey('CREDITO.TIPO_PRESTAMO_ITEMAHORRO.ID'), nullable=False)
+    codigo_tipo_cuenta = Column('CODIGOTIPOCUENTA', NVARCHAR(50), ForeignKey('AHORROS.TIPO_CUENTA.CODIGO'), nullable=False)
+    id_item_saldo = Column('IDITEMSALDO', Integer, ForeignKey('AHORROS.ITEMSALDO.ID'), nullable=False)
+    activo = Column('ACTIVO', Boolean, nullable=False)

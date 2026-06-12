@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from app.core.settings import get_app_settings, get_database_settings, get_mongo_settings
 from app.db.mongo import get_mongo_client, get_mongo_client_sync
@@ -8,6 +9,7 @@ from app.main import verify_database_on_startup, verify_mongo_on_startup
 from app.models import import_all_models
 
 client = TestClient(app)
+MODELS_DIR = Path("app/models")
 
 DB_ENV_VARS = (
     "DB_USER",
@@ -111,3 +113,16 @@ def test_import_all_models_without_database_connection(monkeypatch) -> None:
     clear_database_caches()
 
     import_all_models()
+
+
+def test_models_do_not_use_relationships() -> None:
+    for model_file in MODELS_DIR.rglob("*.py"):
+        source = model_file.read_text()
+        assert "relationship" not in source, f"{model_file} should not use relationship"
+
+
+def test_model_columns_are_single_line() -> None:
+    for model_file in MODELS_DIR.rglob("*.py"):
+        for line in model_file.read_text().splitlines():
+            if "= Column(" in line:
+                assert line.count("(") == line.count(")"), f"{model_file} has a multiline Column definition"

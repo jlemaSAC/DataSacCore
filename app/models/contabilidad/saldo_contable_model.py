@@ -14,15 +14,15 @@ class SaldoContable(Base):
         {"schema": "CONTABILIDAD"},
     )
 
-    id = Column("ID", Integer, primary_key=True, autoincrement=True, nullable=False)
-    codigo_cuenta = Column("CODIGOCUENTA",NVARCHAR(50),ForeignKey("CONTABILIDAD.CUENTACONTABLE.CODIGO"),nullable=False,)
-    id_agencia = Column("IDAGENCIA",Integer,ForeignKey("GENERAL.AGENCIA.ID"),nullable=False,)
-    id_moneda = Column("IDMONEDA",Integer,ForeignKey("GENERAL.MONEDA.ID"),nullable=False,)
-    fecha = Column("FECHA", DateTime, nullable=False)
-    saldo_inicial = Column("SALDOINICIAL", DECIMAL(18, 2), nullable=False)
-    total_debito = Column("TOTALDEBITO", DECIMAL(18, 2), nullable=False)
-    total_credito = Column("TOTALCREDITO", DECIMAL(18, 2), nullable=False)
-    cerrado = Column("CERRADO", Boolean, nullable=False)
+    id = Column('ID', Integer, primary_key=True, autoincrement=True, nullable=False)
+    codigo_cuenta = Column('CODIGOCUENTA', NVARCHAR(50), ForeignKey('CONTABILIDAD.CUENTACONTABLE.CODIGO'), nullable=False)
+    id_agencia = Column('IDAGENCIA', Integer, ForeignKey('GENERAL.AGENCIA.ID'), nullable=False)
+    id_moneda = Column('IDMONEDA', Integer, ForeignKey('GENERAL.MONEDA.ID'), nullable=False)
+    fecha = Column('FECHA', DateTime, nullable=False)
+    saldo_inicial = Column('SALDOINICIAL', DECIMAL(18, 2), nullable=False)
+    total_debito = Column('TOTALDEBITO', DECIMAL(18, 2), nullable=False)
+    total_credito = Column('TOTALCREDITO', DECIMAL(18, 2), nullable=False)
+    cerrado = Column('CERRADO', Boolean, nullable=False)
 
 # Índices no cluster en SQL Server con columnas incluidas
 Index(

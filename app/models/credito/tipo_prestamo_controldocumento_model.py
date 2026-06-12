@@ -8,19 +8,9 @@ class TipoPrestamoControlDocumento(Base):
     __tablename__ = "TIPO_PRESTAMO_CONTROLDOCUMENTO"
     __table_args__ = {"schema": "CREDITO"}
 
-    id = Column("ID", Integer, primary_key=True, autoincrement=True, nullable=False)
-    codigo_tipo_prestamo = Column(
-        "CODIGOTIPOPRESTAMO",
-        NVARCHAR(30),
-        ForeignKey("CREDITO.TIPO_PRESTAMO.CODIGO"),
-        nullable=False,
-    )
-    codigo_control_documento_item = Column(
-        "CODIGOCONTROLDOCUMENTOITEM",
-        NVARCHAR(10),
-        ForeignKey("CREDITO.CONTROLDOCUMENTO_ITEM.CODIGO"),
-        nullable=False,
-    )
-    solicitar = Column("SOLICITAR", Boolean, nullable=False)
-    aprobar = Column("APROBAR", Boolean, nullable=False)
-    activo = Column("ACTIVO", Boolean, nullable=False)
+    id = Column('ID', Integer, primary_key=True, autoincrement=True, nullable=False)
+    codigo_tipo_prestamo = Column('CODIGOTIPOPRESTAMO', NVARCHAR(30), ForeignKey('CREDITO.TIPO_PRESTAMO.CODIGO'), nullable=False)
+    codigo_control_documento_item = Column('CODIGOCONTROLDOCUMENTOITEM', NVARCHAR(10), ForeignKey('CREDITO.CONTROLDOCUMENTO_ITEM.CODIGO'), nullable=False)
+    solicitar = Column('SOLICITAR', Boolean, nullable=False)
+    aprobar = Column('APROBAR', Boolean, nullable=False)
+    activo = Column('ACTIVO', Boolean, nullable=False)

@@ -1,5 +1,4 @@
 from sqlalchemy import Column, Integer, DateTime, Boolean, ForeignKey, Index, Numeric
-from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.mssql import NVARCHAR
 from app.db.base import Base
 
@@ -23,20 +22,15 @@ class MovimientoComprobanteContable(Base):
         {"schema": "CONTABILIDAD"},
     )
 
-    id = Column("ID", Integer, primary_key=True, autoincrement=True, nullable=False)
-    id_comprobante = Column("IDCOMPROBANTE",Integer,ForeignKey("CONTABILIDAD.COMPROBANTECONTABLE.ID"),nullable=False,)
-    es_debito = Column("ESDEBITO", Boolean, nullable=False)
-    fecha_comprobante = Column("FECHACOMPROBANTE", DateTime, nullable=False)
-    codigo_cuenta = Column("CODIGOCUENTA",NVARCHAR(50),ForeignKey("CONTABILIDAD.CUENTACONTABLE.CODIGO"),nullable=False,)
-    id_agencia = Column("IDAGENCIA",Integer,ForeignKey("GENERAL.AGENCIA.ID"),nullable=False,)
-    orden = Column("ORDEN", Integer, nullable=False)
-    detalle = Column("DETALLE", NVARCHAR(500), nullable=False)
-    valor = Column("VALOR", Numeric(18, 2), nullable=False)
+    id = Column('ID', Integer, primary_key=True, autoincrement=True, nullable=False)
+    id_comprobante = Column('IDCOMPROBANTE', Integer, ForeignKey('CONTABILIDAD.COMPROBANTECONTABLE.ID'), nullable=False)
+    es_debito = Column('ESDEBITO', Boolean, nullable=False)
+    fecha_comprobante = Column('FECHACOMPROBANTE', DateTime, nullable=False)
+    codigo_cuenta = Column('CODIGOCUENTA', NVARCHAR(50), ForeignKey('CONTABILIDAD.CUENTACONTABLE.CODIGO'), nullable=False)
+    id_agencia = Column('IDAGENCIA', Integer, ForeignKey('GENERAL.AGENCIA.ID'), nullable=False)
+    orden = Column('ORDEN', Integer, nullable=False)
+    detalle = Column('DETALLE', NVARCHAR(500), nullable=False)
+    valor = Column('VALOR', Numeric(18, 2), nullable=False)
 
     # Relaciones (opcionales, útiles para navegación)
-    comprobante = relationship("ComprobanteContable", back_populates="movimientos")
-    movimiento_comprobante_contable_banco = relationship("MovimientoComprobanteContableBanco",back_populates="movimiento_comprobante_contable",uselist=False,)
-    agencia = relationship("Agencia", backref="movimiento_comprobante_contable")
-    movimiento_comprobante_contable_documento_adicional = relationship("MovimientoComprobanteContableDocumentoAdicional",back_populates="movimiento_comprobante_contable",uselist=False,)
-    # cuenta_contable = relationship("CuentaContable", backref="movimientos")
     

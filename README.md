@@ -116,3 +116,10 @@ pytest
 `app/models` contiene los modelos de persistencia SQLAlchemy migrados desde `DataSacService`, organizados por dominio. Los modelos importan `Base` o `BaseSecundaria` desde `app.db.base`; no deben abrir conexiones ni contener reglas de negocio.
 
 Las consultas deben vivir en `app/repositories/sql` o `app/repositories/mongo`, y la logica de negocio debe construirse encima en servicios.
+
+Convenciones para nuevos modelos:
+
+- No usar `relationship`; las relaciones se resuelven con `join()` explicitos en repositorios.
+- Mantener `ForeignKey` cuando exista en la tabla.
+- Declarar cada `Column(...)` en una sola linea.
+- Mantener `__tablename__`, `__table_args__` y `primary_key=True`.
