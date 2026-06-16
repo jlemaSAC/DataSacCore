@@ -85,6 +85,27 @@ def test_auth_menu_endpoint_requires_bearer_token() -> None:
     assert response.status_code == 401
 
 
+def test_analytic_admin_endpoint_requires_bearer_token() -> None:
+    response = client.get("/analytic/rutas")
+
+    assert response.status_code == 401
+
+
+def test_analytic_menu_endpoint_requires_bearer_token() -> None:
+    response = client.get("/analytic/menu")
+
+    assert response.status_code == 401
+
+
+def test_analytic_solvencia_endpoint_requires_bearer_token() -> None:
+    response = client.post(
+        "/analytic/indicadores-financieros/solvencia",
+        json={"fecha_corte": "2026-06-16T00:00:00", "id_agencia": 1},
+    )
+
+    assert response.status_code == 401
+
+
 def test_login_response_does_not_include_menu() -> None:
     class FakeAuthService:
         def login(self, login_data: object) -> dict:

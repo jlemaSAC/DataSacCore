@@ -11,6 +11,7 @@ from app.core.settings import AppSettings, SettingsError, get_app_settings
 from app.db.mongo import check_mongo_connection
 from app.db.session import check_database_connection
 from app.modules.auth.router import router as auth_router
+from app.modules.analytic.router import router as analytic_router
 from app.routers import health
 
 
@@ -76,6 +77,7 @@ add_cors_middleware(app, settings)
 
 app.include_router(health.router)
 app.include_router(auth_router)
+app.include_router(analytic_router)
 
 
 @app.get("/", tags=["root"])

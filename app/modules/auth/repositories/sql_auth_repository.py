@@ -72,6 +72,14 @@ class SqlAuthRepository:
             .all()
         )
 
+    def get_rol_activo(self, codigo_rol: str) -> Rol | None:
+        return (
+            self.db.query(Rol)
+            .filter(Rol.codigo == codigo_rol)
+            .filter(Rol.activo)
+            .first()
+        )
+
     def get_oficinas_consulta(self, codigo_usuario: str) -> list: # type: ignore
         return (
             self.db.query(Agencia.id, Agencia.nombre)

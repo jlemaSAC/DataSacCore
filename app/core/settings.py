@@ -94,6 +94,23 @@ class DatabaseSettings:
 
 
 @dataclass(frozen=True)
+class SecondaryDatabaseSettings:
+    user: str
+    password: str
+    host: str
+    port: int
+    name: str
+    driver: str
+    encrypt: str
+    trust_server_certificate: str
+    pool_size: int
+    max_overflow: int
+    pool_timeout: int
+    pool_recycle: int
+    query_timeout: int
+
+
+@dataclass(frozen=True)
 class MongoSettings:
     uri: str
     server_selection_timeout_ms: int
@@ -144,6 +161,28 @@ def get_database_settings() -> DatabaseSettings:
         pool_timeout=_optional_int("DB_POOL_TIMEOUT", 30),
         pool_recycle=_optional_int("DB_POOL_RECYCLE", 1800),
         query_timeout=_optional_int("DB_QUERY_TIMEOUT", 30),
+    )
+
+
+@lru_cache
+def get_secondary_database_settings() -> SecondaryDatabaseSettings:
+    return SecondaryDatabaseSettings(
+        user=_optional("ALT_DB_USER", _optional("DB_USER", "")),
+        password=_optional("ALT_DB_PASSWORD", _optional("DB_PASSWORD", "")),
+        host=_optional("ALT_DB_HOST", _optional("DB_HOST", "")),
+        port=_optional_int("ALT_DB_PORT", _optional_int("DB_PORT", 1433)),
+        name=_optional("ALT_DB_NAME", "SAC_PROVICIONES"),
+        driver=_optional("ALT_DB_DRIVER", _optional("DB_DRIVER", "ODBC Driver 18 for SQL Server")),
+        encrypt=_optional("ALT_DB_ENCRYPT", _optional("DB_ENCRYPT", "no")),
+        trust_server_certificate=_optional(
+            "ALT_DB_TRUST_SERVER_CERTIFICATE",
+            _optional("DB_TRUST_SERVER_CERTIFICATE", "no"),
+        ),
+        pool_size=_optional_int("ALT_DB_POOL_SIZE", 10),
+        max_overflow=_optional_int("ALT_DB_MAX_OVERFLOW", 5),
+        pool_timeout=_optional_int("ALT_DB_POOL_TIMEOUT", 30),
+        pool_recycle=_optional_int("ALT_DB_POOL_RECYCLE", 1800),
+        query_timeout=_optional_int("ALT_DB_QUERY_TIMEOUT", _optional_int("DB_QUERY_TIMEOUT", 30)),
     )
 
 
