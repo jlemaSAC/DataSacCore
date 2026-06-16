@@ -19,9 +19,27 @@ def _required(name: str) -> str:
     return value.strip()
 
 
+def _required_int(name: str) -> int:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        raise SettingsError(f"Variable de entorno requerida no definida: {name}")
+    try:
+        return int(value.strip())
+    except ValueError as exc:
+        raise SettingsError(f"Variable de entorno invalida para entero: {name}") from exc
+
+
 def _optional(name: str, default: str) -> str:
     value = os.getenv(name)
     return value.strip() if value and value.strip() else default
+
+
+def _optional_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+
+    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def _optional_int(name: str, default: int) -> int:
@@ -52,8 +70,10 @@ def _optional_bool(name: str, default: bool) -> bool:
 class AppSettings:
     name: str
     version: str
+    environment: str
     check_database_on_startup: bool
     check_mongo_on_startup: bool
+    cors_allowed_origins: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -83,13 +103,28 @@ class MongoSettings:
     analytic_sac_db: str
 
 
+@dataclass(frozen=True)
+class JwtSettings:
+    secret_key: str
+    algorithm: str
+    access_token_expire_minutes: int
+
+
 @lru_cache
 def get_app_settings() -> AppSettings:
+    environment = _optional("APP_ENV", "production").lower()
+    cors_allowed_origins = _optional_csv("CORS_ALLOWED_ORIGINS", ())
+
+    if environment == "dev":
+        cors_allowed_origins = ("*",)
+
     return AppSettings(
         name=_optional("APP_NAME", "DataSacCore"),
         version=_optional("APP_VERSION", "0.1.0"),
+        environment=environment,
         check_database_on_startup=_optional_bool("CHECK_DATABASE_ON_STARTUP", True),
         check_mongo_on_startup=_optional_bool("CHECK_MONGO_ON_STARTUP", True),
+        cors_allowed_origins=cors_allowed_origins,
     )
 
 
@@ -121,4 +156,13 @@ def get_mongo_settings() -> MongoSettings:
         datasac_db=_optional("MONGO_DATASAC_DB_NAME", "DataSac"),
         mayor_auxiliar_db=_optional("MONGO_MAYOR_AUXILIAR_DB_NAME", "MayorAuxiliar"),
         analytic_sac_db=_optional("MONGO_ANALYTIC_SAC_DB_NAME", "AnalyticSac"),
+    )
+
+
+@lru_cache
+def get_jwt_settings() -> JwtSettings:
+    return JwtSettings(
+        secret_key=_required("JWT_SECRET_KEY"),
+        algorithm=_required("JWT_ALGORITHM"),
+        access_token_expire_minutes=_required_int("JWT_ACCESS_TOKEN_EXPIRE_MINUTES"),
     )

@@ -59,6 +59,25 @@ CHECK_DATABASE_ON_STARTUP=false
 CHECK_MONGO_ON_STARTUP=false
 ```
 
+Variables CORS:
+
+```env
+APP_ENV=dev
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+```
+
+Cuando `APP_ENV=dev`, la API permite todos los origenes con `*`. En otros ambientes, `CORS_ALLOWED_ORIGINS` debe contener los origenes permitidos separados por comas.
+
+Variables JWT para autenticacion:
+
+```env
+JWT_SECRET_KEY=
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=180
+```
+
+`JWT_SECRET_KEY` debe definirse con una clave larga y privada en cada ambiente.
+
 ## Ejecutar en desarrollo
 
 ```bash
@@ -76,6 +95,13 @@ Healthchecks:
 - http://127.0.0.1:8000/health
 - http://127.0.0.1:8000/health/db
 - http://127.0.0.1:8000/health/mongo
+
+Auth:
+
+- `POST /auth/login`: valida credenciales contra SQL Server y emite JWT.
+- `GET /auth/status`: valida el token Bearer y reconstruye la sesion del usuario.
+
+La respuesta de `POST /auth/login` incluye el campo `menu`, obtenido desde MongoDB usando `MenuPermisosDataSAC` y cruzando los roles SQL del usuario con `rolesPermitidosCodigos`.
 
 ## Ejecutar pruebas
 
@@ -98,6 +124,14 @@ pytest
 │   ├── main.py
 │   ├── models
 │   │   └── ...
+│   ├── modules
+│   │   └── auth
+│   │       ├── repositories
+│   │       ├── dependencies.py
+│   │       ├── router.py
+│   │       ├── schemas.py
+│   │       ├── security.py
+│   │       └── service.py
 │   ├── repositories
 │   │   ├── mongo
 │   │   └── sql
@@ -116,6 +150,13 @@ pytest
 `app/models` contiene los modelos de persistencia SQLAlchemy migrados desde `DataSacService`, organizados por dominio. Los modelos importan `Base` o `BaseSecundaria` desde `app.db.base`; no deben abrir conexiones ni contener reglas de negocio.
 
 Las consultas deben vivir en `app/repositories/sql` o `app/repositories/mongo`, y la logica de negocio debe construirse encima en servicios.
+
+Para modulos nuevos de negocio, preferir la organizacion por modulo en `app/modules/<modulo>`:
+
+- `router.py`: solo dependencias, request/response y delegacion al service.
+- `service.py`: reglas de negocio, validaciones y transacciones.
+- `repositories/`: consultas SQL o Mongo sin reglas de negocio.
+- `schemas.py`: entradas y salidas Pydantic.
 
 Convenciones para nuevos modelos:
 

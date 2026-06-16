@@ -1,10 +1,12 @@
-from fastapi.testclient import TestClient
 from pathlib import Path
 
-from app.core.settings import get_app_settings, get_database_settings, get_mongo_settings
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.core.settings import AppSettings, get_app_settings, get_database_settings, get_mongo_settings
 from app.db.mongo import get_mongo_client, get_mongo_client_sync
 from app.db.session import get_engine, get_session_factory
-from app.main import app
+from app.main import add_cors_middleware, app
 from app.main import verify_database_on_startup, verify_mongo_on_startup
 from app.models import import_all_models
 
@@ -61,6 +63,70 @@ def test_health_check() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_auth_menu_completo_endpoint_is_not_registered() -> None:
+    response = client.post("/auth/menuCompleto")
+
+    assert response.status_code == 404
+
+
+def test_app_settings_dev_allows_all_cors_origins(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
+    get_app_settings.cache_clear()
+
+    settings = get_app_settings()
+
+    assert settings.environment == "dev"
+    assert settings.cors_allowed_origins == ("*",)
+
+    get_app_settings.cache_clear()
+
+
+def test_app_settings_reads_cors_origins_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com, https://admin.example.com")
+    get_app_settings.cache_clear()
+
+    settings = get_app_settings()
+
+    assert settings.cors_allowed_origins == ("https://app.example.com", "https://admin.example.com")
+
+    get_app_settings.cache_clear()
+
+
+def test_cors_middleware_allows_any_origin_in_dev() -> None:
+    cors_app = FastAPI()
+
+    @cors_app.get("/")
+    async def cors_root() -> dict[str, str]:
+        return {"status": "ok"}
+
+    add_cors_middleware(
+        cors_app,
+        AppSettings(
+            name="test",
+            version="0.1.0",
+            environment="dev",
+            check_database_on_startup=False,
+            check_mongo_on_startup=False,
+            cors_allowed_origins=("*",),
+        ),
+    )
+    cors_client = TestClient(cors_app)
+
+    response = cors_client.options(
+        "/",
+        headers={
+            "Origin": "https://any-origin.example.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "access-control-allow-credentials" not in response.headers
 
 
 def test_database_health_check_without_settings(monkeypatch) -> None:

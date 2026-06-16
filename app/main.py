@@ -3,12 +3,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import PyMongoError
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.settings import SettingsError, get_app_settings
+from app.core.settings import AppSettings, SettingsError, get_app_settings
 from app.db.mongo import check_mongo_connection
 from app.db.session import check_database_connection
+from app.modules.auth.router import router as auth_router
 from app.routers import health
 
 
@@ -55,10 +57,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
 
+def add_cors_middleware(fastapi_app: FastAPI, app_settings: AppSettings) -> None:
+    allow_all_origins = "*" in app_settings.cors_allowed_origins
+
+    fastapi_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(app_settings.cors_allowed_origins),
+        allow_credentials=not allow_all_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
 settings = get_app_settings()
 app = FastAPI(title=settings.name, version=settings.version, lifespan=lifespan)
 
+add_cors_middleware(app, settings)
+
 app.include_router(health.router)
+app.include_router(auth_router)
 
 
 @app.get("/", tags=["root"])
