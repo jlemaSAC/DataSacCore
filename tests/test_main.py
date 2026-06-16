@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,6 +10,7 @@ from app.db.session import get_engine, get_session_factory
 from app.main import add_cors_middleware, app
 from app.main import verify_database_on_startup, verify_mongo_on_startup
 from app.models import import_all_models
+from app.modules.auth.dependencies import get_auth_service
 
 client = TestClient(app)
 MODELS_DIR = Path("app/models")
@@ -69,6 +71,46 @@ def test_auth_menu_completo_endpoint_is_not_registered() -> None:
     response = client.post("/auth/menuCompleto")
 
     assert response.status_code == 404
+
+
+def test_auth_status_endpoint_is_not_registered() -> None:
+    response = client.get("/auth/status")
+
+    assert response.status_code == 404
+
+
+def test_auth_menu_endpoint_requires_bearer_token() -> None:
+    response = client.get("/auth/menu/data-sac-web")
+
+    assert response.status_code == 401
+
+
+def test_login_response_does_not_include_menu() -> None:
+    class FakeAuthService:
+        def login(self, login_data: object) -> dict:
+            return {
+                "puede_ingresar": True,
+                "nombre": "John Doe",
+                "identificacion": "0102030405",
+                "codigo": "jdoe",
+                "id_agencia": 1,
+                "nombre_agencia": "Matriz",
+                "activo": True,
+                "roles": [],
+                "oficinas_consulta": [],
+                "menu": [{"label": "No debe salir"}],
+                "token": "token",
+                "fecha_sistema": date(2026, 6, 16),
+            }
+
+    app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
+    try:
+        response = client.post("/auth/login", json={"codigo": "jdoe", "clave": "secret"})
+    finally:
+        app.dependency_overrides.pop(get_auth_service, None)
+
+    assert response.status_code == 200
+    assert "menu" not in response.json()
 
 
 def test_app_settings_dev_allows_all_cors_origins(monkeypatch) -> None:

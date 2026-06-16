@@ -99,9 +99,9 @@ Healthchecks:
 Auth:
 
 - `POST /auth/login`: valida credenciales contra SQL Server y emite JWT.
-- `GET /auth/status`: valida el token Bearer y reconstruye la sesion del usuario.
+- `GET /auth/menu/data-sac-web`: valida el token Bearer y devuelve el menu permitido para los roles del usuario.
 
-La respuesta de `POST /auth/login` incluye el campo `menu`, obtenido desde MongoDB usando `MenuPermisosDataSAC` y cruzando los roles SQL del usuario con `rolesPermitidosCodigos`.
+La respuesta de `POST /auth/login` no incluye el campo `menu`. El menu se obtiene por separado desde `GET /auth/menu/data-sac-web`, usando `MenuPermisosDataSAC` en MongoDB y cruzando los roles SQL del usuario con `rolesPermitidosCodigos`.
 
 ## Ejecutar pruebas
 

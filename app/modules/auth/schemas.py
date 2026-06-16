@@ -39,9 +39,12 @@ class LoginResponse(BaseModel):
     activo: bool
     roles: list[RolOut]
     oficinas_consulta: list[OficinaConsultaItem] = Field(default_factory=list)
-    menu: list[MenuChild] = Field(default_factory=list)
     token: str
     fecha_sistema: date | datetime
+
+
+class MenuResponse(BaseModel):
+    menu: list[MenuChild] = Field(default_factory=list)
 
 
 class UsuarioTokenPayload(BaseModel):

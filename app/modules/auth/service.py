@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.mongo import get_mongo_datasac_db_sync
 from app.modules.auth.repositories.mongo_menu_repository import MongoMenuRepository
 from app.modules.auth.repositories.sql_auth_repository import SqlAuthRepository
-from app.modules.auth.schemas import LoginResponse, MenuChild, OficinaConsultaItem, RolOut, UserLogin
+from app.modules.auth.schemas import LoginResponse, MenuChild, MenuResponse, OficinaConsultaItem, RolOut, UserLogin
 from app.modules.auth.security import JwtTokenService, PasswordHasher
 
 
@@ -23,7 +23,7 @@ class AuthService:
     ) -> None:
         self.db = db
         self.sql_repository = sql_repository or SqlAuthRepository(db)
-        self.menu_repository = menu_repository or MongoMenuRepository(get_mongo_datasac_db_sync())
+        self.menu_repository = menu_repository
         self.password_hasher = password_hasher or PasswordHasher()
         self.token_service = token_service or JwtTokenService()
 
@@ -39,39 +39,16 @@ class AuthService:
 
         return response
 
-    def build_status_response(self, codigo_usuario: str, fecha_sistema: date | datetime) -> LoginResponse:
+    def build_menu_response(self, codigo_usuario: str) -> MenuResponse:
         usuario = self.sql_repository.get_usuario(codigo_usuario)
         if usuario is None:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
         if not usuario.activo or not usuario.puede_ingresar_sistema:
             raise HTTPException(status_code=403, detail="Usuario inhabilitado")
 
-        login_data = self.sql_repository.get_usuario_login_data(usuario.usuario)
-        if login_data is None:
-            raise HTTPException(status_code=404, detail="Datos del usuario no encontrados")
-
         roles_out = self._get_roles_out(usuario.usuario)
-        oficinas = self._get_oficinas_consulta(usuario.usuario)
         menu = self._get_menu_for_roles(roles_out)
-        token = self.token_service.create_access_token(
-            usuario,
-            fecha_sistema,
-            login_data.nombre_agencia or "",
-        )
-        return LoginResponse(
-            puede_ingresar=True,
-            codigo=login_data.usuario,
-            nombre=login_data.nombre,
-            identificacion=login_data.identificacion or "",
-            id_agencia=login_data.id_agencia,
-            nombre_agencia=login_data.nombre_agencia or "",
-            activo=login_data.activo,
-            roles=roles_out,
-            oficinas_consulta=oficinas,
-            menu=menu,
-            token=token,
-            fecha_sistema=fecha_sistema,
-        )
+        return MenuResponse(menu=menu)
 
     def _authenticate_user(self, login_data: UserLogin) -> LoginResponse:
         usuario_data = self.sql_repository.get_usuario_login_data(login_data.codigo)
@@ -93,7 +70,6 @@ class AuthService:
         fecha_sistema = self._resolve_fecha_sistema()
         roles_out = self._get_roles_out(usuario_data.usuario)
         oficinas = self._get_oficinas_consulta(usuario_data.usuario)
-        menu = self._get_menu_for_roles(roles_out)
         token = self.token_service.create_access_token(
             usuario,
             fecha_sistema,
@@ -110,7 +86,6 @@ class AuthService:
             activo=usuario_data.activo,
             roles=roles_out,
             oficinas_consulta=oficinas,
-            menu=menu,
             token=token,
             fecha_sistema=fecha_sistema,
         )
@@ -138,4 +113,6 @@ class AuthService:
 
     def _get_menu_for_roles(self, roles: list[RolOut]) -> list[MenuChild]:
         role_codes = [rol.codigo for rol in roles]
+        if self.menu_repository is None:
+            self.menu_repository = MongoMenuRepository(get_mongo_datasac_db_sync())
         return self.menu_repository.get_menu_by_role_codes(role_codes)
