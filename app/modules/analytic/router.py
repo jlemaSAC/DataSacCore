@@ -6,6 +6,9 @@ from app.modules.analytic.indicadores_financieros.calidad_de_activos.router impo
 from app.modules.analytic.indicadores_financieros.indicadores_de_liquidez.router import (
     router as indicadores_de_liquidez_router,
 )
+from app.modules.analytic.indicadores_financieros.rentabilidad.router import (
+    router as rentabilidad_router,
+)
 from app.modules.analytic.indicadores_financieros.solvencia.router import (
     router as solvencia_router,
 )
@@ -17,4 +20,5 @@ router = APIRouter(prefix="/analytic")
 router.include_router(menu_router)
 router.include_router(calidad_de_activos_router)
 router.include_router(indicadores_de_liquidez_router)
+router.include_router(rentabilidad_router)
 router.include_router(solvencia_router)
