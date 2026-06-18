@@ -4,7 +4,11 @@ from app.modules.prestamos.constants import (
     SITUACION_CREDITICIA_ACTUAL_COLLECTION,
     SITUACION_CREDITICIA_HISTORICO_COLLECTION,
 )
-from app.modules.prestamos.mappers import format_fecha_corte, prestamo_snapshot_from_mongo
+from app.modules.prestamos.mappers import (
+    format_fecha_corte,
+    mongo_document_from_snapshot,
+    prestamo_snapshot_from_mongo,
+)
 from app.modules.prestamos.repositories.mongo_universo_repository import MongoUniversoPrestamosRepository
 from app.modules.prestamos.schemas import PrestamoUniverseRequest
 
@@ -44,6 +48,7 @@ def test_prestamo_snapshot_from_mongo_normaliza_aliases_historicos() -> None:
             "CodigoEstado": "C",
             "EstadoPrestamo": "cancelado",
             "ESDIFERIDO": "SI",
+            "DiasVencidos": "17",
             "CodigoUsuario": " jperez ",
             "NombreCompleto": " Juan   Perez ",
             "ProvisionConsituida": "1.234,56",
@@ -65,6 +70,7 @@ def test_prestamo_snapshot_from_mongo_normaliza_aliases_historicos() -> None:
     assert snapshot.codigo_estado_prestamo == "C"
     assert snapshot.es_cancelado is True
     assert snapshot.es_diferido is True
+    assert snapshot.dias_vencidos == 17
     assert snapshot.codigo_asesor == "JPEREZ"
     assert snapshot.nombre_asesor == "JUAN PEREZ"
     assert snapshot.provision_constituida == 1234.56
@@ -74,6 +80,26 @@ def test_prestamo_snapshot_from_mongo_normaliza_aliases_historicos() -> None:
     assert snapshot.tipo_prestamo == "ORDINARIO"
     assert snapshot.provincia == "AZUAY"
     assert snapshot.data_version == "20260618-1030"
+
+
+def test_mongo_document_from_snapshot_incluye_diferido_y_dias_vencidos() -> None:
+    snapshot = prestamo_snapshot_from_mongo(
+        {
+            "IdPrestamo": 10,
+            "NumeroPrestamo": "0001",
+            "EsDiferido": True,
+            "DiasVencidos": 12,
+        }
+    )
+
+    document = mongo_document_from_snapshot(
+        snapshot,
+        as_of=datetime(2026, 6, 18, 10, 30),
+        data_version="20260618-103000",
+    )
+
+    assert document["EsDiferido"] is True
+    assert document["DiasVencidos"] == 12
 
 
 def test_mongo_universo_repository_usa_coleccion_actual() -> None:
@@ -122,4 +148,3 @@ def test_mongo_universo_repository_usa_historico_con_fecha_corte_yyyymmdd() -> N
     assert snapshots[0].numero_prestamo == "0002"
     assert snapshots[0].codigo_asesor == "MLOPEZ"
     assert mongo_db.collections[SITUACION_CREDITICIA_HISTORICO_COLLECTION].last_filter["fecha_corte"] == "20260531"
-
