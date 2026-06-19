@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import date, datetime
 from typing import Any, Mapping
 
@@ -136,7 +138,7 @@ def mongo_document_from_snapshot(
     data_version: str,
     source: str = "sql_core",
 ) -> dict[str, Any]:
-    return {
+    document = {
         "IdPrestamo": snapshot.id_prestamo,
         "NumeroPrestamo": snapshot.numero_prestamo,
         "IdAgencia": snapshot.id_agencia,
@@ -146,9 +148,7 @@ def mongo_document_from_snapshot(
         "EsCancelado": snapshot.es_cancelado,
         "EsDiferido": snapshot.es_diferido,
         "CodigoAsesor": snapshot.codigo_asesor,
-        "CodigoUsuario": snapshot.codigo_asesor,
         "NombreAsesor": snapshot.nombre_asesor,
-        "NombreCompleto": snapshot.nombre_asesor,
         "IdCargoAsesor": snapshot.id_cargo_asesor,
         "CargoAsesor": snapshot.cargo_asesor,
         "CodigoUsuarioControl": snapshot.codigo_usuario_control,
@@ -181,11 +181,39 @@ def mongo_document_from_snapshot(
         "ValorParaEstarAlDia": snapshot.valor_para_estar_al_dia,
         "ValorHastaCuotaActual": snapshot.valor_hasta_cuota_actual,
         "ValorCancelarTotal": snapshot.valor_cancelar_total,
-        "source": source,
-        "as_of": as_of,
-        "data_version": data_version,
-        "updated_at": as_of,
     }
+    document["SnapshotHash"] = snapshot_hash(document)
+    document.update(
+        {
+            "source": source,
+            "as_of": as_of,
+            "data_version": data_version,
+            "updated_at": as_of,
+        }
+    )
+    return document
+
+
+def snapshot_hash(document: Mapping[str, Any]) -> str:
+    canonical_payload = json.dumps(
+        {
+            key: value
+            for key, value in document.items()
+            if key
+            not in {
+                "SnapshotHash",
+                "source",
+                "as_of",
+                "data_version",
+                "updated_at",
+                "created_at",
+            }
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
 
 
 def _es_cancelado(codigo_estado: Any, estado: Any) -> bool:

@@ -52,7 +52,7 @@ class FakeUniversoRepository:
         _ = as_of
         self.last_upsert_snapshots = snapshots
         self.last_upsert_data_version = data_version
-        return {"upserted": len(snapshots), "matched": 0, "modified": 0}
+        return {"upserted": len(snapshots), "matched": 0, "modified": 0, "unchanged": 0}
 
 
 class FakeSqlUniversoRepository:
@@ -148,6 +148,13 @@ def test_universo_prestamos_service_sincroniza_situacion_crediticia_actual() -> 
                 "IdPrestamo": 10,
                 "NumeroPrestamo": "0001",
                 "CodigoAsesor": "jperez",
+                "IdCargoAsesor": "10",
+                "CargoAsesor": "asesor de negocios",
+                "CodigoUsuarioControl": "mlopez",
+                "UsuarioControl": "Maria Lopez",
+                "CodigoUsuarioCobranzaApoyo": "ccruz",
+                "CobranzaApoyo": "Carlos Cruz",
+                "Provincia": "azuay",
                 "SaldoCapital": "1000",
                 "CapitalNoDevenga": "100",
                 "CapitalVencido": "50",
@@ -184,6 +191,7 @@ def test_universo_prestamos_service_sincroniza_situacion_crediticia_actual() -> 
     assert response.total_upserted == 1
     assert response.total_matched == 0
     assert response.total_modified == 0
+    assert response.total_sin_cambios == 0
     assert response.timings_ms.ensure_indexes_ms >= 0
     assert response.timings_ms.sql_read_ms >= 0
     assert response.timings_ms.python_map_ms >= 0
@@ -192,6 +200,13 @@ def test_universo_prestamos_service_sincroniza_situacion_crediticia_actual() -> 
     assert mongo_repository.indexes_created is True
     assert mongo_repository.last_upsert_snapshots[0].numero_prestamo == "0001"
     assert mongo_repository.last_upsert_snapshots[0].codigo_asesor == "JPEREZ"
+    assert mongo_repository.last_upsert_snapshots[0].id_cargo_asesor == 10
+    assert mongo_repository.last_upsert_snapshots[0].cargo_asesor == "ASESOR DE NEGOCIOS"
+    assert mongo_repository.last_upsert_snapshots[0].codigo_usuario_control == "MLOPEZ"
+    assert mongo_repository.last_upsert_snapshots[0].usuario_control == "MARIA LOPEZ"
+    assert mongo_repository.last_upsert_snapshots[0].codigo_usuario_cobranza_apoyo == "CCRUZ"
+    assert mongo_repository.last_upsert_snapshots[0].cobranza_apoyo == "CARLOS CRUZ"
+    assert mongo_repository.last_upsert_snapshots[0].provincia == "AZUAY"
     assert mongo_repository.last_upsert_snapshots[0].capital_no_devenga == 100
     assert mongo_repository.last_upsert_snapshots[0].capital_vencido == 50
     assert mongo_repository.last_upsert_snapshots[0].capital_vigente == 850
@@ -221,6 +236,13 @@ def test_prestamos_sincronizar_actual_endpoint_devuelve_conteos() -> None:
                 "IdPrestamo": 10,
                 "NumeroPrestamo": "0001",
                 "CodigoAsesor": "jperez",
+                "IdCargoAsesor": "10",
+                "CargoAsesor": "asesor de negocios",
+                "CodigoUsuarioControl": "mlopez",
+                "UsuarioControl": "Maria Lopez",
+                "CodigoUsuarioCobranzaApoyo": "ccruz",
+                "CobranzaApoyo": "Carlos Cruz",
+                "Provincia": "azuay",
                 "SaldoCapital": "1000",
                 "CapitalNoDevenga": "100",
                 "CapitalVencido": "50",
@@ -265,6 +287,7 @@ def test_prestamos_sincronizar_actual_endpoint_devuelve_conteos() -> None:
     assert payload["total_upserted"] == 1
     assert payload["total_matched"] == 0
     assert payload["total_modified"] == 0
+    assert payload["total_sin_cambios"] == 0
     assert set(payload["timings_ms"]) == {
         "ensure_indexes_ms",
         "sql_read_ms",

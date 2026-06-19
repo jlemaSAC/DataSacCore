@@ -28,11 +28,17 @@ class SqlUniversoPrestamosRepository:
                 P.CODIGOESTADO AS CodigoEstadoPrestamo,
                 EP.NOMBRE AS EstadoPrestamo,
                 P.CODIGOUSUARIO AS CodigoAsesor,
-                P.CODIGOUSUARIO AS CodigoUsuario,
                 U.NOMBRE AS NombreAsesor,
+                E.IDCARGO AS IdCargoAsesor,
+                CAR.NOMBRE AS CargoAsesor,
+                CTRL.CodigoUsuarioControl AS CodigoUsuarioControl,
+                UCTRL.NOMBRE AS UsuarioControl,
+                APOYO.CodigoUsuarioCobranzaApoyo AS CodigoUsuarioCobranzaApoyo,
+                UAPOYO.NOMBRE AS CobranzaApoyo,
                 P.CALIFICACION AS Calificacion,
                 P.CODIGOPRODUCTO AS Producto,
                 P.CODIGOTIPOPRESTAMO AS TipoPrestamo,
+                PROV.Provincia,
                 P.SALDO AS SaldoCapital
             INTO #PrestamosBase
             FROM COLOCACION.PRESTAMO P WITH (NOLOCK)
@@ -42,6 +48,46 @@ class SqlUniversoPrestamosRepository:
                 ON EP.CODIGO = P.CODIGOESTADO
             LEFT JOIN SEGURIDAD.USUARIO U WITH (NOLOCK)
                 ON U.USUARIO = P.CODIGOUSUARIO
+            LEFT JOIN NOMINA.EMPLEADO_USUARIO EU WITH (NOLOCK)
+                ON EU.CODIGOUSUARIO = P.CODIGOUSUARIO
+            LEFT JOIN NOMINA.EMPLEADO E WITH (NOLOCK)
+                ON E.ID = EU.IDEMPLEADO
+            LEFT JOIN NOMINA.CARGO CAR WITH (NOLOCK)
+                ON CAR.ID = E.IDCARGO
+            OUTER APPLY (
+                SELECT TOP 1
+                    PUC.CODIGOUSUARIOCONTROL AS CodigoUsuarioControl
+                FROM COLOCACION.PRESTAMO_USUARIO_CONTROL PUC WITH (NOLOCK)
+                WHERE PUC.IDPRESTAMO = P.ID
+                  AND NULLIF(LTRIM(RTRIM(PUC.CODIGOUSUARIOCONTROL)), '') IS NOT NULL
+                ORDER BY PUC.NIVEL ASC, PUC.ID DESC
+            ) CTRL
+            OUTER APPLY (
+                SELECT TOP 1
+                    PUC.CODIGOUSUARIOCOBRANZAAPOYO AS CodigoUsuarioCobranzaApoyo
+                FROM COLOCACION.PRESTAMO_USUARIO_CONTROL PUC WITH (NOLOCK)
+                WHERE PUC.IDPRESTAMO = P.ID
+                  AND NULLIF(LTRIM(RTRIM(PUC.CODIGOUSUARIOCOBRANZAAPOYO)), '') IS NOT NULL
+                ORDER BY PUC.NIVEL ASC, PUC.ID DESC
+            ) APOYO
+            LEFT JOIN SEGURIDAD.USUARIO UCTRL WITH (NOLOCK)
+                ON UCTRL.USUARIO = CTRL.CodigoUsuarioControl
+            LEFT JOIN SEGURIDAD.USUARIO UAPOYO WITH (NOLOCK)
+                ON UAPOYO.USUARIO = APOYO.CodigoUsuarioCobranzaApoyo
+            OUTER APPLY (
+                SELECT TOP 1
+                    DPC.PROVINCIA AS Provincia
+                FROM COLOCACION.PRESTAMO_CLIENTE PCLI WITH (NOLOCK)
+                INNER JOIN CLIENTES.CLIENTE CLI WITH (NOLOCK)
+                    ON CLI.ID = PCLI.IDCLIENTE
+                INNER JOIN SUJETO.PERSONA PER WITH (NOLOCK)
+                    ON PER.ID = CLI.IDPERSONA
+                LEFT JOIN GENERAL.DIVISIONPOLITICA_CONSOLIDADO DPC WITH (NOLOCK)
+                    ON DPC.IDDIVISIONNIVELBAJO = PER.IDRESIDENCIA
+                WHERE PCLI.IDPRESTAMO = P.ID
+                  AND PCLI.ACTIVO = 1
+                ORDER BY PCLI.ESPRINCIPAL DESC, PCLI.ID ASC
+            ) PROV
             WHERE P.CODIGOESTADO <> 'C'
             {base_order_clause};
 
@@ -119,11 +165,17 @@ class SqlUniversoPrestamosRepository:
                 PB.CodigoEstadoPrestamo,
                 PB.EstadoPrestamo,
                 PB.CodigoAsesor,
-                PB.CodigoUsuario,
                 PB.NombreAsesor,
-                COALESCE(UC.CalificacionProvision, PB.Calificacion) AS Calificacion,
+                PB.IdCargoAsesor,
+                PB.CargoAsesor,
+                PB.CodigoUsuarioControl,
+                PB.UsuarioControl,
+                PB.CodigoUsuarioCobranzaApoyo,
+                PB.CobranzaApoyo,
+                COALESCE(ULTCAL.CalificacionProvision, PB.Calificacion) AS Calificacion,
                 PB.Producto,
                 PB.TipoPrestamo,
+                PB.Provincia,
                 PB.SaldoCapital,
                 COALESCE(CC.CapitalNoDevenga, 0) AS CapitalNoDevenga,
                 COALESCE(CC.CapitalVencido, 0) AS CapitalVencido,
@@ -135,16 +187,16 @@ class SqlUniversoPrestamosRepository:
                 COALESCE(PC.VALORALDIA, 0) AS ValorParaEstarAlDia,
                 COALESCE(PC.VALORALDIAMASCUOTACTUAL, 0) AS ValorHastaCuotaActual,
                 COALESCE(PC.VALORCANCELAPRESTAMO, 0) AS ValorCancelarTotal,
-                COALESCE(UC.SaldoBaseProvision, 0) AS SaldoBaseProvision,
-                COALESCE(UC.PorcentajeProvisionFuente, 0) AS PorcentajeProvisionFuente,
+                COALESCE(ULTCAL.SaldoBaseProvision, 0) AS SaldoBaseProvision,
+                COALESCE(ULTCAL.PorcentajeProvisionFuente, 0) AS PorcentajeProvisionFuente,
                 COALESCE(CPI.PORCENTAJE_FIJO, 0) AS PorcentajeProvisionReglaFijo,
                 COALESCE(CPI.PORCENTAJE_MINIMO, 0) AS PorcentajeProvisionMinimo,
                 COALESCE(CPI.PORCENTAJE_MAXIMO, 0) AS PorcentajeProvisionMaximo,
                 COALESCE(CPI.ESPORCENTAJE_FIJO, 0) AS EsPorcentajeFijo,
-                COALESCE(UC.ProvisionAutomatica, 0) AS ProvisionAutomatica,
-                COALESCE(UC.ProvisionManual, 0) AS ProvisionManual,
-                COALESCE(UC.ProvisionRequeridaFuente, 0) AS ProvisionRequeridaFuente,
-                COALESCE(UC.ProvisionConstituida, 0) AS ProvisionConstituida,
+                COALESCE(ULTCAL.ProvisionAutomatica, 0) AS ProvisionAutomatica,
+                COALESCE(ULTCAL.ProvisionManual, 0) AS ProvisionManual,
+                COALESCE(ULTCAL.ProvisionRequeridaFuente, 0) AS ProvisionRequeridaFuente,
+                COALESCE(ULTCAL.ProvisionConstituida, 0) AS ProvisionConstituida,
                 CASE WHEN DIF.IdPrestamo IS NULL THEN 0 ELSE 1 END AS EsDiferido
             FROM #PrestamosBase PB
             LEFT JOIN CapitalClasificado CC
@@ -167,9 +219,9 @@ class SqlUniversoPrestamosRepository:
                 FROM COLOCACION.PRESTAMO_CALIFICACION PCAL WITH (NOLOCK)
                 WHERE PCAL.IDPRESTAMO = PB.IdPrestamo
                 ORDER BY PCAL.FECHACALIFICACION DESC, PCAL.ID DESC
-            ) UC
+            ) ULTCAL
             LEFT JOIN COLOCACION.CALIFICACION_PRESTAMO_INFORMACION CPI WITH (NOLOCK)
-                ON CPI.ID = UC.IdCalificacionPrestamoInformacion
+                ON CPI.ID = ULTCAL.IdCalificacionPrestamoInformacion
             LEFT JOIN Diferidos DIF
                 ON DIF.IdPrestamo = PB.IdPrestamo
             ORDER BY PB.IdPrestamo

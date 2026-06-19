@@ -139,6 +139,7 @@ class SituacionCrediticiaActualSyncResponse(BaseModel):
     total_upserted: int
     total_matched: int
     total_modified: int
+    total_sin_cambios: int = 0
     timings_ms: SituacionCrediticiaActualSyncTimings
 
     @field_validator("data_version")

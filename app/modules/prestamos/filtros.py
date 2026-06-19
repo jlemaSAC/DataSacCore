@@ -113,7 +113,7 @@ def _build_match(filtros: PrestamoUniverseRequest, *, historico: bool) -> FieldC
     _add_in(match, "TipoPrestamo", filtros.tipos_prestamo)
     _add_in(match, "Provincia", filtros.provincias)
 
-    _add_alias_condition(and_conditions, ["CodigoAsesor", "CodigoUsuario"], filtros.codigos_asesor)
+    _add_in(match, "CodigoAsesor", filtros.codigos_asesor)
     _add_alias_condition(
         and_conditions,
         ["CodigoUsuarioControl", "CodigoUsuarioResponsableControl"],

@@ -13,19 +13,46 @@ from app.modules.prestamos.repositories.mongo_universo_repository import MongoUn
 from app.modules.prestamos.schemas import PrestamoUniverseRequest
 
 
+class FakeBulkWriteResult:
+    def __init__(self, *, upserted: int = 0, matched: int = 0, modified: int = 0) -> None:
+        self.upserted_count = upserted
+        self.matched_count = matched
+        self.modified_count = modified
+
+
 class FakeMongoCollection:
     def __init__(self, documents: list[dict]) -> None:
         self.documents = documents
         self.last_filter = None
+        self.last_projection = None
         self.created_indexes = []
+        self.bulk_write_calls = 0
+        self.last_operations = []
 
-    def find(self, query: dict) -> list[dict]:
+    def find(self, query: dict, projection: dict | None = None) -> list[dict]:
         self.last_filter = query
-        return self.documents
+        self.last_projection = projection
+
+        documents = self.documents
+        if isinstance(query.get("IdPrestamo"), dict) and "$in" in query["IdPrestamo"]:
+            ids = set(query["IdPrestamo"]["$in"])
+            documents = [document for document in documents if document.get("IdPrestamo") in ids]
+
+        if projection is None:
+            return documents
+
+        included_fields = {key for key, value in projection.items() if value}
+        return [{key: value for key, value in document.items() if key in included_fields} for document in documents]
 
     def create_index(self, keys, **kwargs) -> str:
         self.created_indexes.append((keys, kwargs))
         return kwargs.get("name", "")
+
+    def bulk_write(self, operations, ordered: bool) -> FakeBulkWriteResult:
+        _ = ordered
+        self.bulk_write_calls += 1
+        self.last_operations = operations
+        return FakeBulkWriteResult(upserted=len(operations))
 
 
 class FakeMongoDatabase:
@@ -105,6 +132,45 @@ def test_mongo_document_from_snapshot_incluye_diferido_y_dias_vencidos() -> None
 
     assert document["EsDiferido"] is True
     assert document["DiasVencidos"] == 12
+    assert document["SnapshotHash"]
+    assert "NombreCompleto" not in document
+    assert "CodigoUsuario" not in document
+
+
+def test_mongo_document_from_snapshot_mantiene_hash_estable_sin_campos_tecnicos() -> None:
+    snapshot = prestamo_snapshot_from_mongo(
+        {
+            "IdPrestamo": 10,
+            "NumeroPrestamo": "0001",
+            "SaldoCapital": 1000,
+        }
+    )
+
+    first_document = mongo_document_from_snapshot(
+        snapshot,
+        as_of=datetime(2026, 6, 18, 10, 30),
+        data_version="20260618-103000",
+    )
+    second_document = mongo_document_from_snapshot(
+        snapshot,
+        as_of=datetime(2026, 6, 19, 11, 45),
+        data_version="20260619-114500",
+    )
+    changed_snapshot = prestamo_snapshot_from_mongo(
+        {
+            "IdPrestamo": 10,
+            "NumeroPrestamo": "0001",
+            "SaldoCapital": 1100,
+        }
+    )
+    changed_document = mongo_document_from_snapshot(
+        changed_snapshot,
+        as_of=datetime(2026, 6, 19, 11, 45),
+        data_version="20260619-114500",
+    )
+
+    assert first_document["SnapshotHash"] == second_document["SnapshotHash"]
+    assert first_document["SnapshotHash"] != changed_document["SnapshotHash"]
 
 
 def test_prestamo_snapshot_from_sql_calcula_provision_requerida_con_parametros() -> None:
@@ -179,7 +245,7 @@ def test_mongo_universo_repository_crea_indices_actual_una_sola_vez_por_instanci
     repository.ensure_actual_indexes()
 
     created_indexes = mongo_db.collections[SITUACION_CREDITICIA_ACTUAL_COLLECTION].created_indexes
-    assert len(created_indexes) == 7
+    assert len(created_indexes) == 11
 
 
 def test_mongo_universo_repository_usa_coleccion_actual() -> None:
@@ -195,13 +261,8 @@ def test_mongo_universo_repository_usa_coleccion_actual() -> None:
     assert snapshots[0].numero_prestamo == "0001"
     assert snapshots[0].codigo_asesor == "JPEREZ"
     assert mongo_db.collections[SITUACION_CREDITICIA_ACTUAL_COLLECTION].last_filter == {
+        "CodigoAsesor": {"$in": ["JPEREZ"]},
         "$and": [
-            {
-                "$or": [
-                    {"CodigoAsesor": {"$in": ["JPEREZ"]}},
-                    {"CodigoUsuario": {"$in": ["JPEREZ"]}},
-                ]
-            },
             {
                 "$and": [
                     {"EstadoPrestamo": {"$nin": ["CANCELADO", "C"]}},
@@ -228,3 +289,37 @@ def test_mongo_universo_repository_usa_historico_con_fecha_corte_yyyymmdd() -> N
     assert snapshots[0].numero_prestamo == "0002"
     assert snapshots[0].codigo_asesor == "MLOPEZ"
     assert mongo_db.collections[SITUACION_CREDITICIA_HISTORICO_COLLECTION].last_filter["fecha_corte"] == "20260531"
+
+
+def test_mongo_universo_repository_omite_upsert_si_snapshot_hash_no_cambia() -> None:
+    mongo_db = FakeMongoDatabase()
+    snapshot = prestamo_snapshot_from_mongo(
+        {
+            "IdPrestamo": 10,
+            "NumeroPrestamo": "0001",
+            "SaldoCapital": 1000,
+        }
+    )
+    existing_document = mongo_document_from_snapshot(
+        snapshot,
+        as_of=datetime(2026, 6, 18, 10, 30),
+        data_version="20260618-103000",
+    )
+    mongo_db.collections[SITUACION_CREDITICIA_ACTUAL_COLLECTION].documents = [
+        {
+            "IdPrestamo": 10,
+            "SnapshotHash": existing_document["SnapshotHash"],
+        }
+    ]
+    repository = MongoUniversoPrestamosRepository(mongo_db)
+
+    result = repository.upsert_actual_snapshots(
+        [snapshot],
+        as_of=datetime(2026, 6, 19, 9, 20),
+        data_version="20260619-092000",
+    )
+
+    actual_collection = mongo_db.collections[SITUACION_CREDITICIA_ACTUAL_COLLECTION]
+    assert result == {"upserted": 0, "matched": 0, "modified": 0, "unchanged": 1}
+    assert actual_collection.bulk_write_calls == 0
+    assert actual_collection.last_projection == {"IdPrestamo": 1, "SnapshotHash": 1, "_id": 0}

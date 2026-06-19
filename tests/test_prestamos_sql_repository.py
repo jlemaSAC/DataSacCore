@@ -40,6 +40,9 @@ def test_get_prestamos_actuales_agrega_top_y_order_by_en_base_con_limit() -> Non
     prestamos_base_sql = session.last_statement.split("INTO #PrestamosBase", 1)[0]
     assert "SELECT TOP (100)" in prestamos_base_sql
     assert "ORDER BY P.ID" in session.last_statement
+    assert "P.CODIGOUSUARIO AS CodigoAsesor" in session.last_statement
+    assert "P.CODIGOUSUARIO AS CodigoUsuario" not in session.last_statement
+    assert "\n                PB.CodigoUsuario,\n" not in session.last_statement
 
 
 def test_get_prestamos_actuales_calcula_capital_y_exigibles_desde_rubros_pendientes() -> None:
@@ -78,3 +81,23 @@ def test_get_prestamos_actuales_trae_parametros_de_provision_con_outer_apply() -
     assert "CPI.PORCENTAJE_MAXIMO, 0) AS PorcentajeProvisionMaximo" in session.last_statement
     assert "CPI.ESPORCENTAJE_FIJO, 0) AS EsPorcentajeFijo" in session.last_statement
     assert "ROW_NUMBER()" not in session.last_statement
+
+
+def test_get_prestamos_actuales_trae_responsables_cargo_y_provincia() -> None:
+    session = FakeSession()
+    repository = SqlUniversoPrestamosRepository(session)
+
+    repository.get_prestamos_actuales(limit=100)
+
+    assert "E.IDCARGO AS IdCargoAsesor" in session.last_statement
+    assert "CAR.NOMBRE AS CargoAsesor" in session.last_statement
+    assert "COLOCACION.PRESTAMO_USUARIO_CONTROL PUC" in session.last_statement
+    assert "PUC.CODIGOUSUARIOCONTROL AS CodigoUsuarioControl" in session.last_statement
+    assert "PUC.CODIGOUSUARIOCOBRANZAAPOYO AS CodigoUsuarioCobranzaApoyo" in session.last_statement
+    assert "NULLIF(LTRIM(RTRIM(PUC.CODIGOUSUARIOCONTROL)), '') IS NOT NULL" in session.last_statement
+    assert "NULLIF(LTRIM(RTRIM(PUC.CODIGOUSUARIOCOBRANZAAPOYO)), '') IS NOT NULL" in session.last_statement
+    assert "APOYO.CodigoUsuarioCobranzaApoyo AS CodigoUsuarioCobranzaApoyo" in session.last_statement
+    assert "UCTRL.NOMBRE AS UsuarioControl" in session.last_statement
+    assert "UAPOYO.NOMBRE AS CobranzaApoyo" in session.last_statement
+    assert "GENERAL.DIVISIONPOLITICA_CONSOLIDADO DPC" in session.last_statement
+    assert "DPC.PROVINCIA AS Provincia" in session.last_statement

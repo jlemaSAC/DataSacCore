@@ -76,9 +76,7 @@ def test_build_mongo_match_actual_usa_campos_canonicos_y_aliases() -> None:
 
     assert match["IdPrestamo"] == {"$in": [10]}
     assert match["IdAgencia"] == {"$in": [2]}
-    assert {"$or": [{"CodigoAsesor": {"$in": ["JPEREZ"]}}, {"CodigoUsuario": {"$in": ["JPEREZ"]}}]} in match[
-        "$and"
-    ]
+    assert match["CodigoAsesor"] == {"$in": ["JPEREZ"]}
     assert {
         "$or": [
             {"CodigoUsuarioControl": {"$in": ["MLOPEZ"]}},
@@ -154,4 +152,3 @@ def test_metricas_calculan_cartera_mora_suma_y_diferencia() -> None:
     assert total.mora_porcentaje == 15
     assert diferencia.saldo_capital == 100
     assert diferencia.provision_requerida == 5
-

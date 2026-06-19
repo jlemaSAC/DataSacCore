@@ -98,6 +98,7 @@ class UniversoPrestamosService:
             total_upserted=write_result["upserted"],
             total_matched=write_result["matched"],
             total_modified=write_result["modified"],
+            total_sin_cambios=write_result.get("unchanged", 0),
             timings_ms=SituacionCrediticiaActualSyncTimings(
                 ensure_indexes_ms=ensure_indexes_ms,
                 sql_read_ms=sql_read_ms,
