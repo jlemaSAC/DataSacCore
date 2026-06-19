@@ -40,6 +40,7 @@ def prestamo_snapshot_from_mongo(document: Mapping[str, Any]) -> PrestamoSnapsho
 
     estado = pick_first(document, "EstadoPrestamo", "estado_prestamo")
     codigo_estado = pick_first(document, "CodigoEstadoPrestamo", "CodigoEstado", "codigo_estado_prestamo")
+    provision_data = _calcular_provision_data(document)
 
     return PrestamoSnapshot(
         id_prestamo=to_int_safe(pick_first(document, "IdPrestamo", "id_prestamo"), default=None),
@@ -92,7 +93,9 @@ def prestamo_snapshot_from_mongo(document: Mapping[str, Any]) -> PrestamoSnapsho
         capital_vigente=capital_vigente,
         capital_no_devenga=capital_no_devenga,
         capital_vencido=capital_vencido,
-        provision_requerida=to_float_safe(pick_first(document, "ProvisionRequerida", "provision_requerida")),
+        provision_requerida=provision_data["provision_requerida"],
+        provision_requerida_fuente=provision_data["provision_requerida_fuente"],
+        provision_requerida_calculada=provision_data["provision_requerida_calculada"],
         provision_constituida=to_float_safe(
             pick_first(
                 document,
@@ -101,6 +104,12 @@ def prestamo_snapshot_from_mongo(document: Mapping[str, Any]) -> PrestamoSnapsho
                 "provision_constituida",
             )
         ),
+        porcentaje_provision_aplicado=provision_data["porcentaje_provision_aplicado"],
+        porcentaje_provision_fuente=provision_data["porcentaje_provision_fuente"],
+        porcentaje_provision_minimo=provision_data["porcentaje_provision_minimo"],
+        porcentaje_provision_maximo=provision_data["porcentaje_provision_maximo"],
+        es_porcentaje_fijo=provision_data["es_porcentaje_fijo"],
+        provision_diferencia_validacion=provision_data["provision_diferencia_validacion"],
         exigible_capital=to_float_safe(pick_first(document, "ExigibleCapital", "exigible_capital")),
         exigible_interes=to_float_safe(pick_first(document, "ExigibleInteres", "exigible_interes")),
         exigible_mora=to_float_safe(pick_first(document, "ExigibleMora", "exigible_mora")),
@@ -156,7 +165,15 @@ def mongo_document_from_snapshot(
         "CapitalNoDevenga": snapshot.capital_no_devenga,
         "CapitalVencido": snapshot.capital_vencido,
         "ProvisionRequerida": snapshot.provision_requerida,
+        "ProvisionRequeridaFuente": snapshot.provision_requerida_fuente,
+        "ProvisionRequeridaCalculada": snapshot.provision_requerida_calculada,
         "ProvisionConstituida": snapshot.provision_constituida,
+        "PorcentajeProvisionAplicado": snapshot.porcentaje_provision_aplicado,
+        "PorcentajeProvisionFuente": snapshot.porcentaje_provision_fuente,
+        "PorcentajeProvisionMinimo": snapshot.porcentaje_provision_minimo,
+        "PorcentajeProvisionMaximo": snapshot.porcentaje_provision_maximo,
+        "EsPorcentajeFijo": snapshot.es_porcentaje_fijo,
+        "ProvisionDiferenciaValidacion": snapshot.provision_diferencia_validacion,
         "ExigibleCapital": snapshot.exigible_capital,
         "ExigibleInteres": snapshot.exigible_interes,
         "ExigibleMora": snapshot.exigible_mora,
@@ -173,3 +190,80 @@ def mongo_document_from_snapshot(
 
 def _es_cancelado(codigo_estado: Any, estado: Any) -> bool:
     return normalizar_estado_prestamo(codigo_estado) == "C" or normalizar_estado_prestamo(estado) == "CANCELADO"
+
+
+def _calcular_provision_data(document: Mapping[str, Any]) -> dict[str, float | bool]:
+    provision_requerida_existente = to_float_safe(pick_first(document, "ProvisionRequerida", "provision_requerida"))
+    provision_fuente = _calcular_provision_fuente(document)
+    saldo_base = to_float_safe(
+        pick_first(
+            document,
+            "SaldoBaseProvision",
+            "SaldoProvision",
+            "SaldoCalificacion",
+            "saldo_base_provision",
+        )
+    )
+    porcentaje_fuente = to_float_safe(
+        pick_first(
+            document,
+            "PorcentajeProvisionFuente",
+            "PorcentajeProvision",
+            "PorcentajeFijo",
+            "porcentaje_provision_fuente",
+        )
+    )
+    porcentaje_regla_fijo = to_float_safe(pick_first(document, "PorcentajeProvisionReglaFijo", "PorcentajeFijoRegla"))
+    porcentaje_minimo = to_float_safe(pick_first(document, "PorcentajeProvisionMinimo", "PorcentajeMinimo"))
+    porcentaje_maximo = to_float_safe(pick_first(document, "PorcentajeProvisionMaximo", "PorcentajeMaximo"))
+    es_porcentaje_fijo = es_diferido(pick_first(document, "EsPorcentajeFijo", "es_porcentaje_fijo"))
+    porcentaje_aplicado = _calcular_porcentaje_provision_aplicado(
+        porcentaje_fuente=porcentaje_fuente,
+        porcentaje_regla_fijo=porcentaje_regla_fijo,
+        porcentaje_minimo=porcentaje_minimo,
+        porcentaje_maximo=porcentaje_maximo,
+        es_porcentaje_fijo=es_porcentaje_fijo,
+    )
+    provision_calculada = max(saldo_base * porcentaje_aplicado / 100, 0.0) if saldo_base > 0 else 0.0
+    provision_requerida = provision_calculada if provision_calculada > 0 else provision_requerida_existente
+
+    return {
+        "provision_requerida": provision_requerida,
+        "provision_requerida_fuente": provision_fuente,
+        "provision_requerida_calculada": provision_calculada,
+        "porcentaje_provision_aplicado": porcentaje_aplicado,
+        "porcentaje_provision_fuente": porcentaje_fuente,
+        "porcentaje_provision_minimo": porcentaje_minimo,
+        "porcentaje_provision_maximo": porcentaje_maximo,
+        "es_porcentaje_fijo": es_porcentaje_fijo,
+        "provision_diferencia_validacion": provision_fuente - provision_calculada,
+    }
+
+
+def _calcular_provision_fuente(document: Mapping[str, Any]) -> float:
+    provision_fuente = to_float_safe(pick_first(document, "ProvisionRequeridaFuente", "provision_requerida_fuente"))
+    if provision_fuente > 0:
+        return provision_fuente
+
+    provision_automatica = to_float_safe(pick_first(document, "ProvisionAutomatica", "ProvisionAutomaticaFuente"))
+    provision_manual = to_float_safe(pick_first(document, "ProvisionManual", "ProvisionManualFuente"))
+    return max(provision_automatica + provision_manual, 0.0)
+
+
+def _calcular_porcentaje_provision_aplicado(
+    *,
+    porcentaje_fuente: float,
+    porcentaje_regla_fijo: float,
+    porcentaje_minimo: float,
+    porcentaje_maximo: float,
+    es_porcentaje_fijo: bool,
+) -> float:
+    if es_porcentaje_fijo:
+        return porcentaje_regla_fijo if porcentaje_regla_fijo > 0 else porcentaje_fuente
+
+    porcentaje = porcentaje_fuente
+    if porcentaje_minimo > 0:
+        porcentaje = max(porcentaje, porcentaje_minimo)
+    if porcentaje_maximo > 0:
+        porcentaje = min(porcentaje, porcentaje_maximo)
+    return porcentaje

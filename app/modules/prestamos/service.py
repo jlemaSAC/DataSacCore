@@ -1,4 +1,5 @@
 from datetime import datetime
+from time import perf_counter
 from zoneinfo import ZoneInfo
 
 from app.modules.auth.schemas import AuthContext
@@ -10,12 +11,17 @@ from app.modules.prestamos.schemas import (
     PrestamoUniverseRequest,
     SituacionCrediticiaActualSyncRequest,
     SituacionCrediticiaActualSyncResponse,
+    SituacionCrediticiaActualSyncTimings,
     UniversoPrestamosBuscarResponse,
     UniversoPrestamosConteos,
 )
 
 
 TIMEZONE_ECUADOR = ZoneInfo("America/Guayaquil")
+
+
+def _elapsed_ms(start: float) -> float:
+    return round((perf_counter() - start) * 1000, 2)
 
 
 class UniversoPrestamosService:
@@ -62,15 +68,27 @@ class UniversoPrestamosService:
         as_of = datetime.now(TIMEZONE_ECUADOR)
         data_version = as_of.strftime("%Y%m%d-%H%M%S")
 
-        self.repository.ensure_actual_indexes()
+        total_start = perf_counter()
 
+        ensure_indexes_start = perf_counter()
+        self.repository.ensure_actual_indexes()
+        ensure_indexes_ms = _elapsed_ms(ensure_indexes_start)
+
+        sql_read_start = perf_counter()
         rows = self.sql_repository.get_prestamos_actuales(limit=request.limit)
+        sql_read_ms = _elapsed_ms(sql_read_start)
+
+        python_map_start = perf_counter()
         snapshots = [prestamo_snapshot_from_sql_row(row) for row in rows]
+        python_map_ms = _elapsed_ms(python_map_start)
+
+        mongo_upsert_start = perf_counter()
         write_result = self.repository.upsert_actual_snapshots(
             snapshots,
             as_of=as_of,
             data_version=data_version,
         )
+        mongo_upsert_ms = _elapsed_ms(mongo_upsert_start)
 
         return SituacionCrediticiaActualSyncResponse(
             collection=SITUACION_CREDITICIA_ACTUAL_COLLECTION,
@@ -80,4 +98,11 @@ class UniversoPrestamosService:
             total_upserted=write_result["upserted"],
             total_matched=write_result["matched"],
             total_modified=write_result["modified"],
+            timings_ms=SituacionCrediticiaActualSyncTimings(
+                ensure_indexes_ms=ensure_indexes_ms,
+                sql_read_ms=sql_read_ms,
+                python_map_ms=python_map_ms,
+                mongo_upsert_ms=mongo_upsert_ms,
+                total_ms=_elapsed_ms(total_start),
+            ),
         )

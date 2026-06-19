@@ -160,6 +160,15 @@ def test_universo_prestamos_service_sincroniza_situacion_crediticia_actual() -> 
                 "ValorParaEstarAlDia": "100",
                 "ValorHastaCuotaActual": "140",
                 "ValorCancelarTotal": "1020",
+                "SaldoBaseProvision": "1000",
+                "PorcentajeProvisionFuente": "2",
+                "PorcentajeProvisionReglaFijo": "1.5",
+                "PorcentajeProvisionMinimo": "1",
+                "PorcentajeProvisionMaximo": "5",
+                "EsPorcentajeFijo": 1,
+                "ProvisionAutomatica": "12",
+                "ProvisionManual": "3",
+                "ProvisionConstituida": "9",
             }
         ]
     )
@@ -175,6 +184,11 @@ def test_universo_prestamos_service_sincroniza_situacion_crediticia_actual() -> 
     assert response.total_upserted == 1
     assert response.total_matched == 0
     assert response.total_modified == 0
+    assert response.timings_ms.ensure_indexes_ms >= 0
+    assert response.timings_ms.sql_read_ms >= 0
+    assert response.timings_ms.python_map_ms >= 0
+    assert response.timings_ms.mongo_upsert_ms >= 0
+    assert response.timings_ms.total_ms >= 0
     assert mongo_repository.indexes_created is True
     assert mongo_repository.last_upsert_snapshots[0].numero_prestamo == "0001"
     assert mongo_repository.last_upsert_snapshots[0].codigo_asesor == "JPEREZ"
@@ -190,6 +204,12 @@ def test_universo_prestamos_service_sincroniza_situacion_crediticia_actual() -> 
     assert mongo_repository.last_upsert_snapshots[0].valor_para_estar_al_dia == 100
     assert mongo_repository.last_upsert_snapshots[0].valor_hasta_cuota_actual == 140
     assert mongo_repository.last_upsert_snapshots[0].valor_cancelar_total == 1020
+    assert mongo_repository.last_upsert_snapshots[0].provision_requerida == 15
+    assert mongo_repository.last_upsert_snapshots[0].provision_requerida_fuente == 15
+    assert mongo_repository.last_upsert_snapshots[0].provision_requerida_calculada == 15
+    assert mongo_repository.last_upsert_snapshots[0].provision_constituida == 9
+    assert mongo_repository.last_upsert_snapshots[0].porcentaje_provision_aplicado == 1.5
+    assert mongo_repository.last_upsert_snapshots[0].provision_diferencia_validacion == 0
     assert sql_repository.last_limit == 1
 
 
@@ -213,6 +233,15 @@ def test_prestamos_sincronizar_actual_endpoint_devuelve_conteos() -> None:
                 "ValorParaEstarAlDia": "100",
                 "ValorHastaCuotaActual": "140",
                 "ValorCancelarTotal": "1020",
+                "SaldoBaseProvision": "1000",
+                "PorcentajeProvisionFuente": "2",
+                "PorcentajeProvisionReglaFijo": "1.5",
+                "PorcentajeProvisionMinimo": "1",
+                "PorcentajeProvisionMaximo": "5",
+                "EsPorcentajeFijo": 1,
+                "ProvisionAutomatica": "12",
+                "ProvisionManual": "3",
+                "ProvisionConstituida": "9",
             }
         ]
     )
@@ -236,6 +265,14 @@ def test_prestamos_sincronizar_actual_endpoint_devuelve_conteos() -> None:
     assert payload["total_upserted"] == 1
     assert payload["total_matched"] == 0
     assert payload["total_modified"] == 0
+    assert set(payload["timings_ms"]) == {
+        "ensure_indexes_ms",
+        "sql_read_ms",
+        "python_map_ms",
+        "mongo_upsert_ms",
+        "total_ms",
+    }
+    assert payload["timings_ms"]["total_ms"] >= 0
 
 
 def test_prestamos_sincronizar_actual_requiere_limit_o_confirmacion_total() -> None:

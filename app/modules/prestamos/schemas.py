@@ -67,7 +67,15 @@ class PrestamoSnapshot(BaseModel):
     capital_no_devenga: float = 0.0
     capital_vencido: float = 0.0
     provision_requerida: float = 0.0
+    provision_requerida_fuente: float = 0.0
+    provision_requerida_calculada: float = 0.0
     provision_constituida: float = 0.0
+    porcentaje_provision_aplicado: float = 0.0
+    porcentaje_provision_fuente: float = 0.0
+    porcentaje_provision_minimo: float = 0.0
+    porcentaje_provision_maximo: float = 0.0
+    es_porcentaje_fijo: bool = False
+    provision_diferencia_validacion: float = 0.0
 
     exigible_capital: float = 0.0
     exigible_interes: float = 0.0
@@ -115,6 +123,14 @@ class SituacionCrediticiaActualSyncRequest(BaseModel):
         return self
 
 
+class SituacionCrediticiaActualSyncTimings(BaseModel):
+    ensure_indexes_ms: float
+    sql_read_ms: float
+    python_map_ms: float
+    mongo_upsert_ms: float
+    total_ms: float
+
+
 class SituacionCrediticiaActualSyncResponse(BaseModel):
     collection: str
     data_version: str
@@ -123,6 +139,7 @@ class SituacionCrediticiaActualSyncResponse(BaseModel):
     total_upserted: int
     total_matched: int
     total_modified: int
+    timings_ms: SituacionCrediticiaActualSyncTimings
 
     @field_validator("data_version")
     @classmethod

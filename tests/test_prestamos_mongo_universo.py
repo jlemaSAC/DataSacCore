@@ -107,6 +107,70 @@ def test_mongo_document_from_snapshot_incluye_diferido_y_dias_vencidos() -> None
     assert document["DiasVencidos"] == 12
 
 
+def test_prestamo_snapshot_from_sql_calcula_provision_requerida_con_parametros() -> None:
+    snapshot = prestamo_snapshot_from_mongo(
+        {
+            "IdPrestamo": 10,
+            "NumeroPrestamo": "0001",
+            "SaldoBaseProvision": 1000,
+            "PorcentajeProvisionFuente": 2,
+            "PorcentajeProvisionReglaFijo": 1.5,
+            "PorcentajeProvisionMinimo": 1,
+            "PorcentajeProvisionMaximo": 5,
+            "EsPorcentajeFijo": True,
+            "ProvisionAutomatica": 12,
+            "ProvisionManual": 3,
+            "ProvisionConstituida": 9,
+        }
+    )
+
+    assert snapshot.provision_requerida == 15
+    assert snapshot.provision_requerida_calculada == 15
+    assert snapshot.provision_requerida_fuente == 15
+    assert snapshot.provision_constituida == 9
+    assert snapshot.porcentaje_provision_aplicado == 1.5
+    assert snapshot.porcentaje_provision_fuente == 2
+    assert snapshot.porcentaje_provision_minimo == 1
+    assert snapshot.porcentaje_provision_maximo == 5
+    assert snapshot.es_porcentaje_fijo is True
+    assert snapshot.provision_diferencia_validacion == 0
+
+    document = mongo_document_from_snapshot(
+        snapshot,
+        as_of=datetime(2026, 6, 18, 10, 30),
+        data_version="20260618-103000",
+    )
+
+    assert document["ProvisionRequerida"] == 15
+    assert document["ProvisionRequeridaFuente"] == 15
+    assert document["ProvisionRequeridaCalculada"] == 15
+    assert document["ProvisionConstituida"] == 9
+    assert document["PorcentajeProvisionAplicado"] == 1.5
+    assert document["ProvisionDiferenciaValidacion"] == 0
+
+
+def test_prestamo_snapshot_from_sql_limita_porcentaje_no_fijo_a_minimo_y_maximo() -> None:
+    snapshot = prestamo_snapshot_from_mongo(
+        {
+            "IdPrestamo": 10,
+            "NumeroPrestamo": "0001",
+            "SaldoBaseProvision": 1000,
+            "PorcentajeProvisionFuente": 8,
+            "PorcentajeProvisionMinimo": 1,
+            "PorcentajeProvisionMaximo": 5,
+            "EsPorcentajeFijo": False,
+            "ProvisionAutomatica": 45,
+            "ProvisionManual": 0,
+        }
+    )
+
+    assert snapshot.porcentaje_provision_aplicado == 5
+    assert snapshot.provision_requerida_calculada == 50
+    assert snapshot.provision_requerida_fuente == 45
+    assert snapshot.provision_requerida == 50
+    assert snapshot.provision_diferencia_validacion == -5
+
+
 def test_mongo_universo_repository_crea_indices_actual_una_sola_vez_por_instancia() -> None:
     mongo_db = FakeMongoDatabase()
     repository = MongoUniversoPrestamosRepository(mongo_db)
