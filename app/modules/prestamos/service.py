@@ -62,8 +62,7 @@ class UniversoPrestamosService:
         as_of = datetime.now(TIMEZONE_ECUADOR)
         data_version = as_of.strftime("%Y%m%d-%H%M%S")
 
-        if request.crear_indices:
-            self.repository.ensure_actual_indexes()
+        self.repository.ensure_actual_indexes()
 
         rows = self.sql_repository.get_prestamos_actuales(limit=request.limit)
         snapshots = [prestamo_snapshot_from_sql_row(row) for row in rows]

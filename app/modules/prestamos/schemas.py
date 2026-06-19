@@ -106,7 +106,6 @@ class UniversoPrestamosBuscarResponse(BaseModel):
 
 class SituacionCrediticiaActualSyncRequest(BaseModel):
     limit: int | None = Field(default=None, ge=1)
-    crear_indices: bool = True
     confirmar_carga_total: bool = False
 
     @model_validator(mode="after")

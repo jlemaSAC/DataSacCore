@@ -26,6 +26,7 @@ class MongoUniversoPrestamosRepository:
         self.situacion_crediticia_historico_collection: Collection[MongoDocument] = mongo_db[
             self.situacion_crediticia_historico_collection_name
         ]
+        self._actual_indexes_ensured = False
 
     def get_actual_snapshots(self, filtros: PrestamoUniverseRequest) -> list[PrestamoSnapshot]:
         return self._find_snapshots(self.situacion_crediticia_actual_collection, build_mongo_match_actual(filtros))
@@ -37,6 +38,9 @@ class MongoUniversoPrestamosRepository:
         )
 
     def ensure_actual_indexes(self) -> None:
+        if self._actual_indexes_ensured:
+            return
+
         self.situacion_crediticia_actual_collection.create_index(
             [("IdPrestamo", ASCENDING)],
             unique=True,
@@ -66,6 +70,7 @@ class MongoUniversoPrestamosRepository:
             [("data_version", ASCENDING)],
             name="idx_situacion_crediticia_actual_data_version",
         )
+        self._actual_indexes_ensured = True
 
     def upsert_actual_snapshots(
         self,

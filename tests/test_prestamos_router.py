@@ -153,13 +153,20 @@ def test_universo_prestamos_service_sincroniza_situacion_crediticia_actual() -> 
                 "CapitalVencido": "50",
                 "DiasVencidos": "14",
                 "EsDiferido": 1,
+                "ExigibleCapital": "80",
+                "ExigibleInteres": "12",
+                "ExigibleMora": "3",
+                "ExigibleOtros": "5",
+                "ValorParaEstarAlDia": "100",
+                "ValorHastaCuotaActual": "140",
+                "ValorCancelarTotal": "1020",
             }
         ]
     )
     service = UniversoPrestamosService(repository=mongo_repository, sql_repository=sql_repository)
 
     response = service.sincronizar_situacion_crediticia_actual(
-        request=SituacionCrediticiaActualSyncRequest(limit=1, crear_indices=True),
+        request=SituacionCrediticiaActualSyncRequest(limit=1),
         auth_context=fake_auth_context(),
     )
 
@@ -176,6 +183,13 @@ def test_universo_prestamos_service_sincroniza_situacion_crediticia_actual() -> 
     assert mongo_repository.last_upsert_snapshots[0].capital_vigente == 850
     assert mongo_repository.last_upsert_snapshots[0].dias_vencidos == 14
     assert mongo_repository.last_upsert_snapshots[0].es_diferido is True
+    assert mongo_repository.last_upsert_snapshots[0].exigible_capital == 80
+    assert mongo_repository.last_upsert_snapshots[0].exigible_interes == 12
+    assert mongo_repository.last_upsert_snapshots[0].exigible_mora == 3
+    assert mongo_repository.last_upsert_snapshots[0].exigible_otros == 5
+    assert mongo_repository.last_upsert_snapshots[0].valor_para_estar_al_dia == 100
+    assert mongo_repository.last_upsert_snapshots[0].valor_hasta_cuota_actual == 140
+    assert mongo_repository.last_upsert_snapshots[0].valor_cancelar_total == 1020
     assert sql_repository.last_limit == 1
 
 
@@ -192,6 +206,13 @@ def test_prestamos_sincronizar_actual_endpoint_devuelve_conteos() -> None:
                 "CapitalVencido": "50",
                 "DiasVencidos": "14",
                 "EsDiferido": 1,
+                "ExigibleCapital": "80",
+                "ExigibleInteres": "12",
+                "ExigibleMora": "3",
+                "ExigibleOtros": "5",
+                "ValorParaEstarAlDia": "100",
+                "ValorHastaCuotaActual": "140",
+                "ValorCancelarTotal": "1020",
             }
         ]
     )
@@ -202,7 +223,7 @@ def test_prestamos_sincronizar_actual_endpoint_devuelve_conteos() -> None:
     try:
         response = client.post(
             "/prestamos/universo/sincronizar-actual",
-            json={"limit": 1, "crear_indices": True},
+            json={"limit": 1},
         )
     finally:
         app.dependency_overrides.pop(get_current_auth_context, None)
@@ -222,7 +243,7 @@ def test_prestamos_sincronizar_actual_requiere_limit_o_confirmacion_total() -> N
     try:
         response = client.post(
             "/prestamos/universo/sincronizar-actual",
-            json={"crear_indices": True},
+            json={},
         )
     finally:
         app.dependency_overrides.pop(get_current_auth_context, None)

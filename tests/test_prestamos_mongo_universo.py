@@ -17,10 +17,15 @@ class FakeMongoCollection:
     def __init__(self, documents: list[dict]) -> None:
         self.documents = documents
         self.last_filter = None
+        self.created_indexes = []
 
     def find(self, query: dict) -> list[dict]:
         self.last_filter = query
         return self.documents
+
+    def create_index(self, keys, **kwargs) -> str:
+        self.created_indexes.append((keys, kwargs))
+        return kwargs.get("name", "")
 
 
 class FakeMongoDatabase:
@@ -100,6 +105,17 @@ def test_mongo_document_from_snapshot_incluye_diferido_y_dias_vencidos() -> None
 
     assert document["EsDiferido"] is True
     assert document["DiasVencidos"] == 12
+
+
+def test_mongo_universo_repository_crea_indices_actual_una_sola_vez_por_instancia() -> None:
+    mongo_db = FakeMongoDatabase()
+    repository = MongoUniversoPrestamosRepository(mongo_db)
+
+    repository.ensure_actual_indexes()
+    repository.ensure_actual_indexes()
+
+    created_indexes = mongo_db.collections[SITUACION_CREDITICIA_ACTUAL_COLLECTION].created_indexes
+    assert len(created_indexes) == 7
 
 
 def test_mongo_universo_repository_usa_coleccion_actual() -> None:
