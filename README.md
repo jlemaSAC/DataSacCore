@@ -81,20 +81,20 @@ JWT_ACCESS_TOKEN_EXPIRE_MINUTES=180
 ## Ejecutar en desarrollo
 
 ```bash
-fastapi dev
+fastapi dev --port 9100
 ```
 
 La API queda disponible en:
 
-- http://127.0.0.1:8000
-- http://127.0.0.1:8000/docs
-- http://127.0.0.1:8000/redoc
+- http://127.0.0.1:9100
+- http://127.0.0.1:9100/docs
+- http://127.0.0.1:9100/redoc
 
 Healthchecks:
 
-- http://127.0.0.1:8000/health
-- http://127.0.0.1:8000/health/db
-- http://127.0.0.1:8000/health/mongo
+- http://127.0.0.1:9100/health
+- http://127.0.0.1:9100/health/db
+- http://127.0.0.1:9100/health/mongo
 
 Auth:
 
@@ -108,6 +108,45 @@ La respuesta de `POST /auth/login` no incluye el campo `menu`. El menu se obtien
 ```bash
 pytest
 ```
+
+## Desplegar con Docker
+
+La imagen usa la imagen oficial de Python, instala el driver oficial `msodbcsql18` requerido por `pyodbc` para SQL Server y ejecuta FastAPI con:
+
+```bash
+fastapi run app/main.py --host 0.0.0.0 --port 9100
+```
+
+Construir la imagen:
+
+```bash
+docker build -t datasac-core:latest .
+```
+
+Ejecutar con las variables de entorno del archivo `.env`:
+
+```bash
+docker run --rm --env-file .env -p 9100:9100 datasac-core:latest
+```
+
+O usando Compose:
+
+```bash
+docker compose up -d --build
+```
+
+La API quedara disponible en:
+
+- http://127.0.0.1:9100
+- http://127.0.0.1:9100/docs
+- http://127.0.0.1:9100/health
+
+Notas para produccion:
+
+- No copiar `.env` dentro de la imagen; pasar secretos como variables de entorno, secret manager o variables del orquestador.
+- Usar `APP_ENV=production` y definir `CORS_ALLOWED_ORIGINS` con los dominios reales del frontend.
+- Mantener `CHECK_DATABASE_ON_STARTUP=true` y `CHECK_MONGO_ON_STARTUP=true` si se quiere impedir que la API arranque sin SQL Server o MongoDB.
+- Publicar solo el puerto interno `9100` detras de un proxy/reverse proxy o balanceador con TLS.
 
 ## Estructura
 

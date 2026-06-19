@@ -1,0 +1,12 @@
+services:
+  api:
+    build:
+      context: .
+    image: datasac-core:latest
+    env_file:
+      - .env
+    environment:
+      APP_ENV: production
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
