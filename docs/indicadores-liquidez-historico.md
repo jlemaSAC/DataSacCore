@@ -47,11 +47,19 @@ interface LiquidezHistoricoResponse {
 
 Los indicadores son proporciones: `0.4232` se muestra como `42.32 %`.
 
+## Histórico diario
+
+```text
+POST /analytic/indicadores-financieros/indicadores-de-liquidez/historico-diario
+```
+
+Usa la misma entrada y salida. Devuelve los días disponibles desde el primer día del mes inicial hasta el último día del mes final. Si incluye el mes actual, llega únicamente hasta la fecha actual. En este endpoint, `periodos_sin_datos` contiene fechas `YYYY-MM-DD`.
+
 ## Uso
 
 ```ts
 const response = await fetch(
-  "/analytic/indicadores-financieros/indicadores-de-liquidez/historico-mensual",
+  "/analytic/indicadores-financieros/indicadores-de-liquidez/historico-diario",
   {
     method: "POST",
     headers: {

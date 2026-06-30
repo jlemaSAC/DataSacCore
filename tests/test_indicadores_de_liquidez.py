@@ -15,6 +15,7 @@ from app.modules.analytic.indicadores_financieros.indicadores_de_liquidez.schema
 from app.modules.analytic.indicadores_financieros.indicadores_de_liquidez.service import (
     IndicadoresDeLiquidezService,
     construir_fechas_consulta,
+    construir_fechas_consulta_diaria,
 )
 from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.auth.schemas import AuthContext, UsuarioTokenPayload
@@ -132,6 +133,28 @@ def test_construir_fechas_consulta_rechaza_rango_invertido() -> None:
     assert exc_info.value.status_code == 400
 
 
+def test_construir_fechas_consulta_diaria_incluye_todos_los_dias_de_dos_meses() -> None:
+    fechas = construir_fechas_consulta_diaria(
+        periodo_desde="2026-01",
+        periodo_hasta="2026-02",
+        hoy=date(2026, 6, 18),
+    )
+
+    assert fechas[0] == date(2026, 1, 1)
+    assert fechas[-1] == date(2026, 2, 28)
+    assert len(fechas) == 59
+
+
+def test_construir_fechas_consulta_diaria_limita_mes_actual_a_hoy() -> None:
+    fechas = construir_fechas_consulta_diaria(
+        periodo_desde="2026-06",
+        periodo_hasta="2026-06",
+        hoy=date(2026, 6, 18),
+    )
+
+    assert fechas == [date(2026, 6, dia) for dia in range(1, 19)]
+
+
 def test_servicio_devuelve_datos_y_reporta_periodos_sin_informacion(monkeypatch) -> None:
     repository = FakeSaldoContableRepository(
         filas=filas_liquidez(date(2026, 5, 31)) + filas_liquidez(date(2026, 6, 18))
@@ -219,6 +242,39 @@ def test_endpoint_historico_rechaza_formato_de_periodo_invalido() -> None:
         app.dependency_overrides.pop(get_current_auth_context, None)
 
     assert response.status_code == 422
+
+
+def test_endpoint_historico_diario_devuelve_dias_disponibles_hasta_hoy(monkeypatch) -> None:
+    repository = FakeSaldoContableRepository(
+        filas=filas_liquidez(date(2026, 6, 1)) + filas_liquidez(date(2026, 6, 18))
+    )
+    service = IndicadoresDeLiquidezService(saldo_contable_repository=repository)
+    monkeypatch.setattr(
+        "app.modules.analytic.indicadores_financieros.indicadores_de_liquidez.service."
+        "fecha_actual_ecuador",
+        lambda: date(2026, 6, 18),
+    )
+    app.dependency_overrides[get_current_auth_context] = fake_auth_context
+    app.dependency_overrides[get_indicadores_de_liquidez_service] = lambda: service
+    try:
+        response = client.post(
+            "/analytic/indicadores-financieros/indicadores-de-liquidez/historico-diario",
+            json={
+                "periodo_desde": "2026-06",
+                "periodo_hasta": "2026-06",
+                "id_agencia": 1,
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_auth_context, None)
+        app.dependency_overrides.pop(get_indicadores_de_liquidez_service, None)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["fecha_corte"] for item in payload["datos"]] == ["2026-06-01", "2026-06-18"]
+    assert payload["periodos_sin_datos"][0] == "2026-06-02"
+    assert payload["periodos_sin_datos"][-1] == "2026-06-17"
+    assert len(repository.fechas) == 18
 
 
 def test_endpoint_anterior_conserva_contrato_de_fecha_corte() -> None:

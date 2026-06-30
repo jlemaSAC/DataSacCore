@@ -1,5 +1,5 @@
 from calendar import monthrange
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
@@ -175,6 +175,7 @@ INDICADORES_TABLA = (
     "liquidez_primera_linea",
     "liquidez_segunda_linea",
 )
+MAX_FECHAS_POR_CONSULTA = 1000
 
 
 class IndicadoresDeLiquidezService:
@@ -236,45 +237,10 @@ class IndicadoresDeLiquidezService:
                 periodo_hasta=input_data.periodo_hasta,
                 hoy=hoy,
             )
-            codigos = obtener_codigos_cuentas_liquidez()
-            saldos_raw = self.saldo_contable_repository.get_saldos_contables_fechas_con_neteo(
-                fechas=[datetime.combine(fecha, time.min) for fecha in fechas_consulta],
-                id_agencia=input_data.id_agencia,
-                codigos_cuenta=codigos,
-                neteo=1,
-            )
-
-            saldos_por_fecha = agrupar_saldos_por_fecha(saldos_raw)
-            datos: list[IndicadorDeLiquidezMensual] = []
-            periodos_sin_datos: list[str] = []
-
-            for fecha_corte in fechas_consulta:
-                saldos = saldos_por_fecha.get(fecha_corte)
-                if not saldos:
-                    periodos_sin_datos.append(fecha_corte.strftime("%Y-%m"))
-                    continue
-
-                for codigo in codigos:
-                    saldos.setdefault(codigo, 0.0)
-                indicadores, _componentes = calcular_indicadores(saldos)
-                valores = {nombre: round_ratio(indicadores[nombre]) for nombre in INDICADORES_TABLA}
-                datos.append(
-                    IndicadorDeLiquidezMensual(
-                        fecha_corte=fecha_corte,
-                        anio=fecha_corte.year,
-                        mes=fecha_corte.month,
-                        dia=fecha_corte.day,
-                        **valores,
-                    )
-                )
-
-            return IndicadoresDeLiquidezHistoricoResponse(
-                id_agencia=input_data.id_agencia,
-                periodo_desde=input_data.periodo_desde,
-                periodo_hasta=input_data.periodo_hasta,
-                neteo=1,
-                datos=datos,
-                periodos_sin_datos=periodos_sin_datos,
+            return self._consultar_indicadores_por_fechas(
+                input_data=input_data,
+                fechas_consulta=fechas_consulta,
+                formato_sin_datos="%Y-%m",
             )
         except HTTPException:
             raise
@@ -283,6 +249,84 @@ class IndicadoresDeLiquidezService:
                 status_code=500,
                 detail=f"Error calculando indicadores de liquidez: {exc}",
             ) from exc
+
+    def consultar_indicadores_de_liquidez_historico_diario(
+        self,
+        input_data: InputIndicadoresDeLiquidezHistorico,
+        auth_context: AuthContext,
+    ) -> IndicadoresDeLiquidezHistoricoResponse:
+        _ = auth_context
+        try:
+            fechas_consulta = construir_fechas_consulta_diaria(
+                periodo_desde=input_data.periodo_desde,
+                periodo_hasta=input_data.periodo_hasta,
+                hoy=fecha_actual_ecuador(),
+            )
+            return self._consultar_indicadores_por_fechas(
+                input_data=input_data,
+                fechas_consulta=fechas_consulta,
+                formato_sin_datos="%Y-%m-%d",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error calculando indicadores de liquidez: {exc}",
+            ) from exc
+
+    def _consultar_indicadores_por_fechas(
+        self,
+        *,
+        input_data: InputIndicadoresDeLiquidezHistorico,
+        fechas_consulta: list[date],
+        formato_sin_datos: str,
+    ) -> IndicadoresDeLiquidezHistoricoResponse:
+        codigos = obtener_codigos_cuentas_liquidez()
+        saldos_raw: list[dict[str, Any]] = []
+        for posicion in range(0, len(fechas_consulta), MAX_FECHAS_POR_CONSULTA):
+            lote = fechas_consulta[posicion : posicion + MAX_FECHAS_POR_CONSULTA]
+            saldos_raw.extend(
+                self.saldo_contable_repository.get_saldos_contables_fechas_con_neteo(
+                    fechas=[datetime.combine(fecha, time.min) for fecha in lote],
+                    id_agencia=input_data.id_agencia,
+                    codigos_cuenta=codigos,
+                    neteo=1,
+                )
+            )
+
+        saldos_por_fecha = agrupar_saldos_por_fecha(saldos_raw)
+        datos: list[IndicadorDeLiquidezMensual] = []
+        periodos_sin_datos: list[str] = []
+
+        for fecha_corte in fechas_consulta:
+            saldos = saldos_por_fecha.get(fecha_corte)
+            if not saldos:
+                periodos_sin_datos.append(fecha_corte.strftime(formato_sin_datos))
+                continue
+
+            for codigo in codigos:
+                saldos.setdefault(codigo, 0.0)
+            indicadores, _componentes = calcular_indicadores(saldos)
+            valores = {nombre: round_ratio(indicadores[nombre]) for nombre in INDICADORES_TABLA}
+            datos.append(
+                IndicadorDeLiquidezMensual(
+                    fecha_corte=fecha_corte,
+                    anio=fecha_corte.year,
+                    mes=fecha_corte.month,
+                    dia=fecha_corte.day,
+                    **valores,
+                )
+            )
+
+        return IndicadoresDeLiquidezHistoricoResponse(
+            id_agencia=input_data.id_agencia,
+            periodo_desde=input_data.periodo_desde,
+            periodo_hasta=input_data.periodo_hasta,
+            neteo=1,
+            datos=datos,
+            periodos_sin_datos=periodos_sin_datos,
+        )
 
 
 def obtener_codigos_cuentas_liquidez() -> list[str]:
@@ -314,6 +358,50 @@ def construir_fechas_consulta(
     periodo_hasta: str,
     hoy: date,
 ) -> list[date]:
+    mes_desde, mes_hasta, mes_actual = validar_periodos_consulta(
+        periodo_desde=periodo_desde,
+        periodo_hasta=periodo_hasta,
+        hoy=hoy,
+    )
+
+    fechas: list[date] = []
+    cursor = mes_desde
+    while cursor <= mes_hasta:
+        if cursor == mes_actual:
+            fechas.append(hoy)
+        else:
+            ultimo_dia = monthrange(cursor.year, cursor.month)[1]
+            fechas.append(cursor.replace(day=ultimo_dia))
+        cursor = siguiente_mes(cursor)
+    return fechas
+
+
+def construir_fechas_consulta_diaria(
+    *,
+    periodo_desde: str,
+    periodo_hasta: str,
+    hoy: date,
+) -> list[date]:
+    mes_desde, mes_hasta, mes_actual = validar_periodos_consulta(
+        periodo_desde=periodo_desde,
+        periodo_hasta=periodo_hasta,
+        hoy=hoy,
+    )
+    if mes_hasta == mes_actual:
+        fecha_hasta = hoy
+    else:
+        fecha_hasta = mes_hasta.replace(day=monthrange(mes_hasta.year, mes_hasta.month)[1])
+
+    total_dias = (fecha_hasta - mes_desde).days
+    return [mes_desde + timedelta(days=desplazamiento) for desplazamiento in range(total_dias + 1)]
+
+
+def validar_periodos_consulta(
+    *,
+    periodo_desde: str,
+    periodo_hasta: str,
+    hoy: date,
+) -> tuple[date, date, date]:
     mes_desde = date.fromisoformat(f"{periodo_desde}-01")
     mes_hasta = date.fromisoformat(f"{periodo_hasta}-01")
     mes_actual = hoy.replace(day=1)
@@ -328,17 +416,7 @@ def construir_fechas_consulta(
             status_code=400,
             detail="No se pueden consultar periodos posteriores a la fecha actual.",
         )
-
-    fechas: list[date] = []
-    cursor = mes_desde
-    while cursor <= mes_hasta:
-        if cursor == mes_actual:
-            fechas.append(hoy)
-        else:
-            ultimo_dia = monthrange(cursor.year, cursor.month)[1]
-            fechas.append(cursor.replace(day=ultimo_dia))
-        cursor = siguiente_mes(cursor)
-    return fechas
+    return mes_desde, mes_hasta, mes_actual
 
 
 def siguiente_mes(fecha: date) -> date:
