@@ -1,10 +1,16 @@
-from typing import Iterable
+from calendar import monthrange
+from datetime import date, datetime, time
+from typing import Any, Iterable
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
 from app.modules.analytic.indicadores_financieros.indicadores_de_liquidez.schemas import (
+    IndicadorDeLiquidezMensual,
+    IndicadoresDeLiquidezHistoricoResponse,
     IndicadoresDeLiquidezResponse,
     InputIndicadoresDeLiquidez,
+    InputIndicadoresDeLiquidezHistorico,
 )
 from app.modules.auth.schemas import AuthContext
 from app.modules.contabilidad.repositories.sql_saldo_contable_repository import (
@@ -158,6 +164,18 @@ DENOMINADOR_SEGUNDA_LINEA = (
     "2903",
 )
 
+TIMEZONE_ECUADOR = ZoneInfo("America/Guayaquil")
+INDICADORES_TABLA = (
+    "fondos_disponibles_sobre_depositos_corto_plazo",
+    "liquidez_sobre_obligaciones_publico",
+    "liquidez_inversiones_sobre_depositos_vista_plazo",
+    "activos_liquidos_sobre_pasivos_exigibles",
+    "inversiones_sobre_obligaciones_publico",
+    "activos_liquidos_sobre_obligaciones_publico",
+    "liquidez_primera_linea",
+    "liquidez_segunda_linea",
+)
+
 
 class IndicadoresDeLiquidezService:
     def __init__(
@@ -173,22 +191,7 @@ class IndicadoresDeLiquidezService:
     ) -> IndicadoresDeLiquidezResponse:
         _ = auth_context
         try:
-            codigos = codigos_unicos(
-                (
-                    CUENTAS_FONDOS_DISPONIBLES_DEPOSITOS_CORTO_PLAZO,
-                    CUENTAS_LIQUIDEZ_OBLIGACIONES_PUBLICO,
-                    CUENTAS_LIQUIDEZ_INVERSIONES_DEPOSITOS,
-                    ACTIVO_LIQUIDO_PASIVO_EXIGIBLE,
-                    PASIVO_EXIGIBLE,
-                    CUENTAS_INVERSIONES_OBLIGACIONES_PUBLICO,
-                    ACTIVO_LIQUIDO_OBLIGACIONES_PUBLICO,
-                    OBLIGACIONES_PUBLICO_ACTIVO_LIQUIDO,
-                    codigos_componentes(NUMERADOR_PRIMERA_LINEA),
-                    DENOMINADOR_PRIMERA_LINEA,
-                    codigos_componentes(NUMERADOR_SEGUNDA_LINEA),
-                    DENOMINADOR_SEGUNDA_LINEA,
-                )
-            )
+            codigos = obtener_codigos_cuentas_liquidez()
             saldos_raw = self.saldo_contable_repository.get_saldos_contables_con_neteo(
                 fecha=input_data.fecha_corte,
                 id_agencia=input_data.id_agencia,
@@ -219,6 +222,155 @@ class IndicadoresDeLiquidezService:
                 status_code=500,
                 detail=f"Error calculando indicadores de liquidez: {exc}",
             ) from exc
+
+    def consultar_indicadores_de_liquidez_historico(
+        self,
+        input_data: InputIndicadoresDeLiquidezHistorico,
+        auth_context: AuthContext,
+    ) -> IndicadoresDeLiquidezHistoricoResponse:
+        _ = auth_context
+        try:
+            hoy = fecha_actual_ecuador()
+            fechas_consulta = construir_fechas_consulta(
+                periodo_desde=input_data.periodo_desde,
+                periodo_hasta=input_data.periodo_hasta,
+                hoy=hoy,
+            )
+            codigos = obtener_codigos_cuentas_liquidez()
+            saldos_raw = self.saldo_contable_repository.get_saldos_contables_fechas_con_neteo(
+                fechas=[datetime.combine(fecha, time.min) for fecha in fechas_consulta],
+                id_agencia=input_data.id_agencia,
+                codigos_cuenta=codigos,
+                neteo=1,
+            )
+
+            saldos_por_fecha = agrupar_saldos_por_fecha(saldos_raw)
+            datos: list[IndicadorDeLiquidezMensual] = []
+            periodos_sin_datos: list[str] = []
+
+            for fecha_corte in fechas_consulta:
+                saldos = saldos_por_fecha.get(fecha_corte)
+                if not saldos:
+                    periodos_sin_datos.append(fecha_corte.strftime("%Y-%m"))
+                    continue
+
+                for codigo in codigos:
+                    saldos.setdefault(codigo, 0.0)
+                indicadores, _componentes = calcular_indicadores(saldos)
+                valores = {nombre: round_ratio(indicadores[nombre]) for nombre in INDICADORES_TABLA}
+                datos.append(
+                    IndicadorDeLiquidezMensual(
+                        fecha_corte=fecha_corte,
+                        anio=fecha_corte.year,
+                        mes=fecha_corte.month,
+                        dia=fecha_corte.day,
+                        **valores,
+                    )
+                )
+
+            return IndicadoresDeLiquidezHistoricoResponse(
+                id_agencia=input_data.id_agencia,
+                periodo_desde=input_data.periodo_desde,
+                periodo_hasta=input_data.periodo_hasta,
+                neteo=1,
+                datos=datos,
+                periodos_sin_datos=periodos_sin_datos,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error calculando indicadores de liquidez: {exc}",
+            ) from exc
+
+
+def obtener_codigos_cuentas_liquidez() -> list[str]:
+    return codigos_unicos(
+        (
+            CUENTAS_FONDOS_DISPONIBLES_DEPOSITOS_CORTO_PLAZO,
+            CUENTAS_LIQUIDEZ_OBLIGACIONES_PUBLICO,
+            CUENTAS_LIQUIDEZ_INVERSIONES_DEPOSITOS,
+            ACTIVO_LIQUIDO_PASIVO_EXIGIBLE,
+            PASIVO_EXIGIBLE,
+            CUENTAS_INVERSIONES_OBLIGACIONES_PUBLICO,
+            ACTIVO_LIQUIDO_OBLIGACIONES_PUBLICO,
+            OBLIGACIONES_PUBLICO_ACTIVO_LIQUIDO,
+            codigos_componentes(NUMERADOR_PRIMERA_LINEA),
+            DENOMINADOR_PRIMERA_LINEA,
+            codigos_componentes(NUMERADOR_SEGUNDA_LINEA),
+            DENOMINADOR_SEGUNDA_LINEA,
+        )
+    )
+
+
+def fecha_actual_ecuador() -> date:
+    return datetime.now(TIMEZONE_ECUADOR).date()
+
+
+def construir_fechas_consulta(
+    *,
+    periodo_desde: str,
+    periodo_hasta: str,
+    hoy: date,
+) -> list[date]:
+    mes_desde = date.fromisoformat(f"{periodo_desde}-01")
+    mes_hasta = date.fromisoformat(f"{periodo_hasta}-01")
+    mes_actual = hoy.replace(day=1)
+
+    if mes_desde > mes_hasta:
+        raise HTTPException(
+            status_code=400,
+            detail="periodo_desde no puede ser posterior a periodo_hasta.",
+        )
+    if mes_hasta > mes_actual:
+        raise HTTPException(
+            status_code=400,
+            detail="No se pueden consultar periodos posteriores a la fecha actual.",
+        )
+
+    fechas: list[date] = []
+    cursor = mes_desde
+    while cursor <= mes_hasta:
+        if cursor == mes_actual:
+            fechas.append(hoy)
+        else:
+            ultimo_dia = monthrange(cursor.year, cursor.month)[1]
+            fechas.append(cursor.replace(day=ultimo_dia))
+        cursor = siguiente_mes(cursor)
+    return fechas
+
+
+def siguiente_mes(fecha: date) -> date:
+    if fecha.month == 12:
+        return date(fecha.year + 1, 1, 1)
+    return date(fecha.year, fecha.month + 1, 1)
+
+
+def agrupar_saldos_por_fecha(
+    saldos_raw: Iterable[dict[str, Any]],
+) -> dict[date, dict[str, float]]:
+    saldos_por_fecha: dict[date, dict[str, float]] = {}
+    for item in saldos_raw:
+        fecha = normalizar_fecha(item.get("Fecha"))
+        codigo = str(item.get("CodigoCuenta") or "").strip()
+        if fecha is None or not codigo:
+            continue
+        saldos_por_fecha.setdefault(fecha, {})[codigo] = float(item.get("SaldoFinal") or 0.0)
+    return saldos_por_fecha
+
+
+def normalizar_fecha(valor: Any) -> date | None:
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    if isinstance(valor, str):
+        try:
+            return datetime.fromisoformat(valor).date()
+        except ValueError:
+            return None
+    return None
 
 
 def calcular_indicadores(
