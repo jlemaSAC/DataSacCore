@@ -1,10 +1,19 @@
-from datetime import datetime
-from typing import Iterable
+from datetime import date, datetime, time, timedelta
+from typing import Any, Iterable
 
 from fastapi import HTTPException
 
+from app.modules.analytic.indicadores_financieros.fechas_historicas import (
+    MAX_FECHAS_POR_CONSULTA,
+    construir_fechas_consulta_diaria,
+    construir_fechas_consulta_mensual,
+    fecha_actual_ecuador,
+)
 from app.modules.analytic.indicadores_financieros.rentabilidad.schemas import (
     InputRentabilidad,
+    InputRentabilidadHistorico,
+    RentabilidadHistoricoItem,
+    RentabilidadHistoricoResponse,
     RentabilidadResponse,
 )
 from app.modules.auth.schemas import AuthContext
@@ -29,6 +38,13 @@ CUENTAS_CORTE = (
     "1499",
 )
 CUENTAS_PROMEDIO = ("1", "3", "21", "26")
+INDICADORES_RENTABILIDAD_HISTORICO = (
+    "gasto_operacional_sobre_margen_financiero_neto",
+    "roa",
+    "roe",
+    "gasto_operativo_estimado_sobre_cartera_bruta",
+    "costo_promedio_fondeo",
+)
 
 
 class IndicadoresRentabilidadService:
@@ -56,25 +72,11 @@ class IndicadoresRentabilidadService:
                 input_data=input_data,
                 fecha_promedio_desde=fecha_promedio_desde,
             )
-            mes = input_data.fecha_corte.month
-            indicadores, componentes = calcular_indicadores(
+            return self._calcular_rentabilidad_desde_saldos(
+                input_data=input_data,
+                fecha_promedio_desde=fecha_promedio_desde,
                 saldos=saldos,
                 saldos_promedio=saldos_promedio,
-                mes=mes,
-            )
-
-            return RentabilidadResponse(
-                fecha_corte=input_data.fecha_corte,
-                fecha_promedio_desde=fecha_promedio_desde,
-                id_agencia=input_data.id_agencia,
-                neteo=1,
-                mes=mes,
-                indicadores={nombre: round_ratio(valor) for nombre, valor in indicadores.items()},
-                saldos_cuentas={codigo: round_money(valor) for codigo, valor in sorted(saldos.items())},
-                saldos_promedio={
-                    codigo: round_money(valor) for codigo, valor in sorted(saldos_promedio.items())
-                },
-                componentes={codigo: round_money(valor) for codigo, valor in sorted(componentes.items())},
             )
         except HTTPException:
             raise
@@ -83,6 +85,178 @@ class IndicadoresRentabilidadService:
                 status_code=500,
                 detail=f"Error calculando rentabilidad: {exc}",
             ) from exc
+
+    def consultar_rentabilidad_historico_mensual(
+        self,
+        input_data: InputRentabilidadHistorico,
+        auth_context: AuthContext,
+    ) -> RentabilidadHistoricoResponse:
+        _ = auth_context
+        try:
+            fechas_consulta = construir_fechas_consulta_mensual(
+                periodo_desde=input_data.periodo_desde,
+                periodo_hasta=input_data.periodo_hasta,
+                hoy=fecha_actual_ecuador(),
+            )
+            return self._consultar_rentabilidad_por_fechas(
+                input_data=input_data,
+                fechas_consulta=fechas_consulta,
+                formato_sin_datos="%Y-%m",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error calculando historico mensual de rentabilidad: {exc}",
+            ) from exc
+
+    def consultar_rentabilidad_historico_diario(
+        self,
+        input_data: InputRentabilidadHistorico,
+        auth_context: AuthContext,
+    ) -> RentabilidadHistoricoResponse:
+        _ = auth_context
+        try:
+            fechas_consulta = construir_fechas_consulta_diaria(
+                periodo_desde=input_data.periodo_desde,
+                periodo_hasta=input_data.periodo_hasta,
+                hoy=fecha_actual_ecuador(),
+            )
+            return self._consultar_rentabilidad_por_fechas(
+                input_data=input_data,
+                fechas_consulta=fechas_consulta,
+                formato_sin_datos="%Y-%m-%d",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error calculando historico diario de rentabilidad: {exc}",
+            ) from exc
+
+    def _consultar_rentabilidad_por_fechas(
+        self,
+        *,
+        input_data: InputRentabilidadHistorico,
+        fechas_consulta: list[date],
+        formato_sin_datos: str,
+    ) -> RentabilidadHistoricoResponse:
+        saldos_corte_raw = self._obtener_saldos_fechas(
+            fechas=fechas_consulta,
+            id_agencia=input_data.id_agencia,
+            codigos=CUENTAS_CORTE,
+        )
+        saldos_corte_por_fecha = agrupar_saldos_por_fecha(saldos_corte_raw)
+
+        fechas_promedio = construir_fechas_promedio_necesarias(fechas_consulta)
+        saldos_promedio_raw = self._obtener_saldos_fechas(
+            fechas=fechas_promedio,
+            id_agencia=input_data.id_agencia,
+            codigos=CUENTAS_PROMEDIO,
+        )
+        saldos_promedio_por_fecha = agrupar_saldos_por_fecha(saldos_promedio_raw)
+
+        codigos_corte = codigos_unicos((CUENTAS_CORTE,))
+        datos: list[RentabilidadHistoricoItem] = []
+        periodos_sin_datos: list[str] = []
+
+        for fecha_corte in fechas_consulta:
+            saldos = saldos_corte_por_fecha.get(fecha_corte)
+            if not saldos:
+                periodos_sin_datos.append(fecha_corte.strftime(formato_sin_datos))
+                continue
+            for codigo in codigos_corte:
+                saldos.setdefault(codigo, 0.0)
+
+            fecha_promedio_desde = datetime(fecha_corte.year, 1, 1)
+            saldos_promedio = calcular_saldos_promedio_hasta_fecha(
+                saldos_por_fecha=saldos_promedio_por_fecha,
+                fecha_corte=fecha_corte,
+                codigos=CUENTAS_PROMEDIO,
+            )
+            resultado = self._calcular_rentabilidad_desde_saldos(
+                input_data=InputRentabilidad(
+                    fecha_corte=datetime.combine(fecha_corte, time.min),
+                    id_agencia=input_data.id_agencia,
+                ),
+                fecha_promedio_desde=fecha_promedio_desde,
+                saldos=saldos,
+                saldos_promedio=saldos_promedio,
+            )
+            valores = {
+                nombre: resultado.indicadores.get(nombre)
+                for nombre in INDICADORES_RENTABILIDAD_HISTORICO
+            }
+            datos.append(
+                RentabilidadHistoricoItem(
+                    fecha_corte=fecha_corte,
+                    anio=fecha_corte.year,
+                    mes=fecha_corte.month,
+                    dia=fecha_corte.day,
+                    **valores,
+                )
+            )
+
+        return RentabilidadHistoricoResponse(
+            id_agencia=input_data.id_agencia,
+            periodo_desde=input_data.periodo_desde,
+            periodo_hasta=input_data.periodo_hasta,
+            neteo=1,
+            datos=datos,
+            periodos_sin_datos=periodos_sin_datos,
+        )
+
+    def _obtener_saldos_fechas(
+        self,
+        *,
+        fechas: list[date],
+        id_agencia: int,
+        codigos: Iterable[str],
+    ) -> list[dict[str, Any]]:
+        codigos_normalizados = codigos_unicos((codigos,))
+        saldos_raw: list[dict[str, Any]] = []
+        for posicion in range(0, len(fechas), MAX_FECHAS_POR_CONSULTA):
+            lote = fechas[posicion : posicion + MAX_FECHAS_POR_CONSULTA]
+            saldos_raw.extend(
+                self.saldo_contable_repository.get_saldos_contables_fechas_con_neteo(
+                    fechas=[datetime.combine(fecha, time.min) for fecha in lote],
+                    id_agencia=id_agencia,
+                    codigos_cuenta=codigos_normalizados,
+                    neteo=1,
+                )
+            )
+        return saldos_raw
+
+    def _calcular_rentabilidad_desde_saldos(
+        self,
+        *,
+        input_data: InputRentabilidad,
+        fecha_promedio_desde: datetime,
+        saldos: dict[str, float],
+        saldos_promedio: dict[str, float],
+    ) -> RentabilidadResponse:
+        mes = input_data.fecha_corte.month
+        indicadores, componentes = calcular_indicadores(
+            saldos=saldos,
+            saldos_promedio=saldos_promedio,
+            mes=mes,
+        )
+
+        return RentabilidadResponse(
+            fecha_corte=input_data.fecha_corte,
+            fecha_promedio_desde=fecha_promedio_desde,
+            id_agencia=input_data.id_agencia,
+            neteo=1,
+            mes=mes,
+            indicadores={nombre: round_ratio(valor) for nombre, valor in indicadores.items()},
+            saldos_cuentas={codigo: round_money(valor) for codigo, valor in sorted(saldos.items())},
+            saldos_promedio={
+                codigo: round_money(valor) for codigo, valor in sorted(saldos_promedio.items())
+            },
+            componentes={codigo: round_money(valor) for codigo, valor in sorted(componentes.items())},
+        )
 
     def obtener_saldos_corte(self, input_data: InputRentabilidad) -> dict[str, float]:
         codigos = codigos_unicos((CUENTAS_CORTE,))
@@ -121,6 +295,75 @@ class IndicadoresRentabilidadService:
         for codigo in codigos:
             saldos.setdefault(codigo, 0.0)
         return saldos
+
+
+def construir_fechas_promedio_necesarias(fechas_corte: Iterable[date]) -> list[date]:
+    ultima_fecha_por_anio: dict[int, date] = {}
+    for fecha_corte in fechas_corte:
+        ultima_fecha = ultima_fecha_por_anio.get(fecha_corte.year)
+        if ultima_fecha is None or fecha_corte > ultima_fecha:
+            ultima_fecha_por_anio[fecha_corte.year] = fecha_corte
+
+    fechas: list[date] = []
+    for anio, fecha_hasta in sorted(ultima_fecha_por_anio.items()):
+        fecha_desde = date(anio, 1, 1)
+        total_dias = (fecha_hasta - fecha_desde).days
+        fechas.extend(
+            fecha_desde + timedelta(days=desplazamiento)
+            for desplazamiento in range(total_dias + 1)
+        )
+    return fechas
+
+
+def calcular_saldos_promedio_hasta_fecha(
+    *,
+    saldos_por_fecha: dict[date, dict[str, float]],
+    fecha_corte: date,
+    codigos: Iterable[str],
+) -> dict[str, float]:
+    codigos_normalizados = codigos_unicos((codigos,))
+    sumas = {codigo: 0.0 for codigo in codigos_normalizados}
+    cantidades = {codigo: 0 for codigo in codigos_normalizados}
+
+    for fecha, saldos in saldos_por_fecha.items():
+        if fecha.year != fecha_corte.year or fecha > fecha_corte:
+            continue
+        for codigo in codigos_normalizados:
+            if codigo not in saldos:
+                continue
+            sumas[codigo] += float(saldos[codigo])
+            cantidades[codigo] += 1
+
+    return {
+        codigo: sumas[codigo] / cantidades[codigo] if cantidades[codigo] else 0.0
+        for codigo in codigos_normalizados
+    }
+
+
+def agrupar_saldos_por_fecha(
+    saldos_raw: Iterable[dict[str, Any]],
+) -> dict[date, dict[str, float]]:
+    saldos_por_fecha: dict[date, dict[str, float]] = {}
+    for item in saldos_raw:
+        fecha = normalizar_fecha(item.get("Fecha"))
+        codigo = str(item.get("CodigoCuenta") or "").strip()
+        if fecha is None or not codigo:
+            continue
+        saldos_por_fecha.setdefault(fecha, {})[codigo] = float(item.get("SaldoFinal") or 0.0)
+    return saldos_por_fecha
+
+
+def normalizar_fecha(valor: Any) -> date | None:
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    if isinstance(valor, str):
+        try:
+            return datetime.fromisoformat(valor).date()
+        except ValueError:
+            return None
+    return None
 
 
 def calcular_indicadores(
