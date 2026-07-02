@@ -4,8 +4,10 @@ from app.modules.analytic.indicadores_financieros.indicadores_de_eficiencia.depe
     get_indicadores_de_eficiencia_service,
 )
 from app.modules.analytic.indicadores_financieros.indicadores_de_eficiencia.schemas import (
+    IndicadoresDeEficienciaHistoricoResponse,
     IndicadoresDeEficienciaResponse,
     InputIndicadoresDeEficiencia,
+    InputIndicadoresDeEficienciaHistorico,
 )
 from app.modules.analytic.indicadores_financieros.indicadores_de_eficiencia.service import (
     IndicadoresDeEficienciaService,
@@ -28,6 +30,38 @@ def indicadores_de_eficiencia(
     service: IndicadoresDeEficienciaService = Depends(get_indicadores_de_eficiencia_service),
 ) -> IndicadoresDeEficienciaResponse:
     return service.calcular_indicadores_de_eficiencia(
+        input_data=body,
+        auth_context=auth_context,
+    )
+
+
+@router.post(
+    "/indicadores-financieros/indicadores-de-eficiencia/historico-mensual",
+    response_model=IndicadoresDeEficienciaHistoricoResponse,
+    summary="Consultar indicadores de eficiencia mensuales",
+)
+def indicadores_de_eficiencia_historico_mensual(
+    body: InputIndicadoresDeEficienciaHistorico,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: IndicadoresDeEficienciaService = Depends(get_indicadores_de_eficiencia_service),
+) -> IndicadoresDeEficienciaHistoricoResponse:
+    return service.consultar_indicadores_de_eficiencia_historico_mensual(
+        input_data=body,
+        auth_context=auth_context,
+    )
+
+
+@router.post(
+    "/indicadores-financieros/indicadores-de-eficiencia/historico-diario",
+    response_model=IndicadoresDeEficienciaHistoricoResponse,
+    summary="Consultar indicadores de eficiencia diarios",
+)
+def indicadores_de_eficiencia_historico_diario(
+    body: InputIndicadoresDeEficienciaHistorico,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: IndicadoresDeEficienciaService = Depends(get_indicadores_de_eficiencia_service),
+) -> IndicadoresDeEficienciaHistoricoResponse:
+    return service.consultar_indicadores_de_eficiencia_historico_diario(
         input_data=body,
         auth_context=auth_context,
     )

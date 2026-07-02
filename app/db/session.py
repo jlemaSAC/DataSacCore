@@ -94,3 +94,9 @@ def check_database_connection() -> int:
     with get_engine().connect() as connection:
         result = connection.execute(text("SELECT 1"))
         return int(result.scalar_one())
+
+
+def check_secondary_database_connection() -> int:
+    with get_secondary_engine().connect() as connection:
+        result = connection.execute(text("SELECT 1"))
+        return int(result.scalar_one())

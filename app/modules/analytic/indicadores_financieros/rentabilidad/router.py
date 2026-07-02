@@ -5,6 +5,8 @@ from app.modules.analytic.indicadores_financieros.rentabilidad.dependencies impo
 )
 from app.modules.analytic.indicadores_financieros.rentabilidad.schemas import (
     InputRentabilidad,
+    InputRentabilidadHistorico,
+    RentabilidadHistoricoResponse,
     RentabilidadResponse,
 )
 from app.modules.analytic.indicadores_financieros.rentabilidad.service import (
@@ -28,6 +30,38 @@ def rentabilidad(
     service: IndicadoresRentabilidadService = Depends(get_rentabilidad_service),
 ) -> RentabilidadResponse:
     return service.calcular_rentabilidad(
+        input_data=body,
+        auth_context=auth_context,
+    )
+
+
+@router.post(
+    "/indicadores-financieros/rentabilidad/historico-mensual",
+    response_model=RentabilidadHistoricoResponse,
+    summary="Consultar indicadores de rentabilidad mensuales",
+)
+def rentabilidad_historico_mensual(
+    body: InputRentabilidadHistorico,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: IndicadoresRentabilidadService = Depends(get_rentabilidad_service),
+) -> RentabilidadHistoricoResponse:
+    return service.consultar_rentabilidad_historico_mensual(
+        input_data=body,
+        auth_context=auth_context,
+    )
+
+
+@router.post(
+    "/indicadores-financieros/rentabilidad/historico-diario",
+    response_model=RentabilidadHistoricoResponse,
+    summary="Consultar indicadores de rentabilidad diarios",
+)
+def rentabilidad_historico_diario(
+    body: InputRentabilidadHistorico,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: IndicadoresRentabilidadService = Depends(get_rentabilidad_service),
+) -> RentabilidadHistoricoResponse:
+    return service.consultar_rentabilidad_historico_diario(
         input_data=body,
         auth_context=auth_context,
     )

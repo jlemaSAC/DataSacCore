@@ -172,7 +172,10 @@ def get_secondary_database_settings() -> SecondaryDatabaseSettings:
         host=_optional("ALT_DB_HOST", _optional("DB_HOST", "")),
         port=_optional_int("ALT_DB_PORT", _optional_int("DB_PORT", 1433)),
         name=_optional("ALT_DB_NAME", "SAC_PROVICIONES"),
-        driver=_optional("ALT_DB_DRIVER", _optional("DB_DRIVER", "ODBC Driver 18 for SQL Server")),
+        driver=_optional(
+            "ALT_DB_DRIVER",
+            _optional("DB_DRIVER", "ODBC Driver 18 for SQL Server"),
+        ),
         encrypt=_optional("ALT_DB_ENCRYPT", _optional("DB_ENCRYPT", "no")),
         trust_server_certificate=_optional(
             "ALT_DB_TRUST_SERVER_CERTIFICATE",

@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.settings import AppSettings, SettingsError, get_app_settings
 from app.db.mongo import check_mongo_connection
-from app.db.session import check_database_connection
+from app.db.session import check_database_connection, check_secondary_database_connection
 from app.modules.auth.router import router as auth_router
 from app.modules.analytic.router import router as analytic_router
 from app.modules.prestamos.router import router as prestamos_router
@@ -36,6 +36,25 @@ def verify_database_on_startup() -> None:
     logger.info("Conexion con la base de datos establecida correctamente. Check=%s ✅​ ", check_result)
 
 
+def verify_secondary_database_on_startup() -> None:
+    app_settings = get_app_settings()
+
+    if not app_settings.check_database_on_startup:
+        logger.warning("Verificacion de base de datos secundaria al iniciar desactivada")
+        return
+
+    try:
+        check_result = check_secondary_database_connection()
+    except (SettingsError, SQLAlchemyError) as exc:
+        logger.exception("No se pudo conectar con la base de datos secundaria al iniciar")
+        raise RuntimeError("No se pudo conectar con la base de datos secundaria al iniciar") from exc
+
+    logger.info(
+        "Conexion con la base de datos secundaria establecida correctamente. Check=%s ✅​",
+        check_result,
+    )
+
+
 def verify_mongo_on_startup() -> None:
     app_settings = get_app_settings()
 
@@ -55,6 +74,7 @@ def verify_mongo_on_startup() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     verify_database_on_startup()
+    verify_secondary_database_on_startup()
     verify_mongo_on_startup()
     yield
 
