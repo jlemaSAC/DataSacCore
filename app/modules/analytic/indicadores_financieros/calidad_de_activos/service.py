@@ -1,10 +1,20 @@
-from typing import Iterable
+from datetime import date, datetime, time
+from typing import Any, Iterable
 
 from fastapi import HTTPException
 
 from app.modules.analytic.indicadores_financieros.calidad_de_activos.schemas import (
+    CalidadDeActivosHistoricoItem,
+    CalidadDeActivosHistoricoResponse,
     CalidadDeActivosResponse,
     InputCalidadDeActivos,
+    InputCalidadDeActivosHistorico,
+)
+from app.modules.analytic.indicadores_financieros.fechas_historicas import (
+    MAX_FECHAS_POR_CONSULTA,
+    construir_fechas_consulta_diaria,
+    construir_fechas_consulta_mensual,
+    fecha_actual_ecuador,
 )
 from app.modules.auth.schemas import AuthContext
 from app.modules.contabilidad.repositories.sql_saldo_contable_repository import (
@@ -149,6 +159,16 @@ CUENTAS_ACTIVO = ("1",)
 CUENTAS_CARTERA_BRUTA = ("14", "1499")
 CUENTAS_CARTERA_REFINANCIADA = ("1410", "1412", "1436", "1460")
 CUENTAS_CARTERA_RESTRUCTURADA = ("1418", "1420", "1444", "1466", "1468")
+INDICADORES_CALIDAD_DE_ACTIVOS_HISTORICO = (
+    "morosidad_ampliada",
+    "morosidad_consumo",
+    "morosidad_inmobiliaria",
+    "morosidad_micro",
+    "activos_improductivos_netos_sobre_activo",
+    "cartera_refinanciada_restructurada_sobre_cartera_total",
+    "cartera_bruta_sobre_activos",
+    "cobertura_cartera_en_riesgo",
+)
 
 
 class IndicadoresCalidadDeActivosService:
@@ -165,34 +185,7 @@ class IndicadoresCalidadDeActivosService:
     ) -> CalidadDeActivosResponse:
         _ = auth_context
         try:
-            codigos = codigos_unicos(
-                (
-                    CARTERA_POR_VENCER_AMPLIADA,
-                    CARTERA_NO_DEVENGA_AMPLIADA,
-                    VENCIDA_AMPLIADA,
-                    CARTERA_POR_VENCER_CONSUMO,
-                    CARTERA_NO_DEVENGA_CONSUMO,
-                    VENCIDA_CONSUMO,
-                    CARTERA_POR_VENCER_INMOBILIARIA,
-                    CARTERA_NO_DEVENGA_INMOBILIARIA,
-                    VENCIDA_INMOBILIARIA,
-                    CARTERA_POR_VENCER_MICRO,
-                    CARTERA_NO_DEVENGA_MICRO,
-                    VENCIDA_MICRO,
-                    CUENTAS_FONDOS,
-                    CARTERA_NO_DEVENGA_ACTIVOS_IMPRODUCTIVOS,
-                    VENCIDA_ACTIVOS_IMPRODUCTIVOS,
-                    CUENTAS_POR_COBRAR,
-                    CUENTAS_BIENES_ADJUDICADOS,
-                    ("18",),
-                    CUENTAS_OTROS_ACTIVOS,
-                    CUENTAS_PROVISIONES_IMPRODUCTIVOS,
-                    CUENTAS_ACTIVO,
-                    CUENTAS_CARTERA_BRUTA,
-                    CUENTAS_CARTERA_REFINANCIADA,
-                    CUENTAS_CARTERA_RESTRUCTURADA,
-                )
-            )
+            codigos = obtener_codigos_cuentas_calidad_de_activos()
             saldos_raw = self.saldo_contable_repository.get_saldos_contables_con_neteo(
                 fecha=input_data.fecha_corte,
                 id_agencia=input_data.id_agencia,
@@ -206,75 +199,9 @@ class IndicadoresCalidadDeActivosService:
             for codigo in codigos:
                 saldos.setdefault(codigo, 0.0)
 
-            mora_ampliada, componentes_mora_ampliada = calcular_morosidad(
-                saldos,
-                cartera_por_vencer=CARTERA_POR_VENCER_AMPLIADA,
-                cartera_no_devenga=CARTERA_NO_DEVENGA_AMPLIADA,
-                vencida=VENCIDA_AMPLIADA,
-                prefijo="morosidad_ampliada",
-            )
-            mora_consumo, componentes_mora_consumo = calcular_morosidad(
-                saldos,
-                cartera_por_vencer=CARTERA_POR_VENCER_CONSUMO,
-                cartera_no_devenga=CARTERA_NO_DEVENGA_CONSUMO,
-                vencida=VENCIDA_CONSUMO,
-                prefijo="morosidad_consumo",
-            )
-            mora_inmobiliaria, componentes_mora_inmobiliaria = calcular_morosidad(
-                saldos,
-                cartera_por_vencer=CARTERA_POR_VENCER_INMOBILIARIA,
-                cartera_no_devenga=CARTERA_NO_DEVENGA_INMOBILIARIA,
-                vencida=VENCIDA_INMOBILIARIA,
-                prefijo="morosidad_inmobiliaria",
-            )
-            mora_micro, componentes_mora_micro = calcular_morosidad(
-                saldos,
-                cartera_por_vencer=CARTERA_POR_VENCER_MICRO,
-                cartera_no_devenga=CARTERA_NO_DEVENGA_MICRO,
-                vencida=VENCIDA_MICRO,
-                prefijo="morosidad_micro",
-            )
-            (
-                activos_improductivos_netos_sobre_activo,
-                componentes_activos_improductivos,
-            ) = calcular_activos_improductivos_netos_sobre_activo(saldos)
-            (
-                cartera_refinanciada_restructurada_sobre_cartera_total,
-                cartera_bruta_sobre_activos,
-                componentes_cartera,
-            ) = calcular_indicadores_cartera(saldos)
-            cobertura, componentes_cobertura = calcular_cobertura_cartera_en_riesgo(saldos)
-
-            componentes = {
-                **componentes_mora_ampliada,
-                **componentes_mora_consumo,
-                **componentes_mora_inmobiliaria,
-                **componentes_mora_micro,
-                **componentes_activos_improductivos,
-                **componentes_cartera,
-                **componentes_cobertura,
-            }
-
-            return CalidadDeActivosResponse(
-                fecha_corte=input_data.fecha_corte,
-                id_agencia=input_data.id_agencia,
-                neteo=1,
-                indicadores={
-                    "morosidad_ampliada": round_ratio(mora_ampliada),
-                    "morosidad_consumo": round_ratio(mora_consumo),
-                    "morosidad_inmobiliaria": round_ratio(mora_inmobiliaria),
-                    "morosidad_micro": round_ratio(mora_micro),
-                    "activos_improductivos_netos_sobre_activo": round_ratio(
-                        activos_improductivos_netos_sobre_activo
-                    ),
-                    "cartera_refinanciada_restructurada_sobre_cartera_total": round_ratio(
-                        cartera_refinanciada_restructurada_sobre_cartera_total
-                    ),
-                    "cartera_bruta_sobre_activos": round_ratio(cartera_bruta_sobre_activos),
-                    "cobertura_cartera_en_riesgo": round_ratio(cobertura),
-                },
-                saldos_cuentas={codigo: round_money(valor) for codigo, valor in sorted(saldos.items())},
-                componentes={codigo: round_money(valor) for codigo, valor in sorted(componentes.items())},
+            return self._calcular_calidad_de_activos_desde_saldos(
+                input_data=input_data,
+                saldos=saldos,
             )
         except HTTPException:
             raise
@@ -283,6 +210,252 @@ class IndicadoresCalidadDeActivosService:
                 status_code=500,
                 detail=f"Error calculando calidad de activos: {exc}",
             ) from exc
+
+    def consultar_calidad_de_activos_historico_mensual(
+        self,
+        input_data: InputCalidadDeActivosHistorico,
+        auth_context: AuthContext,
+    ) -> CalidadDeActivosHistoricoResponse:
+        _ = auth_context
+        try:
+            fechas_consulta = construir_fechas_consulta_mensual(
+                periodo_desde=input_data.periodo_desde,
+                periodo_hasta=input_data.periodo_hasta,
+                hoy=fecha_actual_ecuador(),
+            )
+            return self._consultar_calidad_de_activos_por_fechas(
+                input_data=input_data,
+                fechas_consulta=fechas_consulta,
+                formato_sin_datos="%Y-%m",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error calculando historico mensual de calidad de activos: {exc}",
+            ) from exc
+
+    def consultar_calidad_de_activos_historico_diario(
+        self,
+        input_data: InputCalidadDeActivosHistorico,
+        auth_context: AuthContext,
+    ) -> CalidadDeActivosHistoricoResponse:
+        _ = auth_context
+        try:
+            fechas_consulta = construir_fechas_consulta_diaria(
+                periodo_desde=input_data.periodo_desde,
+                periodo_hasta=input_data.periodo_hasta,
+                hoy=fecha_actual_ecuador(),
+            )
+            return self._consultar_calidad_de_activos_por_fechas(
+                input_data=input_data,
+                fechas_consulta=fechas_consulta,
+                formato_sin_datos="%Y-%m-%d",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error calculando historico diario de calidad de activos: {exc}",
+            ) from exc
+
+    def _consultar_calidad_de_activos_por_fechas(
+        self,
+        *,
+        input_data: InputCalidadDeActivosHistorico,
+        fechas_consulta: list[date],
+        formato_sin_datos: str,
+    ) -> CalidadDeActivosHistoricoResponse:
+        codigos = obtener_codigos_cuentas_calidad_de_activos()
+        saldos_raw: list[dict[str, Any]] = []
+        for posicion in range(0, len(fechas_consulta), MAX_FECHAS_POR_CONSULTA):
+            lote = fechas_consulta[posicion : posicion + MAX_FECHAS_POR_CONSULTA]
+            saldos_raw.extend(
+                self.saldo_contable_repository.get_saldos_contables_fechas_con_neteo(
+                    fechas=[datetime.combine(fecha, time.min) for fecha in lote],
+                    id_agencia=input_data.id_agencia,
+                    codigos_cuenta=codigos,
+                    neteo=1,
+                )
+            )
+
+        saldos_por_fecha = agrupar_saldos_por_fecha(saldos_raw)
+        datos: list[CalidadDeActivosHistoricoItem] = []
+        periodos_sin_datos: list[str] = []
+
+        for fecha_corte in fechas_consulta:
+            saldos = saldos_por_fecha.get(fecha_corte)
+            if not saldos:
+                periodos_sin_datos.append(fecha_corte.strftime(formato_sin_datos))
+                continue
+
+            for codigo in codigos:
+                saldos.setdefault(codigo, 0.0)
+            resultado = self._calcular_calidad_de_activos_desde_saldos(
+                input_data=InputCalidadDeActivos(
+                    fecha_corte=datetime.combine(fecha_corte, time.min),
+                    id_agencia=input_data.id_agencia,
+                ),
+                saldos=saldos,
+            )
+            valores = {
+                nombre: resultado.indicadores.get(nombre)
+                for nombre in INDICADORES_CALIDAD_DE_ACTIVOS_HISTORICO
+            }
+            datos.append(
+                CalidadDeActivosHistoricoItem(
+                    fecha_corte=fecha_corte,
+                    anio=fecha_corte.year,
+                    mes=fecha_corte.month,
+                    dia=fecha_corte.day,
+                    **valores,
+                )
+            )
+
+        return CalidadDeActivosHistoricoResponse(
+            id_agencia=input_data.id_agencia,
+            periodo_desde=input_data.periodo_desde,
+            periodo_hasta=input_data.periodo_hasta,
+            neteo=1,
+            datos=datos,
+            periodos_sin_datos=periodos_sin_datos,
+        )
+
+    def _calcular_calidad_de_activos_desde_saldos(
+        self,
+        *,
+        input_data: InputCalidadDeActivos,
+        saldos: dict[str, float],
+    ) -> CalidadDeActivosResponse:
+        mora_ampliada, componentes_mora_ampliada = calcular_morosidad(
+            saldos,
+            cartera_por_vencer=CARTERA_POR_VENCER_AMPLIADA,
+            cartera_no_devenga=CARTERA_NO_DEVENGA_AMPLIADA,
+            vencida=VENCIDA_AMPLIADA,
+            prefijo="morosidad_ampliada",
+        )
+        mora_consumo, componentes_mora_consumo = calcular_morosidad(
+            saldos,
+            cartera_por_vencer=CARTERA_POR_VENCER_CONSUMO,
+            cartera_no_devenga=CARTERA_NO_DEVENGA_CONSUMO,
+            vencida=VENCIDA_CONSUMO,
+            prefijo="morosidad_consumo",
+        )
+        mora_inmobiliaria, componentes_mora_inmobiliaria = calcular_morosidad(
+            saldos,
+            cartera_por_vencer=CARTERA_POR_VENCER_INMOBILIARIA,
+            cartera_no_devenga=CARTERA_NO_DEVENGA_INMOBILIARIA,
+            vencida=VENCIDA_INMOBILIARIA,
+            prefijo="morosidad_inmobiliaria",
+        )
+        mora_micro, componentes_mora_micro = calcular_morosidad(
+            saldos,
+            cartera_por_vencer=CARTERA_POR_VENCER_MICRO,
+            cartera_no_devenga=CARTERA_NO_DEVENGA_MICRO,
+            vencida=VENCIDA_MICRO,
+            prefijo="morosidad_micro",
+        )
+        (
+            activos_improductivos_netos_sobre_activo,
+            componentes_activos_improductivos,
+        ) = calcular_activos_improductivos_netos_sobre_activo(saldos)
+        (
+            cartera_refinanciada_restructurada_sobre_cartera_total,
+            cartera_bruta_sobre_activos,
+            componentes_cartera,
+        ) = calcular_indicadores_cartera(saldos)
+        cobertura, componentes_cobertura = calcular_cobertura_cartera_en_riesgo(saldos)
+
+        componentes = {
+            **componentes_mora_ampliada,
+            **componentes_mora_consumo,
+            **componentes_mora_inmobiliaria,
+            **componentes_mora_micro,
+            **componentes_activos_improductivos,
+            **componentes_cartera,
+            **componentes_cobertura,
+        }
+
+        return CalidadDeActivosResponse(
+            fecha_corte=input_data.fecha_corte,
+            id_agencia=input_data.id_agencia,
+            neteo=1,
+            indicadores={
+                "morosidad_ampliada": round_ratio(mora_ampliada),
+                "morosidad_consumo": round_ratio(mora_consumo),
+                "morosidad_inmobiliaria": round_ratio(mora_inmobiliaria),
+                "morosidad_micro": round_ratio(mora_micro),
+                "activos_improductivos_netos_sobre_activo": round_ratio(
+                    activos_improductivos_netos_sobre_activo
+                ),
+                "cartera_refinanciada_restructurada_sobre_cartera_total": round_ratio(
+                    cartera_refinanciada_restructurada_sobre_cartera_total
+                ),
+                "cartera_bruta_sobre_activos": round_ratio(cartera_bruta_sobre_activos),
+                "cobertura_cartera_en_riesgo": round_ratio(cobertura),
+            },
+            saldos_cuentas={codigo: round_money(valor) for codigo, valor in sorted(saldos.items())},
+            componentes={codigo: round_money(valor) for codigo, valor in sorted(componentes.items())},
+        )
+
+
+def obtener_codigos_cuentas_calidad_de_activos() -> list[str]:
+    return codigos_unicos(
+        (
+            CARTERA_POR_VENCER_AMPLIADA,
+            CARTERA_NO_DEVENGA_AMPLIADA,
+            VENCIDA_AMPLIADA,
+            CARTERA_POR_VENCER_CONSUMO,
+            CARTERA_NO_DEVENGA_CONSUMO,
+            VENCIDA_CONSUMO,
+            CARTERA_POR_VENCER_INMOBILIARIA,
+            CARTERA_NO_DEVENGA_INMOBILIARIA,
+            VENCIDA_INMOBILIARIA,
+            CARTERA_POR_VENCER_MICRO,
+            CARTERA_NO_DEVENGA_MICRO,
+            VENCIDA_MICRO,
+            CUENTAS_FONDOS,
+            CARTERA_NO_DEVENGA_ACTIVOS_IMPRODUCTIVOS,
+            VENCIDA_ACTIVOS_IMPRODUCTIVOS,
+            CUENTAS_POR_COBRAR,
+            CUENTAS_BIENES_ADJUDICADOS,
+            ("18",),
+            CUENTAS_OTROS_ACTIVOS,
+            CUENTAS_PROVISIONES_IMPRODUCTIVOS,
+            CUENTAS_ACTIVO,
+            CUENTAS_CARTERA_BRUTA,
+            CUENTAS_CARTERA_REFINANCIADA,
+            CUENTAS_CARTERA_RESTRUCTURADA,
+        )
+    )
+
+
+def agrupar_saldos_por_fecha(
+    saldos_raw: Iterable[dict[str, Any]],
+) -> dict[date, dict[str, float]]:
+    saldos_por_fecha: dict[date, dict[str, float]] = {}
+    for item in saldos_raw:
+        fecha = normalizar_fecha(item.get("Fecha"))
+        codigo = str(item.get("CodigoCuenta") or "").strip()
+        if fecha is None or not codigo:
+            continue
+        saldos_por_fecha.setdefault(fecha, {})[codigo] = float(item.get("SaldoFinal") or 0.0)
+    return saldos_por_fecha
+
+
+def normalizar_fecha(valor: Any) -> date | None:
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    if isinstance(valor, str):
+        try:
+            return datetime.fromisoformat(valor).date()
+        except ValueError:
+            return None
+    return None
 
 
 def codigos_unicos(grupos: Iterable[Iterable[str]]) -> list[str]:
