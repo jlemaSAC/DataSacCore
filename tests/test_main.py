@@ -3,12 +3,28 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.settings import AppSettings, get_app_settings, get_database_settings, get_mongo_settings
+from app.core.settings import (
+    AppSettings,
+    get_app_settings,
+    get_database_settings,
+    get_mongo_settings,
+    get_secondary_database_settings,
+)
 from app.db.mongo import get_mongo_client, get_mongo_client_sync
-from app.db.session import get_engine, get_session_factory
+from app.db.session import (
+    get_engine,
+    get_secondary_engine,
+    get_secondary_session_factory,
+    get_session_factory,
+)
 from app.main import add_cors_middleware, app
-from app.main import verify_database_on_startup, verify_mongo_on_startup
+from app.main import (
+    verify_database_on_startup,
+    verify_mongo_on_startup,
+    verify_secondary_database_on_startup,
+)
 from app.models import import_all_models
 from app.modules.auth.dependencies import get_auth_service
 
@@ -43,8 +59,11 @@ MONGO_ENV_VARS = (
 
 def clear_database_caches() -> None:
     get_database_settings.cache_clear()
+    get_secondary_database_settings.cache_clear()
     get_engine.cache_clear()
+    get_secondary_engine.cache_clear()
     get_session_factory.cache_clear()
+    get_secondary_session_factory.cache_clear()
 
 
 def clear_mongo_caches() -> None:
@@ -159,6 +178,48 @@ def test_app_settings_reads_cors_origins_from_env(monkeypatch) -> None:
     get_app_settings.cache_clear()
 
 
+def test_secondary_database_settings_reuse_primary_connection(monkeypatch) -> None:
+    primary_values = {
+        "DB_USER": "primary-user",
+        "DB_PASSWORD": "primary-password",
+        "DB_HOST": "sql.example.internal",
+        "DB_PORT": "1444",
+        "DB_DRIVER": "ODBC Driver 18 for SQL Server",
+        "DB_ENCRYPT": "yes",
+        "DB_TRUST_SERVER_CERTIFICATE": "yes",
+        "DB_QUERY_TIMEOUT": "45",
+    }
+    for name, value in primary_values.items():
+        monkeypatch.setenv(name, value)
+    for name in (
+        "ALT_DB_USER",
+        "ALT_DB_PASSWORD",
+        "ALT_DB_HOST",
+        "ALT_DB_PORT",
+        "ALT_DB_NAME",
+        "ALT_DB_DRIVER",
+        "ALT_DB_ENCRYPT",
+        "ALT_DB_TRUST_SERVER_CERTIFICATE",
+        "ALT_DB_QUERY_TIMEOUT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    get_secondary_database_settings.cache_clear()
+
+    settings = get_secondary_database_settings()
+
+    assert settings.user == "primary-user"
+    assert settings.password == "primary-password"
+    assert settings.host == "sql.example.internal"
+    assert settings.port == 1444
+    assert settings.name == "SAC_PROVICIONES"
+    assert settings.driver == "ODBC Driver 18 for SQL Server"
+    assert settings.encrypt == "yes"
+    assert settings.trust_server_certificate == "yes"
+    assert settings.query_timeout == 45
+
+    get_secondary_database_settings.cache_clear()
+
+
 def test_cors_middleware_allows_any_origin_in_dev() -> None:
     cors_app = FastAPI()
 
@@ -214,12 +275,58 @@ def test_mongo_health_check_without_settings(monkeypatch) -> None:
     assert response.json()["detail"]["message"] == "MongoDB no configurado"
 
 
+def test_secondary_database_health_check(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.routers.health.check_secondary_database_connection",
+        lambda: 1,
+    )
+
+    response = client.get("/health/db-secondary")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "database_secondary": "connected",
+        "check": 1,
+    }
+
+
+def test_secondary_database_health_check_reports_unavailable(monkeypatch) -> None:
+    def fail_connection() -> int:
+        raise SQLAlchemyError("connection failed")
+
+    monkeypatch.setattr(
+        "app.routers.health.check_secondary_database_connection",
+        fail_connection,
+    )
+
+    response = client.get("/health/db-secondary")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["message"] == "Base de datos secundaria no disponible"
+
+
 def test_startup_database_check_can_be_disabled(monkeypatch) -> None:
     monkeypatch.setenv("CHECK_DATABASE_ON_STARTUP", "false")
     get_app_settings.cache_clear()
     clear_database_caches()
 
     verify_database_on_startup()
+
+    get_app_settings.cache_clear()
+    clear_database_caches()
+
+
+def test_startup_secondary_database_check_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("CHECK_DATABASE_ON_STARTUP", "false")
+    monkeypatch.setattr(
+        "app.main.check_secondary_database_connection",
+        lambda: (_ for _ in ()).throw(AssertionError("No debe intentar conectarse")),
+    )
+    get_app_settings.cache_clear()
+    clear_database_caches()
+
+    verify_secondary_database_on_startup()
 
     get_app_settings.cache_clear()
     clear_database_caches()

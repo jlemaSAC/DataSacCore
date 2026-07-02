@@ -1,9 +1,15 @@
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
+from app.modules.analytic.indicadores_financieros.fechas_historicas import (
+    MAX_FECHAS_POR_CONSULTA,
+    construir_fechas_consulta_diaria,
+    construir_fechas_consulta_mensual,
+    fecha_actual_ecuador,
+)
 from app.modules.auth.schemas import AuthContext
 from app.modules.contabilidad.repositories.sql_saldo_contable_repository import (
     SqlSaldoContableRepository,
@@ -17,6 +23,9 @@ from app.modules.analytic.indicadores_financieros.solvencia.repositories.sql_sol
 )
 from app.modules.analytic.indicadores_financieros.solvencia.schemas import (
     InputSolvencia,
+    InputSolvenciaHistorico,
+    SolvenciaHistoricoItem,
+    SolvenciaHistoricoResponse,
     SolvenciaResponse,
 )
 
@@ -126,6 +135,12 @@ CUENTAS_RIESGO_CIEN_RESTAS = (
 CUENTAS_RIESGO_DOSCIENTOS = ("1407", "1415", "1423", "1431", "1439", "1447", "1455", "1463", "1471")
 
 TIMEZONE_ECUADOR = ZoneInfo("America/Guayaquil")
+INDICADORES_SOLVENCIA_HISTORICO = (
+    "solvencia",
+    "activos_fijos_sobre_patrimonio_tecnico",
+    "patrimonio_sobre_activo",
+    "patrimonio_resultados_sobre_activos_improductivos_netos",
+)
 
 
 class IndicadoresFinancierosService:
@@ -146,22 +161,7 @@ class IndicadoresFinancierosService:
     ) -> SolvenciaResponse:
         _ = auth_context
         try:
-            codigos = codigos_unicos(
-                (
-                    CUENTAS_PTC_PRIMARIO,
-                    CUENTAS_PTC_SECUNDARIO,
-                    CUENTAS_UTILIDAD,
-                    CUENTAS_PROVISION_CONSTITUIDA,
-                    CUENTAS_PATRIMONIO_SOBRE_ACTIVO,
-                    CUENTAS_ACTIVOS_IMPRODUCTIVOS_NETOS,
-                    CUENTAS_RIESGO_CERO,
-                    CUENTAS_RIESGO_VEINTE,
-                    CUENTAS_RIESGO_CINCUENTA,
-                    CUENTAS_RIESGO_CIEN_BASE,
-                    CUENTAS_RIESGO_CIEN_RESTAS,
-                    CUENTAS_RIESGO_DOSCIENTOS,
-                )
-            )
+            codigos = obtener_codigos_cuentas_solvencia()
             saldos_raw = self.saldo_contable_repository.get_saldos_contables_con_neteo(
                 fecha=input_data.fecha_corte,
                 id_agencia=input_data.id_agencia,
@@ -175,86 +175,7 @@ class IndicadoresFinancierosService:
             for codigo in codigos:
                 saldos.setdefault(codigo, 0.0)
 
-            mes = input_data.fecha_corte.month
-            utilidad = calcular_utilidad(saldos)
-            deficiencia_info = self.calcular_deficiencia(input_data=input_data, saldos=saldos)
-            deficiencia = float(deficiencia_info.get("deficiencia") or 0.0)
-            ptc_primario, componentes_primario = calcular_patrimonio_tecnico_primario(
-                saldos,
-                mes=mes,
-                utilidad=utilidad,
-            )
-            ptc_secundario, componentes_secundario = calcular_patrimonio_tecnico_secundario(
-                saldos,
-                mes=mes,
-                utilidad=utilidad,
-                deficiencia=deficiencia,
-            )
-            patrimonio_tecnico_constituido = ptc_primario + ptc_secundario
-            activos_fijos_sobre_patrimonio_tecnico = (
-                saldos.get("18", 0.0) / patrimonio_tecnico_constituido
-                if patrimonio_tecnico_constituido != 0
-                else None
-            )
-            patrimonio_sobre_activo = (
-                saldos.get("3", 0.0) / saldos.get("1", 0.0)
-                if saldos.get("1", 0.0) != 0
-                else None
-            )
-            activos_improductivos_netos = calcular_activos_improductivos_netos(saldos)
-            patrimonio_resultados_sobre_activos_improductivos_netos = (
-                (saldos.get("3", 0.0) + utilidad) / activos_improductivos_netos
-                if activos_improductivos_netos != 0
-                else None
-            )
-            activos_ponderados, componentes_riesgo = calcular_activos_ponderados_por_riesgo(saldos)
-            solvencia = (
-                patrimonio_tecnico_constituido / activos_ponderados
-                if activos_ponderados != 0
-                else None
-            )
-            componentes = {
-                **componentes_primario,
-                **componentes_secundario,
-                **componentes_riesgo,
-            }
-
-            return SolvenciaResponse(
-                fecha_corte=input_data.fecha_corte,
-                id_agencia=input_data.id_agencia,
-                neteo=1,
-                mes=mes,
-                deficiencia=round_money(deficiencia),
-                deficiencia_fuente=str(deficiencia_info.get("fuente") or ""),
-                provision_requerida=round_money(deficiencia_info.get("provision_requerida") or 0.0),
-                provision_constituida=round_money(deficiencia_info.get("provision_constituida") or 0.0),
-                utilidad=round_money(utilidad),
-                patrimonio_tecnico_primario=round_money(ptc_primario),
-                patrimonio_tecnico_secundario=round_money(ptc_secundario),
-                patrimonio_tecnico_constituido=round_money(patrimonio_tecnico_constituido),
-                activos_improductivos_netos=round_money(activos_improductivos_netos),
-                activos_ponderados_por_riesgo=round_money(activos_ponderados),
-                indicadores={
-                    "solvencia": round(solvencia, 6) if solvencia is not None else None,
-                    "activos_fijos_sobre_patrimonio_tecnico": (
-                        round(activos_fijos_sobre_patrimonio_tecnico, 6)
-                        if activos_fijos_sobre_patrimonio_tecnico is not None
-                        else None
-                    ),
-                    "patrimonio_sobre_activo": (
-                        round(patrimonio_sobre_activo, 6)
-                        if patrimonio_sobre_activo is not None
-                        else None
-                    ),
-                    "patrimonio_resultados_sobre_activos_improductivos_netos": (
-                        round(patrimonio_resultados_sobre_activos_improductivos_netos, 6)
-                        if patrimonio_resultados_sobre_activos_improductivos_netos is not None
-                        else None
-                    ),
-                },
-                saldos_cuentas={codigo: round_money(valor) for codigo, valor in sorted(saldos.items())},
-                componentes={codigo: round_money(valor) for codigo, valor in sorted(componentes.items())},
-            )
+            return self._calcular_solvencia_desde_saldos(input_data=input_data, saldos=saldos)
         except HTTPException:
             raise
         except Exception as exc:
@@ -262,6 +183,212 @@ class IndicadoresFinancierosService:
                 status_code=500,
                 detail=f"Error calculando solvencia: {exc}",
             ) from exc
+
+    def consultar_solvencia_historico_mensual(
+        self,
+        input_data: InputSolvenciaHistorico,
+        auth_context: AuthContext,
+    ) -> SolvenciaHistoricoResponse:
+        _ = auth_context
+        try:
+            fechas_consulta = construir_fechas_consulta_mensual(
+                periodo_desde=input_data.periodo_desde,
+                periodo_hasta=input_data.periodo_hasta,
+                hoy=fecha_actual_ecuador(),
+            )
+            return self._consultar_solvencia_por_fechas(
+                input_data=input_data,
+                fechas_consulta=fechas_consulta,
+                formato_sin_datos="%Y-%m",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error calculando historico mensual de solvencia: {exc}",
+            ) from exc
+
+    def consultar_solvencia_historico_diario(
+        self,
+        input_data: InputSolvenciaHistorico,
+        auth_context: AuthContext,
+    ) -> SolvenciaHistoricoResponse:
+        _ = auth_context
+        try:
+            fechas_consulta = construir_fechas_consulta_diaria(
+                periodo_desde=input_data.periodo_desde,
+                periodo_hasta=input_data.periodo_hasta,
+                hoy=fecha_actual_ecuador(),
+            )
+            return self._consultar_solvencia_por_fechas(
+                input_data=input_data,
+                fechas_consulta=fechas_consulta,
+                formato_sin_datos="%Y-%m-%d",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error calculando historico diario de solvencia: {exc}",
+            ) from exc
+
+    def _consultar_solvencia_por_fechas(
+        self,
+        *,
+        input_data: InputSolvenciaHistorico,
+        fechas_consulta: list[date],
+        formato_sin_datos: str,
+    ) -> SolvenciaHistoricoResponse:
+        codigos = obtener_codigos_cuentas_solvencia()
+        saldos_raw: list[dict[str, Any]] = []
+        for posicion in range(0, len(fechas_consulta), MAX_FECHAS_POR_CONSULTA):
+            lote = fechas_consulta[posicion : posicion + MAX_FECHAS_POR_CONSULTA]
+            saldos_raw.extend(
+                self.saldo_contable_repository.get_saldos_contables_fechas_con_neteo(
+                    fechas=[datetime.combine(fecha, time.min) for fecha in lote],
+                    id_agencia=input_data.id_agencia,
+                    codigos_cuenta=codigos,
+                    neteo=1,
+                )
+            )
+
+        saldos_por_fecha = agrupar_saldos_por_fecha(saldos_raw)
+        datos: list[SolvenciaHistoricoItem] = []
+        periodos_sin_datos: list[str] = []
+
+        for fecha_corte in fechas_consulta:
+            saldos = saldos_por_fecha.get(fecha_corte)
+            if not saldos:
+                periodos_sin_datos.append(fecha_corte.strftime(formato_sin_datos))
+                continue
+
+            for codigo in codigos:
+                saldos.setdefault(codigo, 0.0)
+            try:
+                resultado = self._calcular_solvencia_desde_saldos(
+                    input_data=InputSolvencia(
+                        fecha_corte=datetime.combine(fecha_corte, time.min),
+                        id_agencia=input_data.id_agencia,
+                    ),
+                    saldos=saldos,
+                )
+            except HTTPException as exc:
+                if not es_error_situacion_crediticia_sin_datos(exc):
+                    raise
+                periodos_sin_datos.append(fecha_corte.strftime(formato_sin_datos))
+                continue
+
+            valores = {
+                nombre: resultado.indicadores.get(nombre)
+                for nombre in INDICADORES_SOLVENCIA_HISTORICO
+            }
+            datos.append(
+                SolvenciaHistoricoItem(
+                    fecha_corte=fecha_corte,
+                    anio=fecha_corte.year,
+                    mes=fecha_corte.month,
+                    dia=fecha_corte.day,
+                    **valores,
+                )
+            )
+
+        return SolvenciaHistoricoResponse(
+            id_agencia=input_data.id_agencia,
+            periodo_desde=input_data.periodo_desde,
+            periodo_hasta=input_data.periodo_hasta,
+            neteo=1,
+            datos=datos,
+            periodos_sin_datos=periodos_sin_datos,
+        )
+
+    def _calcular_solvencia_desde_saldos(
+        self,
+        *,
+        input_data: InputSolvencia,
+        saldos: dict[str, float],
+    ) -> SolvenciaResponse:
+        mes = input_data.fecha_corte.month
+        utilidad = calcular_utilidad(saldos)
+        deficiencia_info = self.calcular_deficiencia(input_data=input_data, saldos=saldos)
+        deficiencia = float(deficiencia_info.get("deficiencia") or 0.0)
+        ptc_primario, componentes_primario = calcular_patrimonio_tecnico_primario(
+            saldos,
+            mes=mes,
+            utilidad=utilidad,
+        )
+        ptc_secundario, componentes_secundario = calcular_patrimonio_tecnico_secundario(
+            saldos,
+            mes=mes,
+            utilidad=utilidad,
+            deficiencia=deficiencia,
+        )
+        patrimonio_tecnico_constituido = ptc_primario + ptc_secundario
+        activos_fijos_sobre_patrimonio_tecnico = (
+            saldos.get("18", 0.0) / patrimonio_tecnico_constituido
+            if patrimonio_tecnico_constituido != 0
+            else None
+        )
+        patrimonio_sobre_activo = (
+            saldos.get("3", 0.0) / saldos.get("1", 0.0)
+            if saldos.get("1", 0.0) != 0
+            else None
+        )
+        activos_improductivos_netos = calcular_activos_improductivos_netos(saldos)
+        patrimonio_resultados_sobre_activos_improductivos_netos = (
+            (saldos.get("3", 0.0) + utilidad) / activos_improductivos_netos
+            if activos_improductivos_netos != 0
+            else None
+        )
+        activos_ponderados, componentes_riesgo = calcular_activos_ponderados_por_riesgo(saldos)
+        solvencia = (
+            patrimonio_tecnico_constituido / activos_ponderados
+            if activos_ponderados != 0
+            else None
+        )
+        componentes = {
+            **componentes_primario,
+            **componentes_secundario,
+            **componentes_riesgo,
+        }
+
+        return SolvenciaResponse(
+            fecha_corte=input_data.fecha_corte,
+            id_agencia=input_data.id_agencia,
+            neteo=1,
+            mes=mes,
+            deficiencia=round_money(deficiencia),
+            deficiencia_fuente=str(deficiencia_info.get("fuente") or ""),
+            provision_requerida=round_money(deficiencia_info.get("provision_requerida") or 0.0),
+            provision_constituida=round_money(deficiencia_info.get("provision_constituida") or 0.0),
+            utilidad=round_money(utilidad),
+            patrimonio_tecnico_primario=round_money(ptc_primario),
+            patrimonio_tecnico_secundario=round_money(ptc_secundario),
+            patrimonio_tecnico_constituido=round_money(patrimonio_tecnico_constituido),
+            activos_improductivos_netos=round_money(activos_improductivos_netos),
+            activos_ponderados_por_riesgo=round_money(activos_ponderados),
+            indicadores={
+                "solvencia": round(solvencia, 6) if solvencia is not None else None,
+                "activos_fijos_sobre_patrimonio_tecnico": (
+                    round(activos_fijos_sobre_patrimonio_tecnico, 6)
+                    if activos_fijos_sobre_patrimonio_tecnico is not None
+                    else None
+                ),
+                "patrimonio_sobre_activo": (
+                    round(patrimonio_sobre_activo, 6)
+                    if patrimonio_sobre_activo is not None
+                    else None
+                ),
+                "patrimonio_resultados_sobre_activos_improductivos_netos": (
+                    round(patrimonio_resultados_sobre_activos_improductivos_netos, 6)
+                    if patrimonio_resultados_sobre_activos_improductivos_netos is not None
+                    else None
+                ),
+            },
+            saldos_cuentas={codigo: round_money(valor) for codigo, valor in sorted(saldos.items())},
+            componentes={codigo: round_money(valor) for codigo, valor in sorted(componentes.items())},
+        )
 
     def calcular_deficiencia(
         self,
@@ -342,6 +469,55 @@ class IndicadoresFinancierosService:
             "provision_requerida": provision_requerida,
             "provision_constituida": 0.0,
         }
+
+
+def obtener_codigos_cuentas_solvencia() -> list[str]:
+    return codigos_unicos(
+        (
+            CUENTAS_PTC_PRIMARIO,
+            CUENTAS_PTC_SECUNDARIO,
+            CUENTAS_UTILIDAD,
+            CUENTAS_PROVISION_CONSTITUIDA,
+            CUENTAS_PATRIMONIO_SOBRE_ACTIVO,
+            CUENTAS_ACTIVOS_IMPRODUCTIVOS_NETOS,
+            CUENTAS_RIESGO_CERO,
+            CUENTAS_RIESGO_VEINTE,
+            CUENTAS_RIESGO_CINCUENTA,
+            CUENTAS_RIESGO_CIEN_BASE,
+            CUENTAS_RIESGO_CIEN_RESTAS,
+            CUENTAS_RIESGO_DOSCIENTOS,
+        )
+    )
+
+
+def agrupar_saldos_por_fecha(
+    saldos_raw: Iterable[dict[str, Any]],
+) -> dict[date, dict[str, float]]:
+    saldos_por_fecha: dict[date, dict[str, float]] = {}
+    for item in saldos_raw:
+        fecha = normalizar_fecha(item.get("Fecha"))
+        codigo = str(item.get("CodigoCuenta") or "").strip()
+        if fecha is None or not codigo:
+            continue
+        saldos_por_fecha.setdefault(fecha, {})[codigo] = float(item.get("SaldoFinal") or 0.0)
+    return saldos_por_fecha
+
+
+def normalizar_fecha(valor: Any) -> date | None:
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    if isinstance(valor, str):
+        try:
+            return datetime.fromisoformat(valor).date()
+        except ValueError:
+            return None
+    return None
+
+
+def es_error_situacion_crediticia_sin_datos(exc: HTTPException) -> bool:
+    return exc.status_code == 422 and "No hay datos en SituacionCrediticia" in str(exc.detail)
 
 
 def round_money(valor: float) -> float:
