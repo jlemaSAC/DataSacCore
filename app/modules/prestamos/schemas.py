@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field
 
 
 class PrestamoUniverseRequest(BaseModel):
@@ -110,41 +110,3 @@ class UniversoPrestamosBuscarResponse(BaseModel):
     actual: list[PrestamoSnapshot] = Field(default_factory=list)
     historico: list[PrestamoSnapshot] = Field(default_factory=list)
     conteos: UniversoPrestamosConteos
-
-
-class SituacionCrediticiaActualSyncRequest(BaseModel):
-    limit: int | None = Field(default=None, ge=1)
-    confirmar_carga_total: bool = False
-
-    @model_validator(mode="after")
-    def validar_carga_total(self) -> "SituacionCrediticiaActualSyncRequest":
-        if self.limit is None and not self.confirmar_carga_total:
-            raise ValueError("Enviar limit para pruebas o confirmar_carga_total=true para una carga completa.")
-        return self
-
-
-class SituacionCrediticiaActualSyncTimings(BaseModel):
-    ensure_indexes_ms: float
-    sql_read_ms: float
-    python_map_ms: float
-    mongo_upsert_ms: float
-    total_ms: float
-
-
-class SituacionCrediticiaActualSyncResponse(BaseModel):
-    collection: str
-    data_version: str
-    as_of: datetime
-    total_leidos_sql: int
-    total_upserted: int
-    total_matched: int
-    total_modified: int
-    total_sin_cambios: int = 0
-    timings_ms: SituacionCrediticiaActualSyncTimings
-
-    @field_validator("data_version")
-    @classmethod
-    def validar_data_version(cls, data_version: str) -> str:
-        if not data_version.strip():
-            raise ValueError("data_version no puede estar vacio.")
-        return data_version
