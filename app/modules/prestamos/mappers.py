@@ -1,5 +1,3 @@
-import hashlib
-import json
 from datetime import date, datetime
 from typing import Any, Mapping
 
@@ -125,95 +123,6 @@ def prestamo_snapshot_from_mongo(document: Mapping[str, Any]) -> PrestamoSnapsho
         valor_cancelar_total=to_float_safe(pick_first(document, "ValorCancelarTotal", "valor_cancelar_total")),
         data_version=pick_first(document, "data_version", "DataVersion"),
     )
-
-
-def prestamo_snapshot_from_sql_row(row: Mapping[str, Any]) -> PrestamoSnapshot:
-    return prestamo_snapshot_from_mongo(row)
-
-
-def mongo_document_from_snapshot(
-    snapshot: PrestamoSnapshot,
-    *,
-    as_of: datetime,
-    data_version: str,
-    source: str = "sql_core",
-) -> dict[str, Any]:
-    document = {
-        "IdPrestamo": snapshot.id_prestamo,
-        "NumeroPrestamo": snapshot.numero_prestamo,
-        "IdAgencia": snapshot.id_agencia,
-        "Agencia": snapshot.agencia,
-        "CodigoEstadoPrestamo": snapshot.codigo_estado_prestamo,
-        "EstadoPrestamo": snapshot.estado_prestamo,
-        "EsCancelado": snapshot.es_cancelado,
-        "EsDiferido": snapshot.es_diferido,
-        "CodigoAsesor": snapshot.codigo_asesor,
-        "NombreAsesor": snapshot.nombre_asesor,
-        "IdCargoAsesor": snapshot.id_cargo_asesor,
-        "CargoAsesor": snapshot.cargo_asesor,
-        "CodigoUsuarioControl": snapshot.codigo_usuario_control,
-        "UsuarioControl": snapshot.usuario_control,
-        "CodigoUsuarioCobranzaApoyo": snapshot.codigo_usuario_cobranza_apoyo,
-        "CobranzaApoyo": snapshot.cobranza_apoyo,
-        "Calificacion": snapshot.calificacion,
-        "DiasVencidos": snapshot.dias_vencidos,
-        "Producto": snapshot.producto,
-        "TipoPrestamo": snapshot.tipo_prestamo,
-        "Provincia": snapshot.provincia,
-        "SaldoCapital": snapshot.saldo_capital,
-        "CapitalVigente": snapshot.capital_vigente,
-        "CapitalNoDevenga": snapshot.capital_no_devenga,
-        "CapitalVencido": snapshot.capital_vencido,
-        "ProvisionRequerida": snapshot.provision_requerida,
-        "ProvisionRequeridaFuente": snapshot.provision_requerida_fuente,
-        "ProvisionRequeridaCalculada": snapshot.provision_requerida_calculada,
-        "ProvisionConstituida": snapshot.provision_constituida,
-        "PorcentajeProvisionAplicado": snapshot.porcentaje_provision_aplicado,
-        "PorcentajeProvisionFuente": snapshot.porcentaje_provision_fuente,
-        "PorcentajeProvisionMinimo": snapshot.porcentaje_provision_minimo,
-        "PorcentajeProvisionMaximo": snapshot.porcentaje_provision_maximo,
-        "EsPorcentajeFijo": snapshot.es_porcentaje_fijo,
-        "ProvisionDiferenciaValidacion": snapshot.provision_diferencia_validacion,
-        "ExigibleCapital": snapshot.exigible_capital,
-        "ExigibleInteres": snapshot.exigible_interes,
-        "ExigibleMora": snapshot.exigible_mora,
-        "ExigibleOtros": snapshot.exigible_otros,
-        "ValorParaEstarAlDia": snapshot.valor_para_estar_al_dia,
-        "ValorHastaCuotaActual": snapshot.valor_hasta_cuota_actual,
-        "ValorCancelarTotal": snapshot.valor_cancelar_total,
-    }
-    document["SnapshotHash"] = snapshot_hash(document)
-    document.update(
-        {
-            "source": source,
-            "as_of": as_of,
-            "data_version": data_version,
-            "updated_at": as_of,
-        }
-    )
-    return document
-
-
-def snapshot_hash(document: Mapping[str, Any]) -> str:
-    canonical_payload = json.dumps(
-        {
-            key: value
-            for key, value in document.items()
-            if key
-            not in {
-                "SnapshotHash",
-                "source",
-                "as_of",
-                "data_version",
-                "updated_at",
-                "created_at",
-            }
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
 
 
 def _es_cancelado(codigo_estado: Any, estado: Any) -> bool:

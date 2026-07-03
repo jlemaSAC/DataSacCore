@@ -6,11 +6,7 @@ from app.main import app
 from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.auth.schemas import AuthContext, UsuarioTokenPayload
 from app.modules.prestamos.dependencies import get_universo_prestamos_service
-from app.modules.prestamos.schemas import (
-    PrestamoSnapshot,
-    PrestamoUniverseRequest,
-    SituacionCrediticiaActualSyncRequest,
-)
+from app.modules.prestamos.schemas import PrestamoSnapshot, PrestamoUniverseRequest
 from app.modules.prestamos.service import UniversoPrestamosService
 
 
@@ -27,9 +23,6 @@ class FakeUniversoRepository:
         self.historico = historico or []
         self.last_actual_filters = None
         self.last_historico_filters = None
-        self.indexes_created = False
-        self.last_upsert_snapshots = None
-        self.last_upsert_data_version = None
 
     def get_actual_snapshots(self, filtros: PrestamoUniverseRequest) -> list[PrestamoSnapshot]:
         self.last_actual_filters = filtros
@@ -38,31 +31,6 @@ class FakeUniversoRepository:
     def get_historico_snapshots(self, filtros: PrestamoUniverseRequest) -> list[PrestamoSnapshot]:
         self.last_historico_filters = filtros
         return self.historico
-
-    def ensure_actual_indexes(self) -> None:
-        self.indexes_created = True
-
-    def upsert_actual_snapshots(
-        self,
-        snapshots: list[PrestamoSnapshot],
-        *,
-        as_of,
-        data_version: str,
-    ) -> dict[str, int]:
-        _ = as_of
-        self.last_upsert_snapshots = snapshots
-        self.last_upsert_data_version = data_version
-        return {"upserted": len(snapshots), "matched": 0, "modified": 0, "unchanged": 0}
-
-
-class FakeSqlUniversoRepository:
-    def __init__(self, rows: list[dict]) -> None:
-        self.rows = rows
-        self.last_limit = None
-
-    def get_prestamos_actuales(self, *, limit: int | None = None) -> list[dict]:
-        self.last_limit = limit
-        return self.rows
 
 
 def fake_auth_context() -> AuthContext:
@@ -80,7 +48,6 @@ def fake_auth_context() -> AuthContext:
 
 def test_prestamos_universo_endpoint_requires_bearer_token() -> None:
     response = client.post("/prestamos/universo/buscar", json={})
-
     assert response.status_code == 401
 
 
@@ -106,13 +73,7 @@ def test_universo_prestamos_service_busca_actual_historico_y_conteos() -> None:
 
 def test_prestamos_universo_endpoint_devuelve_snapshots_normalizados() -> None:
     repository = FakeUniversoRepository(
-        actual=[
-            PrestamoSnapshot(
-                numero_prestamo="0001",
-                codigo_asesor="JPEREZ",
-                saldo_capital=1000,
-            )
-        ],
+        actual=[PrestamoSnapshot(numero_prestamo="0001", codigo_asesor="JPEREZ", saldo_capital=1000)],
         historico=[PrestamoSnapshot(numero_prestamo="0001", codigo_asesor="JPEREZ", saldo_capital=900)],
     )
     service = UniversoPrestamosService(repository=repository)
@@ -122,10 +83,7 @@ def test_prestamos_universo_endpoint_devuelve_snapshots_normalizados() -> None:
     try:
         response = client.post(
             "/prestamos/universo/buscar",
-            json={
-                "fecha_corte_anterior": "2026-05-31T00:00:00",
-                "codigos_asesor": ["jperez"],
-            },
+            json={"fecha_corte_anterior": "2026-05-31T00:00:00", "codigos_asesor": ["jperez"]},
         )
     finally:
         app.dependency_overrides.pop(get_current_auth_context, None)
@@ -140,172 +98,6 @@ def test_prestamos_universo_endpoint_devuelve_snapshots_normalizados() -> None:
     assert payload["historico"][0]["saldo_capital"] == 900
 
 
-def test_universo_prestamos_service_sincroniza_situacion_crediticia_actual() -> None:
-    mongo_repository = FakeUniversoRepository()
-    sql_repository = FakeSqlUniversoRepository(
-        [
-            {
-                "IdPrestamo": 10,
-                "NumeroPrestamo": "0001",
-                "CodigoAsesor": "jperez",
-                "IdCargoAsesor": "10",
-                "CargoAsesor": "asesor de negocios",
-                "CodigoUsuarioControl": "mlopez",
-                "UsuarioControl": "Maria Lopez",
-                "CodigoUsuarioCobranzaApoyo": "ccruz",
-                "CobranzaApoyo": "Carlos Cruz",
-                "Provincia": "azuay",
-                "SaldoCapital": "1000",
-                "CapitalNoDevenga": "100",
-                "CapitalVencido": "50",
-                "DiasVencidos": "14",
-                "EsDiferido": 1,
-                "ExigibleCapital": "80",
-                "ExigibleInteres": "12",
-                "ExigibleMora": "3",
-                "ExigibleOtros": "5",
-                "ValorParaEstarAlDia": "100",
-                "ValorHastaCuotaActual": "140",
-                "ValorCancelarTotal": "1020",
-                "SaldoBaseProvision": "1000",
-                "PorcentajeProvisionFuente": "2",
-                "PorcentajeProvisionReglaFijo": "1.5",
-                "PorcentajeProvisionMinimo": "1",
-                "PorcentajeProvisionMaximo": "5",
-                "EsPorcentajeFijo": 1,
-                "ProvisionAutomatica": "12",
-                "ProvisionManual": "3",
-                "ProvisionConstituida": "9",
-            }
-        ]
-    )
-    service = UniversoPrestamosService(repository=mongo_repository, sql_repository=sql_repository)
-
-    response = service.sincronizar_situacion_crediticia_actual(
-        request=SituacionCrediticiaActualSyncRequest(limit=1),
-        auth_context=fake_auth_context(),
-    )
-
-    assert response.collection == "SituacionCrediticiaActual"
-    assert response.total_leidos_sql == 1
-    assert response.total_upserted == 1
-    assert response.total_matched == 0
-    assert response.total_modified == 0
-    assert response.total_sin_cambios == 0
-    assert response.timings_ms.ensure_indexes_ms >= 0
-    assert response.timings_ms.sql_read_ms >= 0
-    assert response.timings_ms.python_map_ms >= 0
-    assert response.timings_ms.mongo_upsert_ms >= 0
-    assert response.timings_ms.total_ms >= 0
-    assert mongo_repository.indexes_created is True
-    assert mongo_repository.last_upsert_snapshots[0].numero_prestamo == "0001"
-    assert mongo_repository.last_upsert_snapshots[0].codigo_asesor == "JPEREZ"
-    assert mongo_repository.last_upsert_snapshots[0].id_cargo_asesor == 10
-    assert mongo_repository.last_upsert_snapshots[0].cargo_asesor == "ASESOR DE NEGOCIOS"
-    assert mongo_repository.last_upsert_snapshots[0].codigo_usuario_control == "MLOPEZ"
-    assert mongo_repository.last_upsert_snapshots[0].usuario_control == "MARIA LOPEZ"
-    assert mongo_repository.last_upsert_snapshots[0].codigo_usuario_cobranza_apoyo == "CCRUZ"
-    assert mongo_repository.last_upsert_snapshots[0].cobranza_apoyo == "CARLOS CRUZ"
-    assert mongo_repository.last_upsert_snapshots[0].provincia == "AZUAY"
-    assert mongo_repository.last_upsert_snapshots[0].capital_no_devenga == 100
-    assert mongo_repository.last_upsert_snapshots[0].capital_vencido == 50
-    assert mongo_repository.last_upsert_snapshots[0].capital_vigente == 850
-    assert mongo_repository.last_upsert_snapshots[0].dias_vencidos == 14
-    assert mongo_repository.last_upsert_snapshots[0].es_diferido is True
-    assert mongo_repository.last_upsert_snapshots[0].exigible_capital == 80
-    assert mongo_repository.last_upsert_snapshots[0].exigible_interes == 12
-    assert mongo_repository.last_upsert_snapshots[0].exigible_mora == 3
-    assert mongo_repository.last_upsert_snapshots[0].exigible_otros == 5
-    assert mongo_repository.last_upsert_snapshots[0].valor_para_estar_al_dia == 100
-    assert mongo_repository.last_upsert_snapshots[0].valor_hasta_cuota_actual == 140
-    assert mongo_repository.last_upsert_snapshots[0].valor_cancelar_total == 1020
-    assert mongo_repository.last_upsert_snapshots[0].provision_requerida == 15
-    assert mongo_repository.last_upsert_snapshots[0].provision_requerida_fuente == 15
-    assert mongo_repository.last_upsert_snapshots[0].provision_requerida_calculada == 15
-    assert mongo_repository.last_upsert_snapshots[0].provision_constituida == 9
-    assert mongo_repository.last_upsert_snapshots[0].porcentaje_provision_aplicado == 1.5
-    assert mongo_repository.last_upsert_snapshots[0].provision_diferencia_validacion == 0
-    assert sql_repository.last_limit == 1
-
-
-def test_prestamos_sincronizar_actual_endpoint_devuelve_conteos() -> None:
-    mongo_repository = FakeUniversoRepository()
-    sql_repository = FakeSqlUniversoRepository(
-        [
-            {
-                "IdPrestamo": 10,
-                "NumeroPrestamo": "0001",
-                "CodigoAsesor": "jperez",
-                "IdCargoAsesor": "10",
-                "CargoAsesor": "asesor de negocios",
-                "CodigoUsuarioControl": "mlopez",
-                "UsuarioControl": "Maria Lopez",
-                "CodigoUsuarioCobranzaApoyo": "ccruz",
-                "CobranzaApoyo": "Carlos Cruz",
-                "Provincia": "azuay",
-                "SaldoCapital": "1000",
-                "CapitalNoDevenga": "100",
-                "CapitalVencido": "50",
-                "DiasVencidos": "14",
-                "EsDiferido": 1,
-                "ExigibleCapital": "80",
-                "ExigibleInteres": "12",
-                "ExigibleMora": "3",
-                "ExigibleOtros": "5",
-                "ValorParaEstarAlDia": "100",
-                "ValorHastaCuotaActual": "140",
-                "ValorCancelarTotal": "1020",
-                "SaldoBaseProvision": "1000",
-                "PorcentajeProvisionFuente": "2",
-                "PorcentajeProvisionReglaFijo": "1.5",
-                "PorcentajeProvisionMinimo": "1",
-                "PorcentajeProvisionMaximo": "5",
-                "EsPorcentajeFijo": 1,
-                "ProvisionAutomatica": "12",
-                "ProvisionManual": "3",
-                "ProvisionConstituida": "9",
-            }
-        ]
-    )
-    service = UniversoPrestamosService(repository=mongo_repository, sql_repository=sql_repository)
-
-    app.dependency_overrides[get_current_auth_context] = fake_auth_context
-    app.dependency_overrides[get_universo_prestamos_service] = lambda: service
-    try:
-        response = client.post(
-            "/prestamos/universo/sincronizar-actual",
-            json={"limit": 1},
-        )
-    finally:
-        app.dependency_overrides.pop(get_current_auth_context, None)
-        app.dependency_overrides.pop(get_universo_prestamos_service, None)
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["collection"] == "SituacionCrediticiaActual"
-    assert payload["total_leidos_sql"] == 1
-    assert payload["total_upserted"] == 1
-    assert payload["total_matched"] == 0
-    assert payload["total_modified"] == 0
-    assert payload["total_sin_cambios"] == 0
-    assert set(payload["timings_ms"]) == {
-        "ensure_indexes_ms",
-        "sql_read_ms",
-        "python_map_ms",
-        "mongo_upsert_ms",
-        "total_ms",
-    }
-    assert payload["timings_ms"]["total_ms"] >= 0
-
-
-def test_prestamos_sincronizar_actual_requiere_limit_o_confirmacion_total() -> None:
-    app.dependency_overrides[get_current_auth_context] = fake_auth_context
-    try:
-        response = client.post(
-            "/prestamos/universo/sincronizar-actual",
-            json={},
-        )
-    finally:
-        app.dependency_overrides.pop(get_current_auth_context, None)
-
-    assert response.status_code == 422
+def test_sincronizar_actual_ya_no_esta_publicado_en_core() -> None:
+    response = client.post("/prestamos/universo/sincronizar-actual", json={"limit": 1})
+    assert response.status_code == 404
