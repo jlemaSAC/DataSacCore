@@ -1,5 +1,8 @@
 from fastapi import APIRouter
 
+from app.modules.analytic.colocacion.colocacion_historico.router import (
+    router as colocacion_historico_router,
+)
 from app.modules.analytic.indicadores_financieros.calidad_de_activos.router import (
     router as calidad_de_activos_router,
 )
@@ -21,6 +24,7 @@ from app.modules.analytic.menu.router import router as menu_router
 router = APIRouter(prefix="/analytic")
 
 router.include_router(menu_router)
+router.include_router(colocacion_historico_router)
 router.include_router(calidad_de_activos_router)
 router.include_router(indicadores_de_liquidez_router)
 router.include_router(indicadores_de_eficiencia_router)
