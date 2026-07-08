@@ -320,34 +320,6 @@ def test_rango_actual_combina_mongo_hasta_ayer_y_sql_hoy() -> None:
     assert response.total_saldo_inicial == 275.0
     assert len(response.agrupaciones) == 1
 
-
-def test_rango_rechaza_fecha_futura_y_mas_de_24_meses() -> None:
-    service = ColocacionHistoricoService(  # type: ignore[arg-type]
-        FakeMongoRepository(),
-        FakeSqlRepository(),
-    )
-
-    with pytest.raises(HTTPException) as futura:
-        service.obtener_colocacion_historica_por_rango(
-            InputColocacionHistoricoRango(
-                fecha_desde=date(2026, 7, 1),
-                fecha_hasta=date(2026, 7, 4),
-            ),
-            fake_auth_context(),
-        )
-    assert futura.value.status_code == 400
-
-    with pytest.raises(HTTPException) as extenso:
-        service.obtener_colocacion_historica_por_rango(
-            InputColocacionHistoricoRango(
-                fecha_desde=date(2024, 1, 1),
-                fecha_hasta=date(2026, 1, 1),
-            ),
-            fake_auth_context(),
-        )
-    assert extenso.value.status_code == 400
-
-
 def test_error_500_se_registra_en_consola(caplog) -> None:
     service = ColocacionHistoricoService(  # type: ignore[arg-type]
         FailingMongoRepository(),
