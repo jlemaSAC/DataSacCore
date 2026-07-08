@@ -48,6 +48,9 @@ interface ColocacionHistoricoAgrupacion {
   educacion: string;
   edad: string;
   garantia: string;
+  monto: string;
+  tasa: string;
+  plazo: string;
   operaciones: number;
   saldo_inicial: number;
 }
@@ -87,6 +90,10 @@ HASTA 100
 MAS DE 100
 SIN DATOS
 ```
+
+`monto`, `tasa` y `plazo` son rangos acumulativos: cada etiqueta incluye el
+límite indicado y comienza después del límite anterior. Valores inválidos o un
+plazo mayor de 10 años se reportan como `SIN DATOS`.
 
 ## Uso
 

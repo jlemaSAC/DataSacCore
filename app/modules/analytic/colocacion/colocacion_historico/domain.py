@@ -18,6 +18,9 @@ class DimensionesColocacion:
     educacion: str
     edad: str
     garantia: str
+    monto: str
+    tasa: str
+    plazo: str
 
 
 @dataclass
