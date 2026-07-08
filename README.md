@@ -148,6 +148,78 @@ Notas para produccion:
 - Mantener `CHECK_DATABASE_ON_STARTUP=true` y `CHECK_MONGO_ON_STARTUP=true` si se quiere impedir que la API arranque sin SQL Server o MongoDB.
 - Publicar solo el puerto interno `9100` detras de un proxy/reverse proxy o balanceador con TLS.
 
+## Publicacion de la imagen
+
+El workflow `.github/workflows/docker-publish.yml` se ejecuta en cada pull
+request y push dirigido a `main`:
+
+1. Ejecuta las pruebas automatizadas.
+2. Construye la imagen Docker.
+3. En un push a `main`, publica la imagen en GitHub Container Registry.
+
+Imagenes generadas:
+
+```text
+ghcr.io/jlemasac/datasaccore:latest
+ghcr.io/jlemasac/datasaccore:sha-<commit>
+```
+
+La etiqueta SHA es la recomendada para despliegues reproducibles y rollback.
+
+## Despliegue en servidor
+
+Si el paquete GHCR es privado, iniciar sesion con un token que tenga unicamente
+el permiso `read:packages`:
+
+```bash
+docker login ghcr.io -u USUARIO_GITHUB
+```
+
+Crear, por ejemplo, `/opt/datasac-core/compose.yaml`:
+
+```yaml
+services:
+  api:
+    image: ghcr.io/jlemasac/datasaccore:latest
+    env_file:
+      - .env
+    environment:
+      APP_ENV: production
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+```
+
+El archivo `/opt/datasac-core/.env` debe crearse directamente en el servidor.
+Luego iniciar el servicio:
+
+```bash
+cd /opt/datasac-core
+docker compose pull
+docker compose up -d
+docker compose logs -f api
+```
+
+Validar el despliegue:
+
+```bash
+curl http://localhost:9100/health
+```
+
+Para actualizar a una imagen nueva:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Para fijar o restaurar una version, reemplazar `latest` en `compose.yaml` por
+la etiqueta correspondiente:
+
+```text
+ghcr.io/jlemasac/datasaccore:sha-<commit>
+```
+
 ## Estructura
 
 ```text
