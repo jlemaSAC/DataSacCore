@@ -1,7 +1,7 @@
 [project]
-name = "fastapi-basic-starter"
+name = "datasac-core"
 version = "0.1.0"
-description = "Proyecto base minimo con FastAPI."
+description = "API Core de DataSac."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
