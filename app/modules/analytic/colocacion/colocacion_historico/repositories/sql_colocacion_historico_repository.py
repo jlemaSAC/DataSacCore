@@ -151,7 +151,14 @@ class SqlColocacionHistoricoRepository:
                     (10, "J.Hasta 10 AÑOS"),
                 )
             ),
-            else_="SIN DATOS",
+            else_=case(
+                (fechas_plazo_validas, "K.Mas de 10 AÑOS"),
+                else_="SIN DATOS",
+            ),
+        )
+        plazo_valor = case(
+            (fechas_plazo_validas, func.datediff(literal_column("day"), Prestamo.fecha_adjudicacion, Prestamo.fecha_vencimiento)),
+            else_=None,
         )
         garantia = case(
             (
@@ -214,6 +221,7 @@ class SqlColocacionHistoricoRepository:
                 tasa_real.label("tasa_real"),
                 tasa_real_valor.label("tasa_real_valor"),
                 plazo.label("plazo"),
+                plazo_valor.label("plazo_valor"),
             )
             .select_from(Prestamo)
             .join(PrestamoCliente, PrestamoCliente.id_prestamo == Prestamo.id)
@@ -274,6 +282,7 @@ class SqlColocacionHistoricoRepository:
             base.c.tasa_real,
             base.c.tasa_real_valor,
             base.c.plazo,
+            base.c.plazo_valor,
         )
         statement = (
             select(
@@ -308,11 +317,12 @@ class SqlColocacionHistoricoRepository:
                 tasa_real=str(row[15] or "SIN DATOS").strip() or "SIN DATOS",
                 tasa_real_valor=float(row[16]) if row[16] is not None else None,
                 plazo=str(row[17] or "SIN DATOS").strip() or "SIN DATOS",
+                plazo_valor=int(row[18]) if row[18] is not None else None,
             )
             actual = resultado.setdefault(
                 dimensiones,
                 ColocacionAgrupada(dimensiones=dimensiones, operaciones=0, saldo_inicial=0.0),
             )
-            actual.operaciones += int(row[18] or 0)
-            actual.saldo_inicial += float(row[19] or 0.0)
+            actual.operaciones += int(row[19] or 0)
+            actual.saldo_inicial += float(row[20] or 0.0)
         return list(resultado.values())

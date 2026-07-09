@@ -24,6 +24,7 @@ class DimensionesColocacion:
     tasa_real: str
     tasa_real_valor: float | None
     plazo: str
+    plazo_valor: int | None
 
 
 @dataclass

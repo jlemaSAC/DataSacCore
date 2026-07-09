@@ -121,29 +121,7 @@ def _numero_valido(campo: str) -> dict[str, Any]:
 
 
 def _rango_plazo() -> dict[str, Any]:
-    fecha_adjudicacion = {
-        "$convert": {
-            "input": "$FechaAdjudicacion",
-            "to": "date",
-            "onError": None,
-            "onNull": None,
-        }
-    }
-    fecha_vencimiento = {
-        "$convert": {
-            "input": "$FechaVencimiento",
-            "to": "date",
-            "onError": None,
-            "onNull": None,
-        }
-    }
-    fechas_validas = {
-        "$and": [
-            {"$ne": [fecha_adjudicacion, None]},
-            {"$ne": [fecha_vencimiento, None]},
-            {"$gte": [fecha_vencimiento, fecha_adjudicacion]},
-        ]
-    }
+    fecha_adjudicacion, fecha_vencimiento, fechas_validas = _fechas_plazo()
     rangos = (
         (1,  "Hasta 1 AÑO"),
         (2,  "Hasta 2 AÑOS"),
@@ -180,9 +158,59 @@ def _rango_plazo() -> dict[str, Any]:
                 }
                 for anios, etiqueta in rangos
             ],
-            "default": "SIN DATOS",
+            "default": {
+                "$cond": [
+                    fechas_validas,
+                    "Mas de 10 AÑOS",
+                    "SIN DATOS",
+                ]
+            },
         }
     }
+
+
+def _plazo_dias() -> dict[str, Any]:
+    fecha_adjudicacion, fecha_vencimiento, fechas_validas = _fechas_plazo()
+    return {
+        "$cond": [
+            fechas_validas,
+            {
+                "$dateDiff": {
+                    "startDate": fecha_adjudicacion,
+                    "endDate": fecha_vencimiento,
+                    "unit": "day",
+                }
+            },
+            None,
+        ]
+    }
+
+
+def _fechas_plazo() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    fecha_adjudicacion = {
+        "$convert": {
+            "input": "$FechaAdjudicacion",
+            "to": "date",
+            "onError": None,
+            "onNull": None,
+        }
+    }
+    fecha_vencimiento = {
+        "$convert": {
+            "input": "$FechaVencimiento",
+            "to": "date",
+            "onError": None,
+            "onNull": None,
+        }
+    }
+    fechas_validas = {
+        "$and": [
+            {"$ne": [fecha_adjudicacion, None]},
+            {"$ne": [fecha_vencimiento, None]},
+            {"$gte": [fecha_vencimiento, fecha_adjudicacion]},
+        ]
+    }
+    return fecha_adjudicacion, fecha_vencimiento, fechas_validas
 
 
 class MongoColocacionHistoricoRepository:
@@ -284,6 +312,7 @@ class MongoColocacionHistoricoRepository:
             ),
             "tasa_real_valor": _numero_valido("TasaAnual"),
             "plazo": _rango_plazo(),
+            "plazo_valor": _plazo_dias(),
         }
         pipeline: list[dict[str, Any]] = [
             {"$match": {"EstadoPrestamo": {"$ne": "CANCELADO"}, "$or": rangos}},
@@ -332,6 +361,14 @@ class MongoColocacionHistoricoRepository:
                     valores[campo] = (
                         float(valor_tasa)
                         if isinstance(valor_tasa, int | float) and valor_tasa >= 0
+                        else None
+                    )
+                    continue
+                if campo == "plazo_valor":
+                    valor_plazo = identificador.get(campo)
+                    valores[campo] = (
+                        int(valor_plazo)
+                        if isinstance(valor_plazo, int | float) and valor_plazo >= 0
                         else None
                     )
                     continue

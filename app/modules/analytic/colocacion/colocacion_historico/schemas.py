@@ -58,6 +58,7 @@ class ColocacionHistoricoAgrupacion(BaseModel):
     tasa_real: str = Field(description="Rango de la tasa anual real del préstamo.")
     tasa_real_valor: float | None = Field(description="Valor anual real de la tasa del préstamo.")
     plazo: str = Field(description="Rango del plazo original del préstamo.")
+    plazo_valor: int | None = Field(description="Plazo original del préstamo en días.")
     operaciones: int = Field(description="Préstamos representados por esta agrupación.")
     saldo_inicial: float = Field(description="Suma de DeudaInicial de la agrupación.")
 

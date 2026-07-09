@@ -54,10 +54,11 @@ interface ColocacionHistoricoAgrupacion {
   tasa_real: string;
   tasa_real_valor: number | null;
   plazo: string;
+  plazo_valor: number | null;
   operaciones: number;
   saldo_inicial: number;
 }
-
+code
 interface ColocacionHistoricoRangoResponse {
   fecha_desde: string;
   fecha_hasta: string;
@@ -98,8 +99,10 @@ SIN DATOS
 límite indicado y comienza después del límite anterior. `tasa_valor` contiene la
 tasa nominal real usada para clasificar la fila. `tasa_real` y `tasa_real_valor`
 se calculan con `TasaAnual` en Mongo histórico y con `TEA` en SQL para el tramo
-actual. Si no hay dato válido, los valores numéricos se reportan como `null`.
-Valores inválidos o un plazo mayor de 10 años se reportan como `SIN DATOS`.
+actual. `plazo_valor` contiene el plazo original en días. Si no hay dato válido,
+los valores numéricos se reportan como `null`. Valores inválidos o un plazo
+inválido se reportan como `SIN DATOS`; un plazo válido mayor de 10 años se
+clasifica en `Mas de 10 AÑOS`.
 
 ## Uso
 

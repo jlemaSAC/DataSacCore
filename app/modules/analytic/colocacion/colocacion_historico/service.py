@@ -45,7 +45,7 @@ def _orden_dimensiones(item: tuple[DimensionesColocacion, ColocacionAgrupada]) -
     dimensiones = item[0]
     valores = []
     for campo, valor in dimensiones.__dict__.items():
-        if campo in {"tasa_valor", "tasa_real_valor"}:
+        if campo in {"tasa_valor", "tasa_real_valor", "plazo_valor"}:
             valores.append(float("-inf") if valor is None else valor)
         else:
             valores.append(valor)
