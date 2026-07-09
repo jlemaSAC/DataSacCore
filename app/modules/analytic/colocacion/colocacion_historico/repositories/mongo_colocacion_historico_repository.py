@@ -83,21 +83,7 @@ def _rango_numerico(
     rangos: tuple[tuple[float, str], ...],
     etiqueta_superior: str | None = None,
 ) -> dict[str, Any]:
-    convertido = {
-        "$convert": {
-            "input": f"${campo}",
-            "to": "double",
-            "onError": None,
-            "onNull": None,
-        }
-    }
-    valor = {
-        "$cond": [
-            {"$gte": [convertido, 0]},
-            convertido,
-            None,
-        ]
-    }
+    valor = _numero_valido(campo)
     branches = [
         {
             "case": {"$and": [{"$ne": [valor, None]}, {"$lte": [valor, limite]}]},
@@ -113,6 +99,25 @@ def _rango_numerico(
             }
         )
     return {"$switch": {"branches": branches, "default": "SIN DATOS"}}
+
+
+def _numero_valido(campo: str) -> dict[str, Any]:
+    convertido = {
+        "$convert": {
+            "input": f"${campo}",
+            "to": "double",
+            "onError": None,
+            "onNull": None,
+        }
+    }
+    valor = {
+        "$cond": [
+            {"$gte": [convertido, 0]},
+            convertido,
+            None,
+        ]
+    }
+    return valor
 
 
 def _rango_plazo() -> dict[str, Any]:
@@ -262,6 +267,22 @@ class MongoColocacionHistoricoRepository:
                 ),
                 "Mas de 22",
             ),
+            "tasa_valor": _numero_valido("TasaNominal"),
+            "tasa_real": _rango_numerico(
+                "TasaAnual",
+                (
+                    (13, "Hasta 13"),
+                    (14, "Hasta 14"),
+                    (16, "Hasta 16"),
+                    (17, "Hasta 17"),
+                    (18, "Hasta 18"),
+                    (19, "Hasta 19"),
+                    (20, "Hasta 20"),
+                    (21, "Hasta 21"),
+                ),
+                "Mas de 22",
+            ),
+            "tasa_real_valor": _numero_valido("TasaAnual"),
             "plazo": _rango_plazo(),
         }
         pipeline: list[dict[str, Any]] = [
@@ -306,8 +327,16 @@ class MongoColocacionHistoricoRepository:
             anio, mes = periodo
             valores = {}
             for campo in dimensiones:
+                if campo in {"tasa_valor", "tasa_real_valor"}:
+                    valor_tasa = identificador.get(campo)
+                    valores[campo] = (
+                        float(valor_tasa)
+                        if isinstance(valor_tasa, int | float) and valor_tasa >= 0
+                        else None
+                    )
+                    continue
                 valor = str(identificador.get(campo) or "SIN DATOS").strip() or "SIN DATOS"
-                valores[campo] = valor if campo in {"monto", "tasa", "plazo"} else valor.upper()
+                valores[campo] = valor if campo in {"monto", "tasa", "tasa_real", "plazo"} else valor.upper()
             resultado.append(
                 ColocacionAgrupada(
                     dimensiones=DimensionesColocacion(

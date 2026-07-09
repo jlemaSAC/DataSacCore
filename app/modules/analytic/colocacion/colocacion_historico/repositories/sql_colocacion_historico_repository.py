@@ -100,6 +100,30 @@ class SqlColocacionHistoricoRepository:
             ),
             "N.Mas de 22",
         )
+        tasa_valor = case(
+            (Prestamo.tasa.is_(None), None),
+            (Prestamo.tasa < 0, None),
+            else_=Prestamo.tasa,
+        )
+        tasa_real = _rango_sql(
+            Prestamo.tea,
+            (
+                (13, "D.Hasta 13"),
+                (14, "E.Hasta 14"),
+                (16, "G.Hasta 16"),
+                (17, "H.Hasta 17"),
+                (18, "I.Hasta 18"),
+                (19, "J.Hasta 19"),
+                (20, "K.Hasta 20"),
+                (21, "L.Hasta 21"),
+            ),
+            "N.Mas de 22",
+        )
+        tasa_real_valor = case(
+            (Prestamo.tea.is_(None), None),
+            (Prestamo.tea < 0, None),
+            else_=Prestamo.tea,
+        )
         fechas_plazo_validas = Prestamo.fecha_vencimiento >= Prestamo.fecha_adjudicacion
         plazo = case(
             *(
@@ -186,6 +210,9 @@ class SqlColocacionHistoricoRepository:
                 garantia.label("garantia"),
                 monto.label("monto"),
                 tasa.label("tasa"),
+                tasa_valor.label("tasa_valor"),
+                tasa_real.label("tasa_real"),
+                tasa_real_valor.label("tasa_real_valor"),
                 plazo.label("plazo"),
             )
             .select_from(Prestamo)
@@ -243,6 +270,9 @@ class SqlColocacionHistoricoRepository:
             base.c.garantia,
             base.c.monto,
             base.c.tasa,
+            base.c.tasa_valor,
+            base.c.tasa_real,
+            base.c.tasa_real_valor,
             base.c.plazo,
         )
         statement = (
@@ -274,12 +304,15 @@ class SqlColocacionHistoricoRepository:
                 garantia=_normalizar(row[11]),
                 monto=str(row[12] or "SIN DATOS").strip() or "SIN DATOS",
                 tasa=str(row[13] or "SIN DATOS").strip() or "SIN DATOS",
-                plazo=str(row[14] or "SIN DATOS").strip() or "SIN DATOS",
+                tasa_valor=float(row[14]) if row[14] is not None else None,
+                tasa_real=str(row[15] or "SIN DATOS").strip() or "SIN DATOS",
+                tasa_real_valor=float(row[16]) if row[16] is not None else None,
+                plazo=str(row[17] or "SIN DATOS").strip() or "SIN DATOS",
             )
             actual = resultado.setdefault(
                 dimensiones,
                 ColocacionAgrupada(dimensiones=dimensiones, operaciones=0, saldo_inicial=0.0),
             )
-            actual.operaciones += int(row[15] or 0)
-            actual.saldo_inicial += float(row[16] or 0.0)
+            actual.operaciones += int(row[18] or 0)
+            actual.saldo_inicial += float(row[19] or 0.0)
         return list(resultado.values())

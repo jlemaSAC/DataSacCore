@@ -50,6 +50,9 @@ interface ColocacionHistoricoAgrupacion {
   garantia: string;
   monto: string;
   tasa: string;
+  tasa_valor: number | null;
+  tasa_real: string;
+  tasa_real_valor: number | null;
   plazo: string;
   operaciones: number;
   saldo_inicial: number;
@@ -92,8 +95,11 @@ SIN DATOS
 ```
 
 `monto`, `tasa` y `plazo` son rangos acumulativos: cada etiqueta incluye el
-límite indicado y comienza después del límite anterior. Valores inválidos o un
-plazo mayor de 10 años se reportan como `SIN DATOS`.
+límite indicado y comienza después del límite anterior. `tasa_valor` contiene la
+tasa nominal real usada para clasificar la fila. `tasa_real` y `tasa_real_valor`
+se calculan con `TasaAnual` en Mongo histórico y con `TEA` en SQL para el tramo
+actual. Si no hay dato válido, los valores numéricos se reportan como `null`.
+Valores inválidos o un plazo mayor de 10 años se reportan como `SIN DATOS`.
 
 ## Uso
 

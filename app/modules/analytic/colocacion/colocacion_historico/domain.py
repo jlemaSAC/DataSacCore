@@ -20,6 +20,9 @@ class DimensionesColocacion:
     garantia: str
     monto: str
     tasa: str
+    tasa_valor: float | None
+    tasa_real: str
+    tasa_real_valor: float | None
     plazo: str
 
 
