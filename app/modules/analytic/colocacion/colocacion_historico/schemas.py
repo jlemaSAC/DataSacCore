@@ -52,6 +52,13 @@ class ColocacionHistoricoAgrupacion(BaseModel):
     educacion: str = Field(description="Nivel de educación del cliente.")
     edad: str = Field(description="Rango de edad: HASTA 20, HASTA 30, ..., MAS DE 100.")
     garantia: str = Field(description="Tipo principal de garantía del préstamo.")
+    monto: str = Field(description="Rango del monto inicial del préstamo.")
+    tasa: str = Field(description="Rango de la tasa del préstamo.")
+    tasa_valor: float | None = Field(description="Valor nominal real de la tasa del préstamo.")
+    tasa_real: str = Field(description="Rango de la tasa anual real del préstamo.")
+    tasa_real_valor: float | None = Field(description="Valor anual real de la tasa del préstamo.")
+    plazo: str = Field(description="Rango del plazo original del préstamo.")
+    plazo_valor: int | None = Field(description="Plazo original del préstamo en días.")
     operaciones: int = Field(description="Préstamos representados por esta agrupación.")
     saldo_inicial: float = Field(description="Suma de DeudaInicial de la agrupación.")
 

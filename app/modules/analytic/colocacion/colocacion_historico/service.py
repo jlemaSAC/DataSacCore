@@ -41,6 +41,17 @@ class SegmentoMensual:
     fecha_hasta: date
 
 
+def _orden_dimensiones(item: tuple[DimensionesColocacion, ColocacionAgrupada]) -> tuple:
+    dimensiones = item[0]
+    valores = []
+    for campo, valor in dimensiones.__dict__.items():
+        if campo in {"tasa_valor", "tasa_real_valor", "plazo_valor"}:
+            valores.append(float("-inf") if valor is None else valor)
+        else:
+            valores.append(valor)
+    return tuple(valores)
+
+
 class ColocacionHistoricoService:
     def __init__(
         self,
@@ -241,7 +252,7 @@ class ColocacionHistoricoService:
         saldos_mes = {mes: 0.0 for mes in range(1, 13)}
         datos: list[ColocacionHistoricoAgrupacion] = []
 
-        for dimensiones, agrupacion in sorted(agrupaciones.items()):
+        for dimensiones, agrupacion in sorted(agrupaciones.items(), key=_orden_dimensiones):
             operaciones_mes[dimensiones.mes] += agrupacion.operaciones
             saldos_mes[dimensiones.mes] += agrupacion.saldo_inicial
             datos.append(
@@ -279,7 +290,7 @@ class ColocacionHistoricoService:
         saldos_periodo = {segmento.periodo: 0.0 for segmento in segmentos}
         datos: list[ColocacionHistoricoAgrupacion] = []
 
-        for dimensiones, agrupacion in sorted(agrupaciones.items()):
+        for dimensiones, agrupacion in sorted(agrupaciones.items(), key=_orden_dimensiones):
             operaciones_periodo[dimensiones.periodo] += agrupacion.operaciones
             saldos_periodo[dimensiones.periodo] += agrupacion.saldo_inicial
             datos.append(

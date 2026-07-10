@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import case, exists, func, select
+from sqlalchemy import case, exists, func, literal_column, select
 from sqlalchemy.orm import Session
 
 from app.models.clientes.cliente_model import Cliente
@@ -48,6 +48,16 @@ def _calcular_edad(fecha_nacimiento: datetime | date | None, fecha_referencia: d
     return "MAS DE 100"
 
 
+def _rango_sql(columna, rangos: tuple[tuple[float, str], ...], etiqueta_superior=None):
+    condiciones = [(columna <= limite, etiqueta) for limite, etiqueta in rangos]
+    return case(
+        (columna.is_(None), "SIN DATOS"),
+        (columna < 0, "SIN DATOS"),
+        *condiciones,
+        else_=etiqueta_superior or "SIN DATOS",
+    )
+
+
 class SqlColocacionHistoricoRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -57,6 +67,99 @@ class SqlColocacionHistoricoRepository:
         fecha_inicio: datetime,
         fecha_fin: datetime,
     ) -> list[ColocacionAgrupada]:
+        monto = _rango_sql(
+            Prestamo.deuda_inicial,
+            (
+                (3000, "A.Hasta 3.000"),
+                (5000, "B.Hasta 5.000"),
+                (8000, "C.Hasta 8.000"),
+                (10000, "D.Hasta 10.000"),
+                (20000, "E.Hasta 20.000"),
+                (30000, "F.Hasta 30.000"),
+                (40000, "G.Hasta 40.000"),
+                (50000, "H.Hasta 50.000"),
+                (60000, "I.Hasta 60.000"),
+                (70000, "J.Hasta 70.000"),
+                (80000, "K.Hasta 80.000"),
+                (90000, "L.Hasta 90.000"),
+                (100000, "M.Hasta 100.000"),
+            ),
+            "N.Mas de 100.000",
+        )
+        tasa = _rango_sql(
+            Prestamo.tasa,
+            (
+                (13, "D.Hasta 13"),
+                (14, "E.Hasta 14"),
+                (16, "G.Hasta 16"),
+                (17, "H.Hasta 17"),
+                (18, "I.Hasta 18"),
+                (19, "J.Hasta 19"),
+                (20, "K.Hasta 20"),
+                (21, "L.Hasta 21"),
+            ),
+            "N.Mas de 22",
+        )
+        tasa_valor = case(
+            (Prestamo.tasa.is_(None), None),
+            (Prestamo.tasa < 0, None),
+            else_=Prestamo.tasa,
+        )
+        tasa_real = _rango_sql(
+            Prestamo.tea,
+            (
+                (13, "D.Hasta 13"),
+                (14, "E.Hasta 14"),
+                (16, "G.Hasta 16"),
+                (17, "H.Hasta 17"),
+                (18, "I.Hasta 18"),
+                (19, "J.Hasta 19"),
+                (20, "K.Hasta 20"),
+                (21, "L.Hasta 21"),
+            ),
+            "N.Mas de 22",
+        )
+        tasa_real_valor = case(
+            (Prestamo.tea.is_(None), None),
+            (Prestamo.tea < 0, None),
+            else_=Prestamo.tea,
+        )
+        fechas_plazo_validas = Prestamo.fecha_vencimiento >= Prestamo.fecha_adjudicacion
+        plazo = case(
+            *(
+                (
+                    fechas_plazo_validas
+                    & (
+                        Prestamo.fecha_vencimiento
+                        <= func.dateadd(
+                            literal_column("year"),
+                            anios,
+                            Prestamo.fecha_adjudicacion,
+                        )
+                    ),
+                    etiqueta,
+                )
+                for anios, etiqueta in (
+                    (1, "A.Hasta 1 AÑO"),
+                    (2, "B.Hasta 2 AÑOS"),
+                    (3, "C.Hasta 3 AÑOS"),
+                    (4, "D.Hasta 4 AÑOS"),
+                    (5, "E.Hasta 5 AÑOS"),
+                    (6, "F.Hasta 6 AÑOS"),
+                    (7, "G.Hasta 7 AÑOS"),
+                    (8, "H.Hasta 8 AÑOS"),
+                    (10, "J.Hasta 10 AÑOS"),
+                )
+            ),
+            else_=case(
+                (fechas_plazo_validas, "K.Mas de 10 AÑOS"),
+                else_="SIN DATOS",
+            ),
+        )
+        plazo_valor = case(
+            (fechas_plazo_validas, func.datediff(literal_column("day"), Prestamo.fecha_adjudicacion, Prestamo.fecha_vencimiento)),
+            else_=None,
+        )
         garantia = case(
             (
                 exists(
@@ -112,6 +215,13 @@ class SqlColocacionHistoricoRepository:
                 Educacion.nombre.label("educacion"),
                 PersonaNatural.fecha_nacimiento.label("fecha_nacimiento"),
                 garantia.label("garantia"),
+                monto.label("monto"),
+                tasa.label("tasa"),
+                tasa_valor.label("tasa_valor"),
+                tasa_real.label("tasa_real"),
+                tasa_real_valor.label("tasa_real_valor"),
+                plazo.label("plazo"),
+                plazo_valor.label("plazo_valor"),
             )
             .select_from(Prestamo)
             .join(PrestamoCliente, PrestamoCliente.id_prestamo == Prestamo.id)
@@ -166,6 +276,13 @@ class SqlColocacionHistoricoRepository:
             base.c.educacion,
             base.c.fecha_nacimiento,
             base.c.garantia,
+            base.c.monto,
+            base.c.tasa,
+            base.c.tasa_valor,
+            base.c.tasa_real,
+            base.c.tasa_real_valor,
+            base.c.plazo,
+            base.c.plazo_valor,
         )
         statement = (
             select(
@@ -194,11 +311,18 @@ class SqlColocacionHistoricoRepository:
                 educacion=_normalizar(row[9]),
                 edad=_calcular_edad(row[10], fecha_fin.date()),
                 garantia=_normalizar(row[11]),
+                monto=str(row[12] or "SIN DATOS").strip() or "SIN DATOS",
+                tasa=str(row[13] or "SIN DATOS").strip() or "SIN DATOS",
+                tasa_valor=float(row[14]) if row[14] is not None else None,
+                tasa_real=str(row[15] or "SIN DATOS").strip() or "SIN DATOS",
+                tasa_real_valor=float(row[16]) if row[16] is not None else None,
+                plazo=str(row[17] or "SIN DATOS").strip() or "SIN DATOS",
+                plazo_valor=int(row[18]) if row[18] is not None else None,
             )
             actual = resultado.setdefault(
                 dimensiones,
                 ColocacionAgrupada(dimensiones=dimensiones, operaciones=0, saldo_inicial=0.0),
             )
-            actual.operaciones += int(row[12] or 0)
-            actual.saldo_inicial += float(row[13] or 0.0)
+            actual.operaciones += int(row[19] or 0)
+            actual.saldo_inicial += float(row[20] or 0.0)
         return list(resultado.values())

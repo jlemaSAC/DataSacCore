@@ -59,6 +59,13 @@ def agrupacion(
             educacion="SUPERIOR",
             edad="HASTA 30",
             garantia="PERSONAL",
+            monto="A.Hasta 3.000",
+            tasa="G.Hasta 16",
+            tasa_valor=16.0,
+            tasa_real="H.Hasta 17",
+            tasa_real_valor=17.0,
+            plazo="B.Hasta 2 AÑOS",
+            plazo_valor=730,
         ),
         operaciones=operaciones,
         saldo_inicial=saldo,
@@ -91,6 +98,13 @@ class FakeMongoCollection:
                     "educacion": "SUPERIOR",
                     "edad": "HASTA 30",
                     "garantia": "PERSONAL",
+                    "monto": "A.Hasta 3.000",
+                    "tasa": "G.Hasta 16",
+                    "tasa_valor": 16.0,
+                    "tasa_real": "H.Hasta 17",
+                    "tasa_real_valor": 17.0,
+                    "plazo": "B.Hasta 2 AÑOS",
+                    "plazo_valor": 730,
                 },
                 "operaciones": 2,
                 "saldo_inicial": 125.5,
@@ -127,6 +141,13 @@ class FakeSqlSession:
                 " superior ",
                 datetime(1995, 8, 10),
                 " personal ",
+                "A.Hasta 3.000",
+                "G.Hasta 16",
+                16.0,
+                "H.Hasta 17",
+                17.0,
+                "B.Hasta 2 AÑOS",
+                730,
                 2,
                 125.0,
             )
@@ -191,8 +212,33 @@ def test_repositorio_mongo_agrupa_dimensiones_en_una_consulta() -> None:
 
     assert mongo_db.collection.calls == 1
     assert mongo_db.collection.options == {"hint": "fecha_corte_1", "allowDiskUse": True}
+    project = mongo_db.collection.pipeline[1]["$project"]
+    assert {
+        "monto",
+        "tasa",
+        "tasa_valor",
+        "tasa_real",
+        "tasa_real_valor",
+        "plazo",
+        "plazo_valor",
+    } <= project.keys()
+    tasa_convertida = project["tasa"]["$switch"]["branches"][0]["case"]["$and"][0]["$ne"][0]
+    assert tasa_convertida["$cond"][0]["$gte"][0]["$convert"]["input"] == "$TasaNominal"
+    assert project["tasa_valor"]["$cond"][0]["$gte"][0]["$convert"]["input"] == "$TasaNominal"
+    tasa_real_convertida = project["tasa_real"]["$switch"]["branches"][0]["case"]["$and"][0]["$ne"][0]
+    assert tasa_real_convertida["$cond"][0]["$gte"][0]["$convert"]["input"] == "$TasaAnual"
+    assert project["tasa_real_valor"]["$cond"][0]["$gte"][0]["$convert"]["input"] == "$TasaAnual"
+    assert project["plazo_valor"]["$cond"][1]["$dateDiff"]["unit"] == "day"
+    assert project["plazo"]["$switch"]["default"]["$cond"][1] == "Mas de 10 AÑOS"
     assert datos[0].dimensiones.producto == "MICROCREDITO"
     assert datos[0].dimensiones.garantia == "PERSONAL"
+    assert datos[0].dimensiones.monto == "A.Hasta 3.000"
+    assert datos[0].dimensiones.tasa == "G.Hasta 16"
+    assert datos[0].dimensiones.tasa_valor == 16.0
+    assert datos[0].dimensiones.tasa_real == "H.Hasta 17"
+    assert datos[0].dimensiones.tasa_real_valor == 17.0
+    assert datos[0].dimensiones.plazo == "B.Hasta 2 AÑOS"
+    assert datos[0].dimensiones.plazo_valor == 730
     assert datos[0].operaciones == 2
     assert datos[0].saldo_inicial == 125.5
 
@@ -210,6 +256,12 @@ def test_repositorio_sql_usa_exists_para_garantias_y_booleanos_validos() -> None
     assert "[ACTIVO] = 1" in sql
     assert "[ESPRINCIPAL] = 1" in sql
     assert "EXISTS" in sql
+    assert "dateadd(year" in sql
+    assert "A.Hasta 3.000" in sql
+    assert "N.Mas de 22" in sql
+    assert "K.Mas de 10 AÑOS" in sql
+    assert "[TEA]" in sql
+    assert "datediff(day" in sql
     assert " IS 1" not in sql
     assert datos[0].dimensiones.edad == "HASTA 30"
     assert datos[0].operaciones == 2
@@ -391,3 +443,10 @@ def test_endpoint_rango_devuelve_periodos_mensuales() -> None:
     assert payload["fecha_desde"] == "2026-06-15"
     assert payload["resumen_mensual"][0]["periodo"] == "2026-06"
     assert payload["agrupaciones"][0]["anio"] == 2026
+    assert payload["agrupaciones"][0]["monto"] == "A.Hasta 3.000"
+    assert payload["agrupaciones"][0]["tasa"] == "G.Hasta 16"
+    assert payload["agrupaciones"][0]["tasa_valor"] == 16.0
+    assert payload["agrupaciones"][0]["tasa_real"] == "H.Hasta 17"
+    assert payload["agrupaciones"][0]["tasa_real_valor"] == 17.0
+    assert payload["agrupaciones"][0]["plazo"] == "B.Hasta 2 AÑOS"
+    assert payload["agrupaciones"][0]["plazo_valor"] == 730
