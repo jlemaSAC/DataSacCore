@@ -142,9 +142,9 @@ interface Rol {
 
 ### Crear y actualizar
 
-Un `grupo` no puede tener `ruta`; una `ruta` debe tenerla. Un `id_padre` debe
-ser un grupo activo. No se puede asignar un nodo como padre propio, moverlo bajo
-un descendiente ni convertir en ruta un grupo con hijos activos.
+Un `grupo` puede tener `ruta` opcional; una `ruta` debe tenerla. Un `id_padre`
+debe ser un grupo activo. No se puede asignar un nodo como padre propio, moverlo
+bajo un descendiente ni convertir en ruta un grupo con hijos activos.
 
 Al crear un menú, o al modificar `codigo`, `permiso_requerido` o `id_padre`, el
 servicio crea o reutiliza el permiso requerido —y el del padre cuando existe—.

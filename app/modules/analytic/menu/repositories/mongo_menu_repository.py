@@ -615,8 +615,6 @@ class MongoMenuAnalyticAdminRepository:
             raise HTTPException(status_code=400, detail="El permiso requerido es obligatorio.")
 
     def _validar_documento_menu(self, documento: dict[str, Any]) -> None:
-        if documento["tipo"] == "grupo" and documento.get("ruta") is not None:
-            raise HTTPException(status_code=400, detail="Un nodo tipo grupo no debe tener ruta.")
         if documento["tipo"] == "ruta" and documento.get("ruta") is None:
             raise HTTPException(status_code=400, detail="Un nodo tipo ruta debe tener ruta.")
 

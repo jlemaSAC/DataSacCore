@@ -41,7 +41,7 @@ class MenuAnalyticAdminService:
             rol.codigo
             for rol in self.sql_repository.get_roles_usuario(auth_context.usuario.sub)
         ]
-        return self.repository.get_menu_by_roles(roles_codigo)
+        return self.repository.get_menu_by_roles(roles_codigo) # pyright: ignore[reportArgumentType]
 
     def list_menu_routes(
         self,
@@ -141,7 +141,7 @@ class MenuAnalyticAdminService:
         roles = [
             rol.strip()
             for rol in roles_codigo
-            if isinstance(rol, str) and rol.strip()
+            if rol.strip()
         ]
         if not roles:
             return [self.admin_role_code]
