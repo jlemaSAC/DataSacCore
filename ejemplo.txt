@@ -1,0 +1,20 @@
+Coleccion de Mongo  
+RecuperacionCrediticia
+
+{
+  "FECHA_COBRO": "2026-07-13",
+  "ID_PRESTAMO": 31348,
+  "NUMERO_PRESTAMO": "2022052601104",
+  "CAPITAL": 465.81,
+  "INTERES": 100.49,
+  "INTERES_MORA": 6.52,
+  "SEGURO": 0,
+  "CASTIGO": 0,
+  "COBRANZA": 9.92,
+  "JUDICIAL": 0,
+  "DIFERIDO": 0,
+  "OTROS": 0,
+  "DETALLES_PAGO": 1,
+  "TOTAL_RECUPERADO": 582.74,
+  "fecha_corte": "20260713"
+}
