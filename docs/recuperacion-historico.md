@@ -1,52 +1,58 @@
-# Recuperación histórica desde MongoDB
+# Recuperación crediticia desde MongoDB
 
 ```text
 POST /analytic/recuperacion/recuperacion-historico
 ```
 
-La consulta usa exclusivamente las colecciones `RecuperacionCrediticia` y
-`SituacionCrediticia` de la base Mongo `DataSac`. SQL Server participa solo en
-la carga incremental de `RecuperacionCrediticia`.
+La consulta no usa SQL Server. Para fechas cerradas lee los movimientos y el
+contexto de cobro guardado en `RecuperacionCrediticia`. Si el rango incluye la
+fecha del sistema, esa fecha se lee desde `RecuperacionCrediticiaActual`.
+
+`prestamos_por_numero` se construye con todos los préstamos recuperados. Sus
+dimensiones corresponden a `fecha_hasta`: si es una fecha cerrada se consulta
+`SituacionCrediticia` en lotes; si es la fecha actual se usa
+`SituacionCrediticiaActual`. El estado inicial se toma del corte de
+`fecha_desde`.
 
 ## Solicitud
 
 ```json
 {
-  "fecha_desde": "2026-01-01",
-  "fecha_hasta": "2026-07-12"
+  "fecha_desde": "2026-06-01",
+  "fecha_hasta": "2026-06-30"
 }
 ```
 
-La respuesta siempre incluye y agrupa por todas las dimensiones: tipo de cobro,
-tipo de transacción, estados de inicio y fin, agencia, condición, tipo de
-préstamo, producto, segmento, asesor, ubicación, educación, edad, garantía,
-monto, tasas y plazo.
+## Resultado
 
-Las recuperaciones se almacenan con granularidad
-`fecha_corte + préstamo + tipo_transaccion`, y con importes pivotados como
-`CAPITAL`, `INTERES`, `INTERES_MORA`, `SEGURO`, entre otros. La consulta los
-desagrupa internamente para poder agrupar por `tipo_cobro`.
+Cada movimiento histórico incluye además el contexto de cobro guardado en la
+recuperación. El cliente usa `prestamos_por_numero[numero_prestamo]` para las
+dimensiones del corte final:
 
-Para dimensiones históricas, el cruce se realiza por:
-
-```text
-RecuperacionCrediticia.NUMERO_PRESTAMO = SituacionCrediticia.NumeroPrestamo
+```json
+{
+  "prestamos_por_numero": {
+    "2020112000639": {
+      "agencia": "MATRIZ",
+      "estado_prestamo_inicio": "AL DIA"
+    }
+  },
+  "recuperaciones": [
+    {
+      "fecha_cobro": "2026-06-01",
+      "numero_prestamo": "2020112000639",
+      "tipo_cobro": "COBRANZA",
+      "tipo_transaccion": "ABONO PRESTAMO AUTOMATICO",
+      "valor_recuperado": 0.01,
+      "agencia": "MATRIZ",
+      "asesor": "ANA ASESORA",
+      "estado_prestamo_cobro": "AL DIA",
+      "calificacion_cobro": "A-1"
+    }
+  ]
+}
 ```
 
-El cruce usa el mismo `NumeroPrestamo` y el mismo `fecha_corte` de la
-recuperación. Los estados de inicio y fin usan los cortes exactos de
-`fecha_desde` y `fecha_hasta`.
-
-## Índices requeridos
-
-```javascript
-db.RecuperacionCrediticia.createIndex(
-  { fecha_corte: 1, ID_PRESTAMO: 1, TIPO_TRANSACCION: 1 },
-  { unique: true }
-)
-
-db.SituacionCrediticia.createIndex(
-  { fecha_corte: 1, NumeroPrestamo: 1 },
-  { unique: true }
-)
-```
+Los valores de cobro `0` no se devuelven. La consulta usa los índices que
+inician por `fecha_corte` de las colecciones históricas y, cuando el corte final
+es actual, el índice de `SituacionCrediticiaActual.NumeroPrestamo`.

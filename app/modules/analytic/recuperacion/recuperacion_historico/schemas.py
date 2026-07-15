@@ -1,8 +1,11 @@
 from datetime import date
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class InputRecuperacionHistoricoRango(BaseModel):
+    """Rango de recuperación; la fuente de consulta es solo MongoDB."""
+
     model_config = ConfigDict(extra="forbid")
 
     fecha_desde: date = Field(description="Primera fecha de cobro incluida.")
@@ -15,6 +18,46 @@ class InputRecuperacionHistoricoRango(BaseModel):
         return self
 
 
+class RecuperacionEtiquetadaOut(BaseModel):
+    fecha_cobro: date
+    periodo: str
+    anio: int
+    mes: int
+    numero_prestamo: str
+    tipo_cobro: str
+    tipo_transaccion: str
+    valor_recuperado: float
+    agencia: str
+    asesor: str
+    abogado_externo: str
+    codigo_cobranza_apoyo: str
+    nombre_cobranza_apoyo: str
+    estado_prestamo_cobro: str
+    calificacion_cobro: str
+
+
+class PrestamoRecuperacionOut(BaseModel):
+    numero_prestamo: str
+    agencia: str
+    condicion: str
+    tipo_prestamo: str
+    producto: str
+    segmento: str
+    asesor: str
+    provincia: str
+    canton: str
+    parroquia: str
+    educacion: str
+    edad: int | None
+    garantia: str
+    monto: float | None = Field(description="Deuda inicial del préstamo en el corte final.")
+    tasa: float | None = Field(description="Tasa nominal en el corte final.")
+    tasa_real: float | None = Field(description="Tasa anual en el corte final.")
+    plazo: int | None = Field(description="Plazo registrado en el corte final.")
+    estado_prestamo_inicio: str
+    estado_prestamo_fin: str
+
+
 class ResumenMensualRecuperacion(BaseModel):
     periodo: str
     anio: int
@@ -24,39 +67,10 @@ class ResumenMensualRecuperacion(BaseModel):
     total_recuperado: float
 
 
-class RecuperacionHistoricoAgrupacion(BaseModel):
-    periodo: str
-    anio: int
-    mes: int
-    estado_prestamo_inicio: str | None = None
-    estado_prestamo_fin: str | None = None
-    tipo_cobro: str | None = None
-    tipo_transaccion: str | None = None
-    agencia: str | None = None
-    condicion: str | None = None
-    tipo_prestamo: str | None = None
-    producto: str | None = None
-    segmento: str | None = None
-    asesor: str | None = None
-    provincia: str | None = None
-    canton: str | None = None
-    parroquia: str | None = None
-    educacion: str | None = None
-    edad: str | None = None
-    garantia: str | None = None
-    monto: str | None = None
-    tasa: str | None = None
-    tasa_valor: float | None = None
-    tasa_real: str | None = None
-    tasa_real_valor: float | None = None
-    plazo: str | None = None
-    plazo_valor: int | None = None
-    total_recuperado: float
-
-
 class RecuperacionHistoricoRangoResponse(BaseModel):
     fecha_desde: date
     fecha_hasta: date
     total_recuperado: float
     resumen_mensual: list[ResumenMensualRecuperacion]
-    agrupaciones: list[RecuperacionHistoricoAgrupacion]
+    prestamos_por_numero: dict[str, PrestamoRecuperacionOut]
+    recuperaciones: list[RecuperacionEtiquetadaOut]

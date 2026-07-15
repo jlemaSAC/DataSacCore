@@ -194,3 +194,33 @@ SituacionCrediticiaActual
     "$date": "2026-07-13T17:25:00.075Z"
   }
 }
+
+
+
+            "periodo": "2026-06",
+            "anio": 2026,
+            "mes": 6,
+            "estado_prestamo_inicio": "AL DIA",
+            "estado_prestamo_fin": "AL DIA",
+            "tipo_cobro": "CAPITAL",
+            "tipo_transaccion": "ABONO PRÉSTAMO AUTOMÁTICO",
+            "agencia": "AV CEVALLOS",
+            "condicion": "NUEVO",
+            "tipo_prestamo": "CONSUMO PRIORITARIO",
+            "producto": "CONSUMO",
+            "segmento": "CONSUMO",
+            "asesor": "MASABANDA CURILLO ANGEL KLEVER",
+            "provincia": "TUNGURAHUA",
+            "canton": "AMBATO",
+            "parroquia": "CELIANO MONGE",
+            "educacion": "SECUNDARIA",
+            "edad": "HASTA 30",
+            "garantia": "SOBRE FIRMAS",
+            "monto": "C.HASTA 8.000",
+            "tasa": "G.HASTA 16",
+            "tasa_valor": 15.55,
+            "tasa_real": "H.HASTA 17",
+            "tasa_real_valor": 16.71,
+            "plazo": "C.HASTA 3 AÑOS",
+            "plazo_valor": 36,
+            "total_recuperado": 160.12
