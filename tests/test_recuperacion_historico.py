@@ -5,6 +5,9 @@ import pytest
 from app.modules.analytic.recuperacion.recuperacion_historico.repositories.mongo_recuperacion_historico_repository import (
     MongoRecuperacionHistoricoRepository,
 )
+from app.modules.analytic.recuperacion.recuperacion_historico.repositories.sql_recuperacion_historico_repository import (
+    SqlRecuperacionHistoricoRepository,
+)
 from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
     PrestamoRecuperacion,
     RecuperacionEtiquetada,
@@ -178,6 +181,34 @@ def test_entrada_solo_admite_fechas() -> None:
             fecha_hasta=date(2026, 6, 1),
             group_by=["tipo_cobro"],
         )
+
+
+class FakeSqlResult:
+    def mappings(self):
+        return self
+
+    def __iter__(self):
+        return iter([{"NumeroPrestamo": "2020112000639", "Agencia": "Matriz"}])
+
+
+class FakeSqlSession:
+    def __init__(self) -> None:
+        self.params = None
+
+    def execute(self, statement, params):
+        self.params = params
+        assert "FROM COLOCACION.PRESTAMO" in str(statement)
+        return FakeSqlResult()
+
+
+def test_consulta_actual_sql_se_limita_a_los_numeros_recuperados() -> None:
+    session = FakeSqlSession()
+    repository = SqlRecuperacionHistoricoRepository(session)  # type: ignore[arg-type]
+
+    resultado = repository.obtener_prestamos_actuales({"2020112000639"})
+
+    assert session.params == {"numeros_prestamo": ["2020112000639"]}
+    assert resultado["2020112000639"]["Agencia"] == "Matriz"
 
 
 def test_respuesta_indexa_el_prestamo_y_las_recuperaciones_lo_referencian() -> None:

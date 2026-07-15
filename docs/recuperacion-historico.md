@@ -10,9 +10,9 @@ fecha del sistema, esa fecha se lee desde `RecuperacionCrediticiaActual`.
 
 `prestamos_por_numero` se construye con todos los préstamos recuperados. Sus
 dimensiones corresponden a `fecha_hasta`: si es una fecha cerrada se consulta
-`SituacionCrediticia` en lotes; si es la fecha actual se usa
-`SituacionCrediticiaActual`. El estado inicial se toma del corte de
-`fecha_desde`.
+`SituacionCrediticia` en lotes; si es la fecha actual se consulta SQL Server
+directamente por los números de préstamo recuperados. El estado inicial se toma
+del corte de `fecha_desde`.
 
 ## Solicitud
 

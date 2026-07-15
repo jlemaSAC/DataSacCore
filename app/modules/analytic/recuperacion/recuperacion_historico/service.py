@@ -11,6 +11,10 @@ from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.repositories.mongo_recuperacion_historico_repository import (
     MongoRecuperacionHistoricoRepository,
+    _prestamo_desde_situacion,
+)
+from app.modules.analytic.recuperacion.recuperacion_historico.repositories.sql_recuperacion_historico_repository import (
+    SqlRecuperacionHistoricoRepository,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.schemas import (
     InputRecuperacionHistoricoRango,
@@ -27,8 +31,13 @@ MAX_MESES_RANGO = 60
 
 
 class RecuperacionHistoricoService:
-    def __init__(self, mongo_repository: MongoRecuperacionHistoricoRepository) -> None:
+    def __init__(
+        self,
+        mongo_repository: MongoRecuperacionHistoricoRepository,
+        sql_repository: SqlRecuperacionHistoricoRepository | None = None,
+    ) -> None:
         self.mongo_repository = mongo_repository
+        self.sql_repository = sql_repository
 
     def obtener_recuperacion_por_rango(
         self,
@@ -48,16 +57,31 @@ class RecuperacionHistoricoService:
             recuperaciones = self.mongo_repository.obtener_recuperaciones(input_data, fecha_hoy)
             print(f"[recuperacion][service] mongo_total_ms={(perf_counter() - inicio_mongo) * 1000:.2f}")
             inicio_prestamos = perf_counter()
-            prestamos_por_numero = self.mongo_repository.obtener_prestamos_por_numero(
-                {
-                    recuperacion.numero_prestamo
-                    for recuperacion in recuperaciones
-                    if recuperacion.numero_prestamo
-                },
-                input_data.fecha_desde.strftime("%Y%m%d"),
-                input_data.fecha_hasta.strftime("%Y%m%d"),
-                fecha_hoy.strftime("%Y%m%d"),
-            )
+            numeros_prestamo = {
+                recuperacion.numero_prestamo
+                for recuperacion in recuperaciones
+                if recuperacion.numero_prestamo
+            }
+            if input_data.fecha_hasta == fecha_hoy:
+                if self.sql_repository is None:
+                    raise RuntimeError("Repositorio SQL no configurado para el corte actual.")
+                prestamos_por_numero = {
+                    numero: _prestamo_desde_situacion(
+                        numero,
+                        documento,
+                        str(documento.get("EstadoPrestamo") or "SIN DATOS"),
+                    )
+                    for numero, documento in self.sql_repository.obtener_prestamos_actuales(
+                        numeros_prestamo
+                    ).items()
+                }
+            else:
+                prestamos_por_numero = self.mongo_repository.obtener_prestamos_por_numero(
+                    numeros_prestamo,
+                    input_data.fecha_desde.strftime("%Y%m%d"),
+                    input_data.fecha_hasta.strftime("%Y%m%d"),
+                    fecha_hoy.strftime("%Y%m%d"),
+                )
             print(
                 "[recuperacion][service] prestamos_total_ms="
                 f"{(perf_counter() - inicio_prestamos) * 1000:.2f} prestamos={len(prestamos_por_numero)}"
