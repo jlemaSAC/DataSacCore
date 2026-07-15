@@ -88,6 +88,11 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
             "tipo_transaccion": "ABONO PRESTAMO AUTOMATICO",
             "tipo_cobro": "COBRANZA",
             "valor_recuperado": 0.01,
+            "es_cancelado_anterior_cobro": False,
+            "es_cancelado_actual_cobro": True,
+            "se_cancelo_con_el_cobro": True,
+            "fecha_estado_prestamo_anterior_cobro": "20260531",
+            "fecha_estado_prestamo_actual_cobro": "20260601",
         }
     ])
     repository = MongoRecuperacionHistoricoRepository(FakeDatabase(collection))  # type: ignore[arg-type]
@@ -104,6 +109,11 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
     assert resultado[0].valor_recuperado == 0.01
     assert resultado[0].agencia == "MATRIZ"
     assert resultado[0].es_actual is False
+    assert resultado[0].es_cancelado_anterior_cobro is False
+    assert resultado[0].es_cancelado_actual_cobro is True
+    assert resultado[0].se_cancelo_con_el_cobro is True
+    assert resultado[0].fecha_estado_prestamo_anterior_cobro == "20260531"
+    assert resultado[0].fecha_estado_prestamo_actual_cobro == "20260601"
     assert collection.pipeline[0] == {
         "$match": {"fecha_corte": {"$gte": "20260601", "$lte": "20260601"}}
     }

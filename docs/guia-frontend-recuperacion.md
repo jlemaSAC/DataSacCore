@@ -34,6 +34,15 @@ export interface RecuperacionMovimiento {
   nombre_cobranza_apoyo: string;
   estado_prestamo_cobro: string;
   calificacion_cobro: string;
+  fecha_estado_prestamo_anterior_cobro: string; // YYYYMMDD o vacío
+  estado_prestamo_anterior_cobro: string;
+  fecha_estado_prestamo_actual_cobro: string; // YYYYMMDD
+  estado_prestamo_actual_cobro: string;
+  calificacion_anterior_cobro: string;
+  calificacion_actual_cobro: string;
+  es_cancelado_anterior_cobro: boolean;
+  es_cancelado_actual_cobro: boolean;
+  se_cancelo_con_el_cobro: boolean;
 }
 
 export interface PrestamoRecuperacion {
@@ -93,6 +102,10 @@ Del movimiento de recuperación:
 - `nombre_cobranza_apoyo` COBRANZA APOYO
 - `estado_prestamo_cobro` ESTADO PRESTAMO
 - `calificacion_cobro` CALIFICACION 
+- `estado_prestamo_anterior_cobro`, `estado_prestamo_actual_cobro`
+- `fecha_estado_prestamo_anterior_cobro`, `fecha_estado_prestamo_actual_cobro`
+- `calificacion_anterior_cobro`, `calificacion_actual_cobro`
+- `es_cancelado_anterior_cobro`, `es_cancelado_actual_cobro`, `se_cancelo_con_el_cobro`
 
 Del préstamo indexado:
 

@@ -17,6 +17,15 @@ class RecuperacionEtiquetada:
     nombre_cobranza_apoyo: str = "SIN DATOS"
     estado_prestamo_cobro: str = "SIN DATOS"
     calificacion_cobro: str = "SIN DATOS"
+    fecha_estado_prestamo_anterior_cobro: str = ""
+    estado_prestamo_anterior_cobro: str = "SIN DATOS"
+    fecha_estado_prestamo_actual_cobro: str = ""
+    estado_prestamo_actual_cobro: str = "SIN DATOS"
+    calificacion_anterior_cobro: str = "SIN DATOS"
+    calificacion_actual_cobro: str = "SIN DATOS"
+    es_cancelado_anterior_cobro: bool = False
+    es_cancelado_actual_cobro: bool = False
+    se_cancelo_con_el_cobro: bool = False
 
 
 @dataclass(frozen=True)

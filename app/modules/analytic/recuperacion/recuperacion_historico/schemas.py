@@ -34,6 +34,15 @@ class RecuperacionEtiquetadaOut(BaseModel):
     nombre_cobranza_apoyo: str
     estado_prestamo_cobro: str
     calificacion_cobro: str
+    fecha_estado_prestamo_anterior_cobro: str
+    estado_prestamo_anterior_cobro: str
+    fecha_estado_prestamo_actual_cobro: str
+    estado_prestamo_actual_cobro: str
+    calificacion_anterior_cobro: str
+    calificacion_actual_cobro: str
+    es_cancelado_anterior_cobro: bool
+    es_cancelado_actual_cobro: bool
+    se_cancelo_con_el_cobro: bool
 
 
 class PrestamoRecuperacionOut(BaseModel):

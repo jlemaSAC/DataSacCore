@@ -131,6 +131,19 @@ class RecuperacionHistoricoService:
                     "estado_prestamo_fin",
                 ),
                 calificacion_cobro=recuperacion.calificacion_cobro,
+                fecha_estado_prestamo_anterior_cobro=(
+                    recuperacion.fecha_estado_prestamo_anterior_cobro
+                ),
+                estado_prestamo_anterior_cobro=recuperacion.estado_prestamo_anterior_cobro,
+                fecha_estado_prestamo_actual_cobro=(
+                    recuperacion.fecha_estado_prestamo_actual_cobro
+                ),
+                estado_prestamo_actual_cobro=recuperacion.estado_prestamo_actual_cobro,
+                calificacion_anterior_cobro=recuperacion.calificacion_anterior_cobro,
+                calificacion_actual_cobro=recuperacion.calificacion_actual_cobro,
+                es_cancelado_anterior_cobro=recuperacion.es_cancelado_anterior_cobro,
+                es_cancelado_actual_cobro=recuperacion.es_cancelado_actual_cobro,
+                se_cancelo_con_el_cobro=recuperacion.se_cancelo_con_el_cobro,
             ))
 
         resumen: list[ResumenMensualRecuperacion] = []
