@@ -193,6 +193,112 @@ def test_consulta_fecha_actual_desde_recuperacion_crediticia_actual() -> None:
     assert historico_collection.pipeline is None
 
 
+class FakeSituacionActualParcial:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def find(self, query, projection):
+        self.calls.append((query, projection))
+        numeros = set(query["NumeroPrestamo"]["$in"])
+        if "PRESTAMO_ACTUAL" not in numeros:
+            return []
+        return [
+            {
+                "NumeroPrestamo": "PRESTAMO_ACTUAL",
+                "Agencia": "Matriz",
+                "TipoCondicion": "Nuevo",
+                "TipoPrestamo": "Microcredito actual",
+                "Producto": "Microcredito",
+                "Segmento": "Minorista",
+                "NombreAsesor": "Ana Actual",
+                "Provincia": "Tungurahua",
+                "Canton": "Ambato",
+                "Parroquia": "La Matriz",
+                "Educacion": "Superior",
+                "Edad": 35,
+                "TipoDeGarantia": "Sobre firmas",
+                "DeudaInicial": 12000,
+                "TasaNominal": 14.95,
+                "TasaAnual": 16.01,
+                "Plazo": 36,
+                "EstadoPrestamo": "Al dia",
+                "Calificacion": "A-1",
+            }
+        ]
+
+
+class FakeSituacionHistoricaAnterior:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def find(self, query, projection):
+        self.calls.append((query, projection))
+        if query.get("fecha_corte") != "20260630":
+            return []
+        numeros = set(query["NumeroPrestamo"]["$in"])
+        if "PRESTAMO_FALTANTE" not in numeros:
+            return []
+        return [
+            {
+                "NumeroPrestamo": "PRESTAMO_FALTANTE",
+                "Agencia": "Latacunga",
+                "TipoCondicion": "Renovado",
+                "TipoPrestamo": "Consumo prioritario",
+                "Producto": "Consumo",
+                "Segmento": "Consumo",
+                "NombreAsesor": "Luis Historico",
+                "Provincia": "Cotopaxi",
+                "Canton": "Latacunga",
+                "Parroquia": "Juan Montalvo",
+                "Educacion": "Secundaria",
+                "Edad": 42,
+                "TipoDeGarantia": "Hipotecaria",
+                "DeudaInicial": 8000,
+                "TasaNominal": 15.5,
+                "TasaAnual": 16.7,
+                "Plazo": 48,
+                "EstadoPrestamo": "En mora",
+                "Calificacion": "C-1",
+            }
+        ]
+
+
+class FakeFallbackDatabase:
+    def __init__(self) -> None:
+        self.recuperacion = FakeCollection()
+        self.recuperacion_actual = FakeCollection()
+        self.situacion = FakeSituacionHistoricaAnterior()
+        self.situacion_actual = FakeSituacionActualParcial()
+
+    def __getitem__(self, name):
+        if name == "RecuperacionCrediticia":
+            return self.recuperacion
+        if name == "RecuperacionCrediticiaActual":
+            return self.recuperacion_actual
+        if name == "SituacionCrediticia":
+            return self.situacion
+        assert name == "SituacionCrediticiaActual"
+        return self.situacion_actual
+
+
+def test_fecha_actual_completa_prestamos_faltantes_con_situacion_del_dia_anterior() -> None:
+    database = FakeFallbackDatabase()
+    repository = MongoRecuperacionHistoricoRepository(database)  # type: ignore[arg-type]
+
+    resultado = repository.obtener_prestamos_por_numero(
+        {"PRESTAMO_ACTUAL", "PRESTAMO_FALTANTE"},
+        fecha_inicio="20260701",
+        fecha_fin="20260701",
+        fecha_actual="20260701",
+    )
+
+    assert resultado["PRESTAMO_ACTUAL"].agencia == "MATRIZ"
+    assert resultado["PRESTAMO_FALTANTE"].agencia == "LATACUNGA"
+    assert resultado["PRESTAMO_FALTANTE"].tipo_prestamo == "CONSUMO PRIORITARIO"
+    assert resultado["PRESTAMO_FALTANTE"].calificacion_fin == "C-1"
+    assert any(call[0].get("fecha_corte") == "20260630" for call in database.situacion.calls)
+
+
 def test_entrada_solo_admite_fechas() -> None:
     with pytest.raises(ValueError, match="Extra inputs"):
         InputRecuperacionHistoricoRango(

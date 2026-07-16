@@ -187,16 +187,20 @@ class MongoRecuperacionHistoricoRepository:
         situaciones_inicio: dict[str, dict[str, Any]] = {}
         dimensiones: dict[str, dict[str, Any]] = {}
         for lote in _lotes(sorted(numeros_prestamo), TAMANO_LOTE_PRESTAMOS):
-            for documento in self._situacion_collection(fecha_inicio, fecha_actual).find(
-                self._filtro_situacion(fecha_inicio, fecha_actual, lote),
+            for documento in self._obtener_situaciones_con_fallback_actual(
+                fecha_inicio,
+                fecha_actual,
+                lote,
                 {"_id": 0, "NumeroPrestamo": 1, "EstadoPrestamo": 1, "Calificacion": 1},
             ):
                 numero = _numero_prestamo(documento)
                 if numero:
                     situaciones_inicio.setdefault(numero, documento)
 
-            for documento in self._situacion_collection(fecha_fin, fecha_actual).find(
-                self._filtro_situacion(fecha_fin, fecha_actual, lote),
+            for documento in self._obtener_situaciones_con_fallback_actual(
+                fecha_fin,
+                fecha_actual,
+                lote,
                 _proyeccion_inicio(),
             ):
                 numero = _numero_prestamo(documento)
@@ -219,15 +223,53 @@ class MongoRecuperacionHistoricoRepository:
         )
         return resultado
 
-    def _situacion_collection(self, fecha_corte: str, fecha_actual: str) -> Collection[MongoDocument]:
-        return self.situacion_actual_collection if fecha_corte == fecha_actual else self.situacion_collection
-
-    @staticmethod
-    def _filtro_situacion(fecha_corte: str, fecha_actual: str, lote: list[str]) -> dict[str, Any]:
-        filtro: dict[str, Any] = {"NumeroPrestamo": {"$in": lote}}
+    def _obtener_situaciones_con_fallback_actual(
+        self,
+        fecha_corte: str,
+        fecha_actual: str,
+        lote: list[str],
+        projection: dict[str, int],
+    ) -> list[MongoDocument]:
+        """Consulta el corte solicitado y, si es hoy, completa faltantes con ayer."""
         if fecha_corte != fecha_actual:
-            filtro["fecha_corte"] = fecha_corte
-        return filtro
+            return list(
+                self.situacion_collection.find(
+                    {
+                        "NumeroPrestamo": {"$in": lote},
+                        "fecha_corte": fecha_corte,
+                    },
+                    projection,
+                )
+            )
+
+        documentos = list(
+            self.situacion_actual_collection.find(
+                {"NumeroPrestamo": {"$in": lote}},
+                projection,
+            )
+        )
+        encontrados = {
+            numero
+            for documento in documentos
+            if (numero := _numero_prestamo(documento))
+        }
+        faltantes = [numero for numero in lote if numero not in encontrados]
+        if not faltantes:
+            return documentos
+
+        fecha_anterior = _fecha_anterior(fecha_actual)
+        documentos.extend(
+            list(
+                self.situacion_collection.find(
+                    {
+                        "NumeroPrestamo": {"$in": faltantes},
+                        "fecha_corte": fecha_anterior,
+                    },
+                    projection,
+                )
+            )
+        )
+        return documentos
 
     @staticmethod
     def _construir_pipeline(fecha_desde: str, fecha_hasta: str) -> list[dict[str, Any]]:
@@ -342,6 +384,10 @@ def _lotes(valores: list[str], tamano: int):
 def _numero_prestamo(documento: dict[str, Any]) -> str:
     valor = documento.get("NumeroPrestamo")
     return str(valor).strip() if valor is not None else ""
+
+
+def _fecha_anterior(fecha_corte: str) -> str:
+    return (datetime.strptime(fecha_corte, "%Y%m%d").date() - timedelta(days=1)).strftime("%Y%m%d")
 
 
 def _texto(valor: Any) -> str:
