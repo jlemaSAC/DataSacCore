@@ -36,7 +36,13 @@ class FakeSituacionCollection:
     def find(self, query, projection):
         self.calls.append((query, projection))
         if query.get("fecha_corte") == "20260601":
-            return [{"NumeroPrestamo": "2020112000639", "EstadoPrestamo": "Al dia"}]
+            return [
+                {
+                    "NumeroPrestamo": "2020112000639",
+                    "EstadoPrestamo": "Al dia",
+                    "Calificacion": "A-1",
+                }
+            ]
         return [
             {
                 "NumeroPrestamo": "2020112000639",
@@ -57,6 +63,7 @@ class FakeSituacionCollection:
                 "TasaAnual": 16.01,
                 "Plazo": 36,
                 "EstadoPrestamo": "En mora",
+                "Calificacion": "C-1",
             }
         ]
 
@@ -141,6 +148,8 @@ def test_consulta_estados_y_dimensiones_del_corte_final_por_prestamo() -> None:
     assert prestamo.agencia == "MATRIZ"
     assert prestamo.estado_prestamo_inicio == "AL DIA"
     assert prestamo.estado_prestamo_fin == "EN MORA"
+    assert prestamo.calificacion_inicio == "A-1"
+    assert prestamo.calificacion_fin == "C-1"
     assert prestamo.monto == 12000.0
     assert prestamo.tasa == 14.95
     assert prestamo.plazo == 36
@@ -288,6 +297,8 @@ def test_movimiento_actual_usa_el_complemento_solo_cuando_no_tiene_contexto() ->
         plazo=None,
         estado_prestamo_inicio="AL DIA",
         estado_prestamo_fin="AL DIA",
+        calificacion_inicio="A-1",
+        calificacion_fin="A-1",
     )
 
     respuesta = RecuperacionHistoricoService._construir_respuesta(
@@ -311,3 +322,89 @@ def test_movimiento_actual_usa_el_complemento_solo_cuando_no_tiene_contexto() ->
     assert movimiento.agencia == "MATRIZ"
     assert movimiento.asesor == "ANA ASESORA"
     assert movimiento.estado_prestamo_cobro == "AL DIA"
+    assert movimiento.estado_prestamo_anterior_cobro == "AL DIA"
+    assert movimiento.estado_prestamo_actual_cobro == "AL DIA"
+    assert movimiento.calificacion_cobro == "A-1"
+    assert movimiento.calificacion_anterior_cobro == "A-1"
+    assert movimiento.calificacion_actual_cobro == "A-1"
+
+
+class FakeUsuario:
+    fecha_sistema = date(2026, 6, 1)
+
+
+class FakeAuthContext:
+    usuario = FakeUsuario()
+
+
+class FakeMongoServiceRepository:
+    def __init__(self) -> None:
+        self.prestamos_args = None
+
+    def obtener_recuperaciones(self, input_data, fecha_hoy):
+        assert fecha_hoy == date(2026, 6, 1)
+        return [
+            RecuperacionEtiquetada(
+                fecha_cobro=date(2026, 6, 1),
+                numero_prestamo="2020112000639",
+                tipo_cobro="CAPITAL",
+                tipo_transaccion="ABONO",
+                valor_recuperado=10,
+                es_actual=True,
+            )
+        ]
+
+    def obtener_prestamos_por_numero(self, numeros_prestamo, fecha_inicio, fecha_fin, fecha_actual):
+        self.prestamos_args = (numeros_prestamo, fecha_inicio, fecha_fin, fecha_actual)
+        return {
+            "2020112000639": PrestamoRecuperacion(
+                numero_prestamo="2020112000639",
+                agencia="MATRIZ",
+                condicion="NUEVO",
+                tipo_prestamo="MICROCREDITO",
+                producto="MICROCREDITO",
+                segmento="MINORISTA",
+                asesor="ANA ASESORA",
+                provincia="TUNGURAHUA",
+                canton="AMBATO",
+                parroquia="LA MATRIZ",
+                educacion="SUPERIOR",
+                edad=35,
+                garantia="SOBRE FIRMAS",
+                monto=12000,
+                tasa=14.95,
+                tasa_real=16.01,
+                plazo=36,
+                estado_prestamo_inicio="AL DIA",
+                estado_prestamo_fin="AL DIA",
+            )
+        }
+
+
+class FakeSqlShouldNotRun:
+    def obtener_prestamos_actuales(self, numeros_prestamo):
+        raise AssertionError("No debe consultar SQL para fecha actual")
+
+
+def test_service_fecha_actual_usa_solo_mongo_para_prestamos() -> None:
+    mongo = FakeMongoServiceRepository()
+    service = RecuperacionHistoricoService(
+        mongo_repository=mongo,  # type: ignore[arg-type]
+        sql_repository=FakeSqlShouldNotRun(),  # type: ignore[arg-type]
+    )
+
+    respuesta = service.obtener_recuperacion_por_rango(
+        InputRecuperacionHistoricoRango(
+            fecha_desde=date(2026, 6, 1),
+            fecha_hasta=date(2026, 6, 1),
+        ),
+        FakeAuthContext(),  # type: ignore[arg-type]
+    )
+
+    assert mongo.prestamos_args == (
+        {"2020112000639"},
+        "20260601",
+        "20260601",
+        "20260601",
+    )
+    assert respuesta.recuperaciones[0].agencia == "MATRIZ"

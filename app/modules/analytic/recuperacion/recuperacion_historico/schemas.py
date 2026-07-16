@@ -65,6 +65,8 @@ class PrestamoRecuperacionOut(BaseModel):
     plazo: int | None = Field(description="Plazo registrado en el corte final.")
     estado_prestamo_inicio: str
     estado_prestamo_fin: str
+    calificacion_inicio: str = "SIN DATOS"
+    calificacion_fin: str = "SIN DATOS"
 
 
 class ResumenMensualRecuperacion(BaseModel):

@@ -11,7 +11,6 @@ from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.repositories.mongo_recuperacion_historico_repository import (
     MongoRecuperacionHistoricoRepository,
-    _prestamo_desde_situacion,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.repositories.sql_recuperacion_historico_repository import (
     SqlRecuperacionHistoricoRepository,
@@ -62,26 +61,12 @@ class RecuperacionHistoricoService:
                 for recuperacion in recuperaciones
                 if recuperacion.numero_prestamo
             }
-            if input_data.fecha_hasta == fecha_hoy:
-                if self.sql_repository is None:
-                    raise RuntimeError("Repositorio SQL no configurado para el corte actual.")
-                prestamos_por_numero = {
-                    numero: _prestamo_desde_situacion(
-                        numero,
-                        documento,
-                        str(documento.get("EstadoPrestamo") or "SIN DATOS"),
-                    )
-                    for numero, documento in self.sql_repository.obtener_prestamos_actuales(
-                        numeros_prestamo
-                    ).items()
-                }
-            else:
-                prestamos_por_numero = self.mongo_repository.obtener_prestamos_por_numero(
-                    numeros_prestamo,
-                    input_data.fecha_desde.strftime("%Y%m%d"),
-                    input_data.fecha_hasta.strftime("%Y%m%d"),
-                    fecha_hoy.strftime("%Y%m%d"),
-                )
+            prestamos_por_numero = self.mongo_repository.obtener_prestamos_por_numero(
+                numeros_prestamo,
+                input_data.fecha_desde.strftime("%Y%m%d"),
+                input_data.fecha_hasta.strftime("%Y%m%d"),
+                fecha_hoy.strftime("%Y%m%d"),
+            )
             print(
                 "[recuperacion][service] prestamos_total_ms="
                 f"{(perf_counter() - inicio_prestamos) * 1000:.2f} prestamos={len(prestamos_por_numero)}"
@@ -130,17 +115,37 @@ class RecuperacionHistoricoService:
                     prestamo_actual,
                     "estado_prestamo_fin",
                 ),
-                calificacion_cobro=recuperacion.calificacion_cobro,
+                calificacion_cobro=_valor_contexto(
+                    recuperacion.calificacion_cobro,
+                    prestamo_actual,
+                    "calificacion_fin",
+                ),
                 fecha_estado_prestamo_anterior_cobro=(
                     recuperacion.fecha_estado_prestamo_anterior_cobro
                 ),
-                estado_prestamo_anterior_cobro=recuperacion.estado_prestamo_anterior_cobro,
+                estado_prestamo_anterior_cobro=_valor_contexto(
+                    recuperacion.estado_prestamo_anterior_cobro,
+                    prestamo_actual,
+                    "estado_prestamo_inicio",
+                ),
                 fecha_estado_prestamo_actual_cobro=(
                     recuperacion.fecha_estado_prestamo_actual_cobro
                 ),
-                estado_prestamo_actual_cobro=recuperacion.estado_prestamo_actual_cobro,
-                calificacion_anterior_cobro=recuperacion.calificacion_anterior_cobro,
-                calificacion_actual_cobro=recuperacion.calificacion_actual_cobro,
+                estado_prestamo_actual_cobro=_valor_contexto(
+                    recuperacion.estado_prestamo_actual_cobro,
+                    prestamo_actual,
+                    "estado_prestamo_fin",
+                ),
+                calificacion_anterior_cobro=_valor_contexto(
+                    recuperacion.calificacion_anterior_cobro,
+                    prestamo_actual,
+                    "calificacion_inicio",
+                ),
+                calificacion_actual_cobro=_valor_contexto(
+                    recuperacion.calificacion_actual_cobro,
+                    prestamo_actual,
+                    "calificacion_fin",
+                ),
                 es_cancelado_anterior_cobro=recuperacion.es_cancelado_anterior_cobro,
                 es_cancelado_actual_cobro=recuperacion.es_cancelado_actual_cobro,
                 se_cancelo_con_el_cobro=recuperacion.se_cancelo_con_el_cobro,

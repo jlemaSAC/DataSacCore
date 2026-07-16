@@ -184,16 +184,16 @@ class MongoRecuperacionHistoricoRepository:
             return {}
 
         inicio_total = perf_counter()
-        estados_inicio: dict[str, str] = {}
+        situaciones_inicio: dict[str, dict[str, Any]] = {}
         dimensiones: dict[str, dict[str, Any]] = {}
         for lote in _lotes(sorted(numeros_prestamo), TAMANO_LOTE_PRESTAMOS):
             for documento in self._situacion_collection(fecha_inicio, fecha_actual).find(
                 self._filtro_situacion(fecha_inicio, fecha_actual, lote),
-                {"_id": 0, "NumeroPrestamo": 1, "EstadoPrestamo": 1},
+                {"_id": 0, "NumeroPrestamo": 1, "EstadoPrestamo": 1, "Calificacion": 1},
             ):
                 numero = _numero_prestamo(documento)
                 if numero:
-                    estados_inicio.setdefault(numero, _texto(documento.get("EstadoPrestamo")))
+                    situaciones_inicio.setdefault(numero, documento)
 
             for documento in self._situacion_collection(fecha_fin, fecha_actual).find(
                 self._filtro_situacion(fecha_fin, fecha_actual, lote),
@@ -207,14 +207,14 @@ class MongoRecuperacionHistoricoRepository:
             numero: _prestamo_desde_situacion(
                 numero,
                 dimensiones.get(numero),
-                estados_inicio.get(numero),
+                situaciones_inicio.get(numero),
             )
             for numero in numeros_prestamo
         }
         print(
             "[recuperacion][mongo] prestamos "
             f"inicio={fecha_inicio} fin={fecha_fin} unicos={len(numeros_prestamo)} "
-            f"inicio_encontrados={len(estados_inicio)} fin_encontrados={len(dimensiones)} "
+            f"inicio_encontrados={len(situaciones_inicio)} fin_encontrados={len(dimensiones)} "
             f"total_ms={(perf_counter() - inicio_total) * 1000:.2f}"
         )
         return resultado
@@ -330,6 +330,7 @@ def _proyeccion_inicio() -> dict[str, int]:
         "TasaAnual": 1,
         "Plazo": 1,
         "EstadoPrestamo": 1,
+        "Calificacion": 1,
     }
 
 
@@ -368,9 +369,10 @@ def _valor_numerico(valor: Any, *, entero: bool = False) -> float | int | None:
 def _prestamo_desde_situacion(
     numero_prestamo: str,
     fin: dict[str, Any] | None,
-    estado_inicio: str | None,
+    inicio: dict[str, Any] | None,
 ) -> PrestamoRecuperacion:
     fin = fin or {}
+    inicio = inicio or {}
     return PrestamoRecuperacion(
         numero_prestamo=numero_prestamo,
         agencia=_texto(fin.get("Agencia")),
@@ -398,6 +400,8 @@ def _prestamo_desde_situacion(
         tasa=_valor_numerico(fin.get("TasaNominal")),
         tasa_real=_valor_numerico(fin.get("TasaAnual")),
         plazo=_valor_numerico(fin.get("Plazo"), entero=True), # type: ignore
-        estado_prestamo_inicio=estado_inicio or "SIN DATOS",
+        estado_prestamo_inicio=_texto(inicio.get("EstadoPrestamo")),
         estado_prestamo_fin=_texto(fin.get("EstadoPrestamo")),
+        calificacion_inicio=_texto(inicio.get("Calificacion")),
+        calificacion_fin=_texto(fin.get("Calificacion")),
     )
