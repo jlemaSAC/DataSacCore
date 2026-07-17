@@ -19,8 +19,6 @@ class InputRecuperacionHistoricoRango(BaseModel):
 
 
 class RecuperacionEtiquetadaOut(BaseModel):
-    fecha_cobro: date
-    periodo: str
     anio: int
     mes: int
     numero_prestamo: str
@@ -30,18 +28,11 @@ class RecuperacionEtiquetadaOut(BaseModel):
     agencia: str
     asesor: str
     abogado_externo: str
-    codigo_cobranza_apoyo: str
     nombre_cobranza_apoyo: str
-    estado_prestamo_cobro: str
-    calificacion_cobro: str
-    fecha_estado_prestamo_anterior_cobro: str
     estado_prestamo_anterior_cobro: str
-    fecha_estado_prestamo_actual_cobro: str
     estado_prestamo_actual_cobro: str
     calificacion_anterior_cobro: str
     calificacion_actual_cobro: str
-    es_cancelado_anterior_cobro: bool
-    es_cancelado_actual_cobro: bool
     se_cancelo_con_el_cobro: bool
 
 
@@ -69,19 +60,6 @@ class PrestamoRecuperacionOut(BaseModel):
     calificacion_fin: str = "SIN DATOS"
 
 
-class ResumenMensualRecuperacion(BaseModel):
-    periodo: str
-    anio: int
-    mes: int
-    fecha_desde: date
-    fecha_hasta: date
-    total_recuperado: float
-
-
 class RecuperacionHistoricoRangoResponse(BaseModel):
-    fecha_desde: date
-    fecha_hasta: date
-    total_recuperado: float
-    resumen_mensual: list[ResumenMensualRecuperacion]
     prestamos_por_numero: dict[str, PrestamoRecuperacionOut]
     recuperaciones: list[RecuperacionEtiquetadaOut]

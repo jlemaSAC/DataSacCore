@@ -376,9 +376,38 @@ def test_respuesta_indexa_el_prestamo_y_las_recuperaciones_lo_referencian() -> N
         {numero_prestamo: prestamo},
     )
 
+    assert set(respuesta.model_dump().keys()) == {"prestamos_por_numero", "recuperaciones"}
     assert respuesta.prestamos_por_numero[numero_prestamo].estado_prestamo_fin == "EN MORA"
+    assert set(respuesta.prestamos_por_numero[numero_prestamo].model_dump().keys()) == {
+        "numero_prestamo",
+        "agencia",
+        "condicion",
+        "tipo_prestamo",
+        "producto",
+        "segmento",
+        "asesor",
+        "provincia",
+        "canton",
+        "parroquia",
+        "educacion",
+        "edad",
+        "garantia",
+        "monto",
+        "tasa",
+        "tasa_real",
+        "plazo",
+        "estado_prestamo_inicio",
+        "estado_prestamo_fin",
+        "calificacion_inicio",
+        "calificacion_fin",
+    }
+    assert respuesta.prestamos_por_numero[numero_prestamo].tipo_prestamo == "MICROCREDITO"
+    assert respuesta.prestamos_por_numero[numero_prestamo].condicion == "NUEVO"
+    assert respuesta.prestamos_por_numero[numero_prestamo].monto == 12000.0
     assert respuesta.recuperaciones[0].numero_prestamo == numero_prestamo
     assert respuesta.recuperaciones[0].valor_recuperado == 120.5
+    assert "fecha_cobro" not in respuesta.recuperaciones[0].model_dump()
+    assert "periodo" not in respuesta.recuperaciones[0].model_dump()
 
 
 def test_movimiento_actual_usa_el_complemento_solo_cuando_no_tiene_contexto() -> None:
@@ -427,10 +456,8 @@ def test_movimiento_actual_usa_el_complemento_solo_cuando_no_tiene_contexto() ->
     movimiento = respuesta.recuperaciones[0]
     assert movimiento.agencia == "MATRIZ"
     assert movimiento.asesor == "ANA ASESORA"
-    assert movimiento.estado_prestamo_cobro == "AL DIA"
     assert movimiento.estado_prestamo_anterior_cobro == "AL DIA"
     assert movimiento.estado_prestamo_actual_cobro == "AL DIA"
-    assert movimiento.calificacion_cobro == "A-1"
     assert movimiento.calificacion_anterior_cobro == "A-1"
     assert movimiento.calificacion_actual_cobro == "A-1"
 

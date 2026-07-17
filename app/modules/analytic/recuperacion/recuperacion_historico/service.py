@@ -1,6 +1,5 @@
-import calendar
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from time import perf_counter
 
 from fastapi import HTTPException
@@ -20,7 +19,6 @@ from app.modules.analytic.recuperacion.recuperacion_historico.schemas import (
     RecuperacionEtiquetadaOut,
     RecuperacionHistoricoRangoResponse,
     PrestamoRecuperacionOut,
-    ResumenMensualRecuperacion,
 )
 from app.modules.auth.schemas import AuthContext
 
@@ -90,15 +88,10 @@ class RecuperacionHistoricoService:
         recuperaciones: list[RecuperacionEtiquetada],
         prestamos_por_numero: dict[str, PrestamoRecuperacion],
     ) -> RecuperacionHistoricoRangoResponse:
-        totales_mes: dict[str, float] = {}
         datos: list[RecuperacionEtiquetadaOut] = []
         for recuperacion in recuperaciones:
-            periodo = recuperacion.fecha_cobro.strftime("%Y-%m")
-            totales_mes[periodo] = totales_mes.get(periodo, 0.0) + recuperacion.valor_recuperado
             prestamo_actual = prestamos_por_numero.get(recuperacion.numero_prestamo)
             datos.append(RecuperacionEtiquetadaOut(
-                fecha_cobro=recuperacion.fecha_cobro,
-                periodo=periodo,
                 anio=recuperacion.fecha_cobro.year,
                 mes=recuperacion.fecha_cobro.month,
                 numero_prestamo=recuperacion.numero_prestamo,
@@ -108,28 +101,11 @@ class RecuperacionHistoricoService:
                 agencia=_valor_contexto(recuperacion.agencia, prestamo_actual, "agencia"),
                 asesor=_valor_contexto(recuperacion.asesor, prestamo_actual, "asesor"),
                 abogado_externo=recuperacion.abogado_externo,
-                codigo_cobranza_apoyo=recuperacion.codigo_cobranza_apoyo,
                 nombre_cobranza_apoyo=recuperacion.nombre_cobranza_apoyo,
-                estado_prestamo_cobro=_valor_contexto(
-                    recuperacion.estado_prestamo_cobro,
-                    prestamo_actual,
-                    "estado_prestamo_fin",
-                ),
-                calificacion_cobro=_valor_contexto(
-                    recuperacion.calificacion_cobro,
-                    prestamo_actual,
-                    "calificacion_fin",
-                ),
-                fecha_estado_prestamo_anterior_cobro=(
-                    recuperacion.fecha_estado_prestamo_anterior_cobro
-                ),
                 estado_prestamo_anterior_cobro=_valor_contexto(
                     recuperacion.estado_prestamo_anterior_cobro,
                     prestamo_actual,
                     "estado_prestamo_inicio",
-                ),
-                fecha_estado_prestamo_actual_cobro=(
-                    recuperacion.fecha_estado_prestamo_actual_cobro
                 ),
                 estado_prestamo_actual_cobro=_valor_contexto(
                     recuperacion.estado_prestamo_actual_cobro,
@@ -146,30 +122,10 @@ class RecuperacionHistoricoService:
                     prestamo_actual,
                     "calificacion_fin",
                 ),
-                es_cancelado_anterior_cobro=recuperacion.es_cancelado_anterior_cobro,
-                es_cancelado_actual_cobro=recuperacion.es_cancelado_actual_cobro,
                 se_cancelo_con_el_cobro=recuperacion.se_cancelo_con_el_cobro,
             ))
 
-        resumen: list[ResumenMensualRecuperacion] = []
-        cursor = date(input_data.fecha_desde.year, input_data.fecha_desde.month, 1)
-        while cursor <= input_data.fecha_hasta:
-            periodo = cursor.strftime("%Y-%m")
-            ultimo_dia = calendar.monthrange(cursor.year, cursor.month)[1]
-            resumen.append(ResumenMensualRecuperacion(
-                periodo=periodo,
-                anio=cursor.year,
-                mes=cursor.month,
-                fecha_desde=max(input_data.fecha_desde, cursor),
-                fecha_hasta=min(input_data.fecha_hasta, date(cursor.year, cursor.month, ultimo_dia)),
-                total_recuperado=totales_mes.get(periodo, 0.0),
-            ))
-            cursor = date(cursor.year + 1, 1, 1) if cursor.month == 12 else date(cursor.year, cursor.month + 1, 1)
         return RecuperacionHistoricoRangoResponse(
-            fecha_desde=input_data.fecha_desde,
-            fecha_hasta=input_data.fecha_hasta,
-            total_recuperado=sum(totales_mes.values()),
-            resumen_mensual=resumen,
             prestamos_por_numero={
                 numero: PrestamoRecuperacionOut(**prestamo.__dict__)
                 for numero, prestamo in prestamos_por_numero.items()
