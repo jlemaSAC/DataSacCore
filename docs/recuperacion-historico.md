@@ -25,9 +25,9 @@ del corte de `fecha_desde`.
 
 ## Resultado
 
-Cada movimiento histórico incluye además el contexto de cobro guardado en la
-recuperación. El cliente usa `prestamos_por_numero[numero_prestamo]` para las
-dimensiones del corte final:
+Este endpoint conserva su contrato original: cada recuperación incluye el
+contexto del cobro y `prestamos_por_numero` contiene las dimensiones del corte
+final por número de préstamo.
 
 ```json
 {
@@ -39,15 +39,11 @@ dimensiones del corte final:
   },
   "recuperaciones": [
     {
-      "fecha_cobro": "2026-06-01",
+      "anio": 2026,
+      "mes": 6,
       "numero_prestamo": "2020112000639",
       "tipo_cobro": "COBRANZA",
-      "tipo_transaccion": "ABONO PRESTAMO AUTOMATICO",
-      "valor_recuperado": 0.01,
-      "agencia": "MATRIZ",
-      "asesor": "ANA ASESORA",
-      "estado_prestamo_cobro": "AL DIA",
-      "calificacion_cobro": "A-1"
+      "valor_recuperado": 0.01
     }
   ]
 }
@@ -56,6 +52,31 @@ dimensiones del corte final:
 Los valores de cobro `0` no se devuelven. La consulta usa los índices que
 inician por `fecha_corte` de las colecciones históricas y, cuando el corte final
 es actual, el índice de `SituacionCrediticiaActual.NumeroPrestamo`.
+
+## Resultado compacto para filtros locales
+
+```text
+POST /analytic/recuperacion/recuperacion-historico-compacto
+```
+
+Este endpoint nuevo conserva el detalle, pero reemplaza textos y objetos
+repetidos por catálogos e índices. El formato es `recuperacion-compacta-v2`.
+
+```json
+{
+  "formato": "recuperacion-compacta-v2",
+  "esquema_prestamos": ["numero_prestamo", "agencia_id", "monto_centavos"],
+  "esquema_recuperaciones": ["periodo_id", "prestamo_id", "tipo_cobro_id", "valor_centavos"],
+  "periodos": ["2026-06"],
+  "catalogos": {"agencias": ["MATRIZ"], "tipos_cobro": ["COBRANZA"]},
+  "prestamos": [["2020112000639", 0, 1200000]],
+  "recuperaciones": [[0, 0, 0, 125050]],
+  "resumen": {"cantidad_prestamos": 1, "cantidad_recuperaciones": 1}
+}
+```
+
+Los esquemas definen la posición de cada columna. Montos se envían en centavos,
+tasas multiplicadas por cien y valores numéricos ausentes como `-1`.
 
 ## Consulta agregada para analítica
 

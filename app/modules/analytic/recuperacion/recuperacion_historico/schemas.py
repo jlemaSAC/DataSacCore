@@ -94,6 +94,85 @@ class RecuperacionHistoricoRangoResponse(BaseModel):
     recuperaciones: list[RecuperacionEtiquetadaOut]
 
 
+CAMPOS_PRESTAMO_COMPACTO = (
+    "numero_prestamo",
+    "agencia_id",
+    "condicion_id",
+    "tipo_prestamo_id",
+    "producto_id",
+    "segmento_id",
+    "asesor_id",
+    "provincia_id",
+    "canton_id",
+    "parroquia_id",
+    "educacion_id",
+    "edad",
+    "garantia_id",
+    "monto_centavos",
+    "tasa_centenas",
+    "tasa_real_centenas",
+    "plazo_meses",
+    "estado_inicio_id",
+    "estado_fin_id",
+    "calificacion_inicio_id",
+    "calificacion_fin_id",
+)
+CAMPOS_RECUPERACION_COMPACTO = (
+    "periodo_id",
+    "prestamo_id",
+    "tipo_cobro_id",
+    "tipo_transaccion_id",
+    "valor_centavos",
+    "agencia_id",
+    "asesor_id",
+    "abogado_externo_id",
+    "nombre_cobranza_apoyo_id",
+    "estado_anterior_id",
+    "estado_actual_id",
+    "calificacion_anterior_id",
+    "calificacion_actual_id",
+    "se_cancelo_con_el_cobro",
+)
+
+
+class RecuperacionCatalogosCompactosOut(BaseModel):
+    agencias: list[str]
+    condiciones: list[str]
+    tipos_prestamo: list[str]
+    productos: list[str]
+    segmentos: list[str]
+    asesores: list[str]
+    provincias: list[str]
+    cantones: list[str]
+    parroquias: list[str]
+    educaciones: list[str]
+    garantias: list[str]
+    estados_prestamo: list[str]
+    calificaciones: list[str]
+    tipos_cobro: list[str]
+    tipos_transaccion: list[str]
+    abogados_externos: list[str]
+    nombres_cobranza_apoyo: list[str]
+
+
+class RecuperacionResumenCompactoOut(BaseModel):
+    cantidad_prestamos: int
+    cantidad_recuperaciones: int
+
+
+class RecuperacionHistoricoCompactoResponse(BaseModel):
+    formato: Literal["recuperacion-compacta-v2"] = "recuperacion-compacta-v2"
+    esquema_prestamos: list[str] = Field(default_factory=lambda: list(CAMPOS_PRESTAMO_COMPACTO))
+    esquema_recuperaciones: list[str] = Field(
+        default_factory=lambda: list(CAMPOS_RECUPERACION_COMPACTO)
+    )
+    periodos: list[str]
+    catalogos: RecuperacionCatalogosCompactosOut
+    prestamos: list[list[str | int]]
+    recuperaciones: list[list[int]]
+    resumen: RecuperacionResumenCompactoOut
+
+
 class InputRecuperacionHistoricoAgrupado(InputRecuperacionHistoricoRango):
     """Consulta agregada; los filtros se aplican antes de construir las series."""
 

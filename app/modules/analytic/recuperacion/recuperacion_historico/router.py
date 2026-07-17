@@ -7,6 +7,7 @@ from app.modules.analytic.recuperacion.recuperacion_historico.schemas import (
     InputRecuperacionHistoricoAgrupado,
     InputRecuperacionHistoricoRango,
     RecuperacionHistoricoAgrupadoResponse,
+    RecuperacionHistoricoCompactoResponse,
     RecuperacionHistoricoRangoResponse,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.service import RecuperacionHistoricoService
@@ -28,6 +29,19 @@ def obtener_recuperacion_historica_por_rango(
     service: RecuperacionHistoricoService = Depends(get_recuperacion_historico_service),
 ) -> RecuperacionHistoricoRangoResponse:
     return service.obtener_recuperacion_por_rango(body, auth_context)
+
+
+@router.post(
+    "/recuperacion/recuperacion-historico-compacto",
+    response_model=RecuperacionHistoricoCompactoResponse,
+    summary="Consultar recuperación histórica compacta desde MongoDB",
+)
+def obtener_recuperacion_historica_compacta(
+    body: InputRecuperacionHistoricoRango,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: RecuperacionHistoricoService = Depends(get_recuperacion_historico_service),
+) -> RecuperacionHistoricoCompactoResponse:
+    return service.obtener_recuperacion_compacta(body, auth_context)
 
 
 @router.post(

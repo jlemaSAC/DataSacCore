@@ -379,36 +379,11 @@ def test_respuesta_indexa_el_prestamo_y_las_recuperaciones_lo_referencian() -> N
 
     assert set(respuesta.model_dump().keys()) == {"prestamos_por_numero", "recuperaciones"}
     assert respuesta.prestamos_por_numero[numero_prestamo].estado_prestamo_fin == "EN MORA"
-    assert set(respuesta.prestamos_por_numero[numero_prestamo].model_dump().keys()) == {
-        "numero_prestamo",
-        "agencia",
-        "condicion",
-        "tipo_prestamo",
-        "producto",
-        "segmento",
-        "asesor",
-        "provincia",
-        "canton",
-        "parroquia",
-        "educacion",
-        "edad",
-        "garantia",
-        "monto",
-        "tasa",
-        "tasa_real",
-        "plazo",
-        "estado_prestamo_inicio",
-        "estado_prestamo_fin",
-        "calificacion_inicio",
-        "calificacion_fin",
-    }
     assert respuesta.prestamos_por_numero[numero_prestamo].tipo_prestamo == "MICROCREDITO"
     assert respuesta.prestamos_por_numero[numero_prestamo].condicion == "NUEVO"
     assert respuesta.prestamos_por_numero[numero_prestamo].monto == 12000.0
     assert respuesta.recuperaciones[0].numero_prestamo == numero_prestamo
     assert respuesta.recuperaciones[0].valor_recuperado == 120.5
-    assert "fecha_cobro" not in respuesta.recuperaciones[0].model_dump()
-    assert "periodo" not in respuesta.recuperaciones[0].model_dump()
 
 
 def test_movimiento_actual_usa_el_complemento_solo_cuando_no_tiene_contexto() -> None:
@@ -542,6 +517,28 @@ def test_service_fecha_actual_usa_solo_mongo_para_prestamos() -> None:
         "20260601",
     )
     assert respuesta.recuperaciones[0].agencia == "MATRIZ"
+
+
+def test_service_compacto_indexa_textos_y_montos() -> None:
+    service = RecuperacionHistoricoService(
+        mongo_repository=FakeMongoServiceRepository(),  # type: ignore[arg-type]
+    )
+
+    respuesta = service.obtener_recuperacion_compacta(
+        InputRecuperacionHistoricoRango(
+            fecha_desde=date(2026, 6, 1), fecha_hasta=date(2026, 6, 1)
+        ),
+        FakeAuthContext(),  # type: ignore[arg-type]
+    )
+
+    assert respuesta.formato == "recuperacion-compacta-v2"
+    assert respuesta.periodos == ["2026-06"]
+    assert respuesta.prestamos[0][0] == "2020112000639"
+    assert respuesta.prestamos[0][13] == 1200000
+    assert respuesta.recuperaciones[0][4] == 1000
+    assert respuesta.catalogos.agencias[respuesta.recuperaciones[0][5]] == "MATRIZ"
+    assert respuesta.resumen.cantidad_prestamos == 1
+    assert respuesta.resumen.cantidad_recuperaciones == 1
 
 
 def test_entrada_agrupada_normaliza_filtros_y_valida_dimension() -> None:

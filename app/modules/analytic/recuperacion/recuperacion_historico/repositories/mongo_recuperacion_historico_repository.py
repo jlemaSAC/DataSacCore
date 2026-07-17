@@ -37,8 +37,6 @@ DIMENSIONES_CONTEXTO_INICIAL = {
     "estado_prestamo_anterior_cobro",
     "calificacion_anterior_cobro",
 }
-
-
 def _expresion_numero(campo: str) -> dict[str, Any]:
     return {
         "$convert": {
@@ -615,7 +613,6 @@ class MongoRecuperacionHistoricoRepository:
             ]
         )
         return pipeline
-
 
 def _proyeccion_inicio() -> dict[str, int]:
     return {
