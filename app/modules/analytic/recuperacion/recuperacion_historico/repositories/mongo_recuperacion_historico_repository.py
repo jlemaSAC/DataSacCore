@@ -85,14 +85,13 @@ class MongoRecuperacionHistoricoRepository:
             fecha_hasta,
             (fecha_actual - timedelta(days=1)).strftime("%Y%m%d"),
         )
-        consultas: list[tuple[str, Collection[MongoDocument], list[dict[str, Any]], bool]] = []
+        consultas: list[tuple[str, Collection[MongoDocument], list[dict[str, Any]]]] = []
         if fecha_desde <= fecha_historica_hasta:
             consultas.append(
                 (
                     "historico",
                     self.collection,
                     self._construir_pipeline(fecha_desde, fecha_historica_hasta),
-                    False,
                 )
             )
         if fecha_desde <= fecha_actual_str <= fecha_hasta:
@@ -101,7 +100,6 @@ class MongoRecuperacionHistoricoRepository:
                     "actual",
                     self.actual_collection,
                     self._construir_pipeline(fecha_actual_str, fecha_actual_str),
-                    True,
                 )
             )
         print(
@@ -112,7 +110,7 @@ class MongoRecuperacionHistoricoRepository:
         resultado: list[RecuperacionEtiquetada] = []
         cursor_ms = 0.0
         fetch_ms = 0.0
-        for nombre, collection, pipeline, es_actual in consultas:
+        for nombre, collection, pipeline in consultas:
             inicio_cursor = perf_counter()
             filas = collection.aggregate(pipeline, allowDiskUse=True)
             cursor_ms += (perf_counter() - inicio_cursor) * 1000
@@ -129,22 +127,12 @@ class MongoRecuperacionHistoricoRepository:
                         tipo_cobro=str(fila["tipo_cobro"]),
                         tipo_transaccion=str(fila.get("tipo_transaccion") or "SIN DATOS"),
                         valor_recuperado=float(fila.get("valor_recuperado") or 0),
-                        es_actual=es_actual,
                         agencia=_texto(fila.get("agencia")),
                         asesor=_texto(fila.get("asesor")),
                         abogado_externo=_texto(fila.get("abogado_externo")),
-                        codigo_cobranza_apoyo=_texto(fila.get("codigo_cobranza_apoyo")),
                         nombre_cobranza_apoyo=_texto(fila.get("nombre_cobranza_apoyo")),
-                        estado_prestamo_cobro=_texto(fila.get("estado_prestamo_cobro")),
-                        calificacion_cobro=_texto(fila.get("calificacion_cobro")),
-                        fecha_estado_prestamo_anterior_cobro=str(
-                            fila.get("fecha_estado_prestamo_anterior_cobro") or ""
-                        ),
                         estado_prestamo_anterior_cobro=_texto(
                             fila.get("estado_prestamo_anterior_cobro")
-                        ),
-                        fecha_estado_prestamo_actual_cobro=str(
-                            fila.get("fecha_estado_prestamo_actual_cobro") or ""
                         ),
                         estado_prestamo_actual_cobro=_texto(
                             fila.get("estado_prestamo_actual_cobro")
@@ -154,12 +142,6 @@ class MongoRecuperacionHistoricoRepository:
                         ),
                         calificacion_actual_cobro=_texto(
                             fila.get("calificacion_actual_cobro")
-                        ),
-                        es_cancelado_anterior_cobro=_booleano(
-                            fila.get("es_cancelado_anterior_cobro")
-                        ),
-                        es_cancelado_actual_cobro=_booleano(
-                            fila.get("es_cancelado_actual_cobro")
                         ),
                     )
                 )
@@ -370,29 +352,14 @@ class MongoRecuperacionHistoricoRepository:
                     "agencia": "$AGENCIA",
                     "asesor": {"$ifNull": ["$NOMBRE_ASESOR_COBRO", "$CODIGO_ASESOR_COBRO"]},
                     "abogado_externo": "$ABOGADO_EXTERNO_COBRO",
-                    "codigo_cobranza_apoyo": "$CODIGO_COBRANZA_APOYO_COBRO",
                     "nombre_cobranza_apoyo": "$NOMBRE_COBRANZA_APOYO_COBRO",
-                    "estado_prestamo_cobro": "$ESTADO_PRESTAMO_COBRO",
-                    "calificacion_cobro": "$CALIFICACION_COBRO",
-                    "fecha_estado_prestamo_anterior_cobro": {
-                        "$ifNull": ["$FECHA_ESTADO_PRESTAMO_ANTERIOR_COBRO", ""]
-                    },
                     "estado_prestamo_anterior_cobro": "$ESTADO_PRESTAMO_ANTERIOR_COBRO",
-                    "fecha_estado_prestamo_actual_cobro": {
-                        "$ifNull": ["$FECHA_ESTADO_PRESTAMO_ACTUAL_COBRO", "$fecha_corte"]
-                    },
                     "estado_prestamo_actual_cobro": {
                         "$ifNull": ["$ESTADO_PRESTAMO_ACTUAL_COBRO", "$ESTADO_PRESTAMO_COBRO"]
                     },
                     "calificacion_anterior_cobro": "$CALIFICACION_ANTERIOR_COBRO",
                     "calificacion_actual_cobro": {
                         "$ifNull": ["$CALIFICACION_ACTUAL_COBRO", "$CALIFICACION_COBRO"]
-                    },
-                    "es_cancelado_anterior_cobro": {
-                        "$ifNull": ["$ES_CANCELADO_ANTERIOR_COBRO", False]
-                    },
-                    "es_cancelado_actual_cobro": {
-                        "$ifNull": ["$ES_CANCELADO_ACTUAL_COBRO", False]
                     },
                     "cobros": _cobros(),
                 }
@@ -408,23 +375,15 @@ class MongoRecuperacionHistoricoRepository:
                     "agencia": 1,
                     "asesor": 1,
                     "abogado_externo": 1,
-                    "codigo_cobranza_apoyo": 1,
                     "nombre_cobranza_apoyo": 1,
-                    "estado_prestamo_cobro": 1,
-                    "calificacion_cobro": 1,
-                    "fecha_estado_prestamo_anterior_cobro": 1,
                     "estado_prestamo_anterior_cobro": 1,
-                    "fecha_estado_prestamo_actual_cobro": 1,
                     "estado_prestamo_actual_cobro": 1,
                     "calificacion_anterior_cobro": 1,
                     "calificacion_actual_cobro": 1,
-                    "es_cancelado_anterior_cobro": 1,
-                    "es_cancelado_actual_cobro": 1,
                     "tipo_cobro": "$cobros.tipo_cobro",
                     "valor_recuperado": "$cobros.valor",
                 }
             },
-            {"$sort": {"fecha_corte": 1, "numero_prestamo": 1, "tipo_transaccion": 1, "tipo_cobro": 1}},
         ]
 
     @staticmethod
@@ -654,12 +613,6 @@ def _fecha_anterior(fecha_corte: str) -> str:
 
 def _texto(valor: Any) -> str:
     return str(valor or "SIN DATOS").strip().upper() or "SIN DATOS"
-
-
-def _booleano(valor: Any) -> bool:
-    if isinstance(valor, bool):
-        return valor
-    return str(valor or "").strip().upper() in {"1", "TRUE", "SI", "SÍ"}
 
 
 def _valor_numerico(valor: Any, *, entero: bool = False) -> float | int | None:

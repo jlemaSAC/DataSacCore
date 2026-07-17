@@ -96,10 +96,6 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
             "tipo_transaccion": "ABONO PRESTAMO AUTOMATICO",
             "tipo_cobro": "COBRANZA",
             "valor_recuperado": 0.01,
-            "es_cancelado_anterior_cobro": False,
-            "es_cancelado_actual_cobro": True,
-            "fecha_estado_prestamo_anterior_cobro": "20260531",
-            "fecha_estado_prestamo_actual_cobro": "20260601",
         }
     ])
     repository = MongoRecuperacionHistoricoRepository(FakeDatabase(collection))  # type: ignore[arg-type]
@@ -115,20 +111,30 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
     assert resultado[0].tipo_transaccion == "ABONO PRESTAMO AUTOMATICO"
     assert resultado[0].valor_recuperado == 0.01
     assert resultado[0].agencia == "MATRIZ"
-    assert resultado[0].es_actual is False
-    assert resultado[0].es_cancelado_anterior_cobro is False
-    assert resultado[0].es_cancelado_actual_cobro is True
-    assert resultado[0].fecha_estado_prestamo_anterior_cobro == "20260531"
-    assert resultado[0].fecha_estado_prestamo_actual_cobro == "20260601"
     assert collection.pipeline[0] == {
         "$match": {"fecha_corte": {"$gte": "20260601", "$lte": "20260601"}}
     }
     assert not any("$lookup" in stage or "$group" in stage for stage in collection.pipeline)
     assert any(stage == {"$unwind": "$cobros"} for stage in collection.pipeline)
+    assert not any("$sort" in stage for stage in collection.pipeline)
     cobros = collection.pipeline[1]["$project"]["cobros"]
     assert cobros[0]["valor"] == {
         "$convert": {"input": "$CAPITAL", "to": "double", "onError": 0, "onNull": 0}
     }
+    proyeccion_final = next(
+        etapa["$project"]
+        for etapa in collection.pipeline
+        if etapa.get("$project", {}).get("valor_recuperado") == "$cobros.valor"
+    )
+    assert not {
+        "codigo_cobranza_apoyo",
+        "estado_prestamo_cobro",
+        "calificacion_cobro",
+        "fecha_estado_prestamo_anterior_cobro",
+        "fecha_estado_prestamo_actual_cobro",
+        "es_cancelado_anterior_cobro",
+        "es_cancelado_actual_cobro",
+    }.intersection(proyeccion_final)
 
 
 def test_consulta_estados_y_dimensiones_del_corte_final_por_prestamo() -> None:
@@ -185,7 +191,6 @@ def test_consulta_fecha_actual_desde_recuperacion_crediticia_actual() -> None:
         date(2026, 6, 1),
     )
 
-    assert resultado[0].es_actual is True
     assert actual_collection.pipeline[0] == {
         "$match": {"fecha_corte": {"$gte": "20260601", "$lte": "20260601"}}
     }
@@ -470,7 +475,6 @@ def test_movimiento_actual_usa_el_complemento_solo_cuando_no_tiene_contexto() ->
                 tipo_cobro="CAPITAL",
                 tipo_transaccion="ABONO",
                 valor_recuperado=20,
-                es_actual=True,
             )
         ],
         {numero_prestamo: prestamo},
@@ -506,7 +510,6 @@ class FakeMongoServiceRepository:
                 tipo_cobro="CAPITAL",
                 tipo_transaccion="ABONO",
                 valor_recuperado=10,
-                es_actual=True,
             )
         ]
 
