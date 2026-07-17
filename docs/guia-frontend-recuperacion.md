@@ -8,85 +8,66 @@ dimensiones del préstamo.
 
 ```ts
 export interface RecuperacionHistoricoResponse {
-  fecha_desde: string;
-  fecha_hasta: string;
-  total_recuperado: number;
-  resumen_mensual: ResumenMensualRecuperacion[];
-  prestamos_por_numero: Record<string, PrestamoRecuperacion>;
-  recuperaciones: RecuperacionMovimiento[];
+  p: Record<string, PrestamoRecuperacion>; // préstamos por número
+  r: RecuperacionMovimiento[]; // recuperaciones
 }
 
 export interface RecuperacionMovimiento {
-  fecha_cobro: string;
-  periodo: string; // YYYY-MM
-  anio: number;
-  mes: number;
-  numero_prestamo: string;
-  tipo_cobro: string;
-  tipo_transaccion: string;
-  valor_recuperado: number;
+  an: number; // año
+  me: number; // mes
+  np: string; // número de préstamo
+  tc: string; // tipo de cobro
+  tx: string; // transacción
+  v: number; // valor recuperado
 
   // Contexto registrado al momento del cobro.
-  agencia: string;
-  asesor: string;
-  abogado_externo: string;
-  codigo_cobranza_apoyo: string;
-  nombre_cobranza_apoyo: string;
-  estado_prestamo_cobro: string;
-  calificacion_cobro: string;
-  fecha_estado_prestamo_anterior_cobro: string; // YYYYMMDD o vacío
-  estado_prestamo_anterior_cobro: string;
-  fecha_estado_prestamo_actual_cobro: string; // YYYYMMDD
-  estado_prestamo_actual_cobro: string;
-  calificacion_anterior_cobro: string;
-  calificacion_actual_cobro: string;
-  es_cancelado_anterior_cobro: boolean;
-  es_cancelado_actual_cobro: boolean;
-  se_cancelo_con_el_cobro: boolean;
+  ag: string; // agencia
+  as: string; // asesor
+  ae?: string; // abogado externo
+  ap?: string; // cobranza apoyo
+  ea: string; // estado anterior
+  ec: string; // estado actual
+  ca: string; // calificación anterior
+  cc: string; // calificación actual
 }
 
 export interface PrestamoRecuperacion {
-  numero_prestamo: string;
-  agencia: string;
-  condicion: string;
-  tipo_prestamo: string;
-  producto: string;
-  segmento: string;
-  asesor: string;
-  provincia: string;
-  canton: string;
-  parroquia: string;
-  educacion: string;
-  edad: number | null;
-  garantia: string;
-  monto: number | null;
-  tasa: number | null;
-  tasa_real: number | null;
-  plazo: number | null;
-  estado_prestamo_inicio: string;
-  estado_prestamo_fin: string;
+  co: string; // condición
+  tp: string; // tipo de préstamo
+  pr: string; // producto
+  sg: string; // segmento
+  pv: string; // provincia
+  cn: string; // cantón
+  pq: string; // parroquia
+  ed: string; // educación
+  e: number | null; // edad
+  ga: string; // garantía
+  mo: number | null; // monto
+  tn: number | null; // tasa nominal
+  tr: number | null; // tasa real
+  pl: number | null; // plazo en meses
 }
 ```
 
 ## Cambio importante
 
-`recuperaciones` contiene un registro por `tipo_cobro`, por lo que
-`valor_recuperado` es la métrica que se suma en gráficas y tablas.
+`r` contiene un registro por `tc`, por lo que `v` es la métrica que se suma
+en gráficas y tablas.
 
-Las dimensiones analíticas viven en `prestamos_por_numero` y se consultan con
-la llave `numero_prestamo`. No se debe buscar con `.find()` ni solicitar datos
+Las dimensiones analíticas viven en `p` y se consultan con la llave `np`. No se
+debe buscar con `.find()` ni solicitar datos
 adicionales al backend.
 
 ```ts
-const prestamo = respuesta.prestamos_por_numero[movimiento.numero_prestamo];
+const prestamo = respuesta.p[movimiento.np];
 const hecho = { ...prestamo, ...movimiento };
 ```
 
-El orden anterior conserva los nuevos campos del cobro (`tipo_cobro`,
-`tipo_transaccion`, responsables, estado y calificación) y agrega las
+El orden anterior conserva los campos del cobro (`tc`, `tx`, responsables,
+estado y calificación) y agrega las
 dimensiones del préstamo para filtrar o agrupar.
 
-Para los filtros y gráficos de `agencia` y `asesor`, usar siempre los valores
+Para los filtros y gráficos de `ag` y `as`, usar siempre los valores
 de `RecuperacionMovimiento`. Representan la agencia y el asesor al momento del
 cobro. No usar los valores homónimos de `PrestamoRecuperacion`, porque
 corresponden al préstamo en `fecha_hasta`.
@@ -95,24 +76,13 @@ corresponden al préstamo en `fecha_hasta`.
 
 Del movimiento de recuperación:
 
-- `tipo_cobro`
-- `tipo_transaccion`
-- `abogado_externo` (ABOGADO)
-- `codigo_cobranza_apoyo` 
-- `nombre_cobranza_apoyo` COBRANZA APOYO
-- `estado_prestamo_cobro` ESTADO PRESTAMO
-- `calificacion_cobro` CALIFICACION 
-- `estado_prestamo_anterior_cobro`, `estado_prestamo_actual_cobro`
-- `fecha_estado_prestamo_anterior_cobro`, `fecha_estado_prestamo_actual_cobro`
-- `calificacion_anterior_cobro`, `calificacion_actual_cobro`
-- `es_cancelado_anterior_cobro`, `es_cancelado_actual_cobro`, `se_cancelo_con_el_cobro`
+- `tc`, `tx`
+- `ae` (ABOGADO), `ap` (COBRANZA APOYO)
+- `ea`, `ec`, `ca`, `cc`
 
 Del préstamo indexado:
 
-- `condicion`, `tipo_prestamo`, `producto`, `segmento`
-- `provincia`, `canton`, `parroquia`, `educacion`
-- `edad`, `garantia`, `monto`, `tasa`, `tasa_real`, `plazo`
-- `estado_prestamo_inicio`, `estado_prestamo_fin`(Ya no usarlo de esta manera)
+- `co`, `tp`, `pr`, `sg`, `pv`, `cn`, `pq`, `ed`
+- `e`, `ga`, `mo`, `tn`, `tr`, `pl`
 
-Para ordenar períodos, usar `anio * 100 + mes`; `periodo` se mantiene para
-etiquetas y agrupaciones mensuales.
+Para ordenar períodos, usar `an * 100 + me`.

@@ -48,50 +48,44 @@ class InputRecuperacionHistoricoRango(BaseModel):
 
 
 class RecuperacionEtiquetadaOut(BaseModel):
-    anio: int
-    mes: int
-    numero_prestamo: str
-    tipo_cobro: str
-    tipo_transaccion: str
-    valor_recuperado: float
-    agencia: str
-    asesor: str
-    abogado_externo: str
-    nombre_cobranza_apoyo: str
-    estado_prestamo_anterior_cobro: str
-    estado_prestamo_actual_cobro: str
-    calificacion_anterior_cobro: str
-    calificacion_actual_cobro: str
-    se_cancelo_con_el_cobro: bool
+    anio: int = Field(serialization_alias="an")
+    mes: int = Field(serialization_alias="me")
+    numero_prestamo: str = Field(serialization_alias="np")
+    tipo_cobro: str = Field(serialization_alias="tc")
+    transaccion: str = Field(serialization_alias="tx")
+    valor: float = Field(serialization_alias="v")
+    agencia: str = Field(serialization_alias="ag")
+    asesor: str = Field(serialization_alias="as")
+    abogado_externo: str | None = Field(default=None, serialization_alias="ae")
+    nombre_cobranza_apoyo: str | None = Field(default=None, serialization_alias="ap")
+    estado_anterior: str = Field(serialization_alias="ea")
+    estado_actual: str = Field(serialization_alias="ec")
+    calificacion_anterior: str = Field(serialization_alias="ca")
+    calificacion_actual: str = Field(serialization_alias="cc")
 
 
 class PrestamoRecuperacionOut(BaseModel):
-    numero_prestamo: str
-    agencia: str
-    condicion: str
-    tipo_prestamo: str
-    producto: str
-    segmento: str
-    asesor: str
-    provincia: str
-    canton: str
-    parroquia: str
-    educacion: str
-    edad: int | None
-    garantia: str
-    monto: float | None = Field(description="Deuda inicial del préstamo en el corte final.")
-    tasa: float | None = Field(description="Tasa nominal en el corte final.")
-    tasa_real: float | None = Field(description="Tasa anual en el corte final.")
-    plazo: int | None = Field(description="Plazo registrado en el corte final.")
-    estado_prestamo_inicio: str
-    estado_prestamo_fin: str
-    calificacion_inicio: str = "SIN DATOS"
-    calificacion_fin: str = "SIN DATOS"
+    condicion: str = Field(serialization_alias="co")
+    tipo_prestamo: str = Field(serialization_alias="tp")
+    producto: str = Field(serialization_alias="pr")
+    segmento: str = Field(serialization_alias="sg")
+    provincia: str = Field(serialization_alias="pv")
+    canton: str = Field(serialization_alias="cn")
+    parroquia: str = Field(serialization_alias="pq")
+    educacion: str = Field(serialization_alias="ed")
+    edad: int | None = Field(serialization_alias="e")
+    garantia: str = Field(serialization_alias="ga")
+    monto: float | None = Field(
+        description="Deuda inicial del préstamo en el corte final.", serialization_alias="mo"
+    )
+    tasa: float | None = Field(description="Tasa nominal en el corte final.", serialization_alias="tn")
+    tasa_real: float | None = Field(description="Tasa anual en el corte final.", serialization_alias="tr")
+    plazo: int | None = Field(description="Plazo registrado en el corte final.", serialization_alias="pl")
 
 
 class RecuperacionHistoricoRangoResponse(BaseModel):
-    prestamos_por_numero: dict[str, PrestamoRecuperacionOut]
-    recuperaciones: list[RecuperacionEtiquetadaOut]
+    prestamos_por_numero: dict[str, PrestamoRecuperacionOut] = Field(serialization_alias="p")
+    recuperaciones: list[RecuperacionEtiquetadaOut] = Field(serialization_alias="r")
 
 
 CAMPOS_PRESTAMO_COMPACTO = (
@@ -131,7 +125,6 @@ CAMPOS_RECUPERACION_COMPACTO = (
     "estado_actual_id",
     "calificacion_anterior_id",
     "calificacion_actual_id",
-    "se_cancelo_con_el_cobro",
 )
 
 

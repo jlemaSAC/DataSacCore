@@ -21,6 +21,8 @@ router = APIRouter(tags=["Analytic Sac - Recuperacion"])
 @router.post(
     "/recuperacion/recuperacion-historico",
     response_model=RecuperacionHistoricoRangoResponse,
+    response_model_by_alias=True,
+    response_model_exclude_none=True,
     summary="Consultar recuperación histórica desde MongoDB",
 )
 def obtener_recuperacion_historica_por_rango(

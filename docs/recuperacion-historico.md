@@ -31,19 +31,18 @@ final por número de préstamo.
 
 ```json
 {
-  "prestamos_por_numero": {
+  "p": {
     "2020112000639": {
-      "agencia": "MATRIZ",
-      "estado_prestamo_inicio": "AL DIA"
+      "tp": "MICROCREDITO"
     }
   },
-  "recuperaciones": [
+  "r": [
     {
-      "anio": 2026,
-      "mes": 6,
-      "numero_prestamo": "2020112000639",
-      "tipo_cobro": "COBRANZA",
-      "valor_recuperado": 0.01
+      "an": 2026,
+      "me": 6,
+      "np": "2020112000639",
+      "tc": "COBRANZA",
+      "v": 0.01
     }
   ]
 }

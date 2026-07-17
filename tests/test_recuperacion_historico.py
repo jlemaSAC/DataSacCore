@@ -98,7 +98,6 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
             "valor_recuperado": 0.01,
             "es_cancelado_anterior_cobro": False,
             "es_cancelado_actual_cobro": True,
-            "se_cancelo_con_el_cobro": True,
             "fecha_estado_prestamo_anterior_cobro": "20260531",
             "fecha_estado_prestamo_actual_cobro": "20260601",
         }
@@ -119,7 +118,6 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
     assert resultado[0].es_actual is False
     assert resultado[0].es_cancelado_anterior_cobro is False
     assert resultado[0].es_cancelado_actual_cobro is True
-    assert resultado[0].se_cancelo_con_el_cobro is True
     assert resultado[0].fecha_estado_prestamo_anterior_cobro == "20260531"
     assert resultado[0].fecha_estado_prestamo_actual_cobro == "20260601"
     assert collection.pipeline[0] == {
@@ -377,13 +375,62 @@ def test_respuesta_indexa_el_prestamo_y_las_recuperaciones_lo_referencian() -> N
         {numero_prestamo: prestamo},
     )
 
-    assert set(respuesta.model_dump().keys()) == {"prestamos_por_numero", "recuperaciones"}
-    assert respuesta.prestamos_por_numero[numero_prestamo].estado_prestamo_fin == "EN MORA"
+    respuesta_serializada = respuesta.model_dump(by_alias=True, exclude_none=True)
+    assert set(respuesta_serializada.keys()) == {"p", "r"}
+    assert set(respuesta_serializada["p"][numero_prestamo]) == {
+        "co",
+        "tp",
+        "pr",
+        "sg",
+        "pv",
+        "cn",
+        "pq",
+        "ed",
+        "e",
+        "ga",
+        "mo",
+        "tn",
+        "tr",
+        "pl",
+    }
+    assert set(respuesta_serializada["r"][0]) == {
+        "an",
+        "me",
+        "np",
+        "tc",
+        "tx",
+        "v",
+        "ag",
+        "as",
+        "ea",
+        "ec",
+        "ca",
+        "cc",
+    }
     assert respuesta.prestamos_por_numero[numero_prestamo].tipo_prestamo == "MICROCREDITO"
     assert respuesta.prestamos_por_numero[numero_prestamo].condicion == "NUEVO"
     assert respuesta.prestamos_por_numero[numero_prestamo].monto == 12000.0
     assert respuesta.recuperaciones[0].numero_prestamo == numero_prestamo
-    assert respuesta.recuperaciones[0].valor_recuperado == 120.5
+    assert respuesta.recuperaciones[0].valor == 120.5
+    assert respuesta.recuperaciones[0].transaccion == "ABONO"
+    movimiento_serializado = respuesta.recuperaciones[0].model_dump()
+    assert "tipo_transaccion" not in movimiento_serializado
+    assert "valor_recuperado" not in movimiento_serializado
+    assert "estado_prestamo_anterior_cobro" not in movimiento_serializado
+    assert "estado_prestamo_actual_cobro" not in movimiento_serializado
+    assert "calificacion_anterior_cobro" not in movimiento_serializado
+    assert "calificacion_actual_cobro" not in movimiento_serializado
+    assert respuesta.recuperaciones[0].abogado_externo is None
+    assert respuesta.recuperaciones[0].nombre_cobranza_apoyo is None
+    assert "abogado_externo" not in respuesta.recuperaciones[0].model_dump(exclude_none=True)
+    assert "nombre_cobranza_apoyo" not in respuesta.recuperaciones[0].model_dump(exclude_none=True)
+    assert "numero_prestamo" not in respuesta.prestamos_por_numero[numero_prestamo].model_dump()
+    assert "estado_prestamo_inicio" not in respuesta.prestamos_por_numero[numero_prestamo].model_dump()
+    assert "estado_prestamo_fin" not in respuesta.prestamos_por_numero[numero_prestamo].model_dump()
+    assert "calificacion_inicio" not in respuesta.prestamos_por_numero[numero_prestamo].model_dump()
+    assert "calificacion_fin" not in respuesta.prestamos_por_numero[numero_prestamo].model_dump()
+    assert "agencia" not in respuesta.prestamos_por_numero[numero_prestamo].model_dump()
+    assert "asesor" not in respuesta.prestamos_por_numero[numero_prestamo].model_dump()
 
 
 def test_movimiento_actual_usa_el_complemento_solo_cuando_no_tiene_contexto() -> None:
@@ -432,10 +479,10 @@ def test_movimiento_actual_usa_el_complemento_solo_cuando_no_tiene_contexto() ->
     movimiento = respuesta.recuperaciones[0]
     assert movimiento.agencia == "MATRIZ"
     assert movimiento.asesor == "ANA ASESORA"
-    assert movimiento.estado_prestamo_anterior_cobro == "AL DIA"
-    assert movimiento.estado_prestamo_actual_cobro == "AL DIA"
-    assert movimiento.calificacion_anterior_cobro == "A-1"
-    assert movimiento.calificacion_actual_cobro == "A-1"
+    assert movimiento.estado_anterior == "AL DIA"
+    assert movimiento.estado_actual == "AL DIA"
+    assert movimiento.calificacion_anterior == "A-1"
+    assert movimiento.calificacion_actual == "A-1"
 
 
 class FakeUsuario:

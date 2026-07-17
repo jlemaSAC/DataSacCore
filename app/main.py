@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pymongo.errors import PyMongoError
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -93,10 +94,16 @@ def add_cors_middleware(fastapi_app: FastAPI, app_settings: AppSettings) -> None
     )
 
 
+def add_gzip_middleware(fastapi_app: FastAPI) -> None:
+    """Comprime respuestas JSON grandes sin cambiar su contrato HTTP."""
+    fastapi_app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
+
+
 settings = get_app_settings()
 app = FastAPI(title=settings.name, version=settings.version, lifespan=lifespan)
 
 add_cors_middleware(app, settings)
+add_gzip_middleware(app)
 
 app.include_router(health.router)
 app.include_router(auth_router)

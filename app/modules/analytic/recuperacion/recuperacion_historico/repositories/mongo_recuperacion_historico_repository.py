@@ -161,9 +161,6 @@ class MongoRecuperacionHistoricoRepository:
                         es_cancelado_actual_cobro=_booleano(
                             fila.get("es_cancelado_actual_cobro")
                         ),
-                        se_cancelo_con_el_cobro=_booleano(
-                            fila.get("se_cancelo_con_el_cobro")
-                        ),
                     )
                 )
                 duracion_mapeo_ms = (perf_counter() - inicio_mapeo) * 1000
@@ -397,9 +394,6 @@ class MongoRecuperacionHistoricoRepository:
                     "es_cancelado_actual_cobro": {
                         "$ifNull": ["$ES_CANCELADO_ACTUAL_COBRO", False]
                     },
-                    "se_cancelo_con_el_cobro": {
-                        "$ifNull": ["$SE_CANCELO_CON_EL_COBRO", False]
-                    },
                     "cobros": _cobros(),
                 }
             },
@@ -426,7 +420,6 @@ class MongoRecuperacionHistoricoRepository:
                     "calificacion_actual_cobro": 1,
                     "es_cancelado_anterior_cobro": 1,
                     "es_cancelado_actual_cobro": 1,
-                    "se_cancelo_con_el_cobro": 1,
                     "tipo_cobro": "$cobros.tipo_cobro",
                     "valor_recuperado": "$cobros.valor",
                 }

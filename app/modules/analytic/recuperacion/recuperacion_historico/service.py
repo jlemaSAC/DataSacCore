@@ -262,33 +262,32 @@ class RecuperacionHistoricoService:
                     mes=recuperacion.fecha_cobro.month,
                     numero_prestamo=recuperacion.numero_prestamo,
                     tipo_cobro=recuperacion.tipo_cobro,
-                    tipo_transaccion=recuperacion.tipo_transaccion,
-                    valor_recuperado=recuperacion.valor_recuperado,
+                    transaccion=recuperacion.tipo_transaccion,
+                    valor=recuperacion.valor_recuperado,
                     agencia=_valor_contexto(recuperacion.agencia, prestamo_actual, "agencia"),
                     asesor=_valor_contexto(recuperacion.asesor, prestamo_actual, "asesor"),
-                    abogado_externo=recuperacion.abogado_externo,
-                    nombre_cobranza_apoyo=recuperacion.nombre_cobranza_apoyo,
-                    estado_prestamo_anterior_cobro=_valor_contexto(
+                    abogado_externo=_texto_opcional(recuperacion.abogado_externo),
+                    nombre_cobranza_apoyo=_texto_opcional(recuperacion.nombre_cobranza_apoyo),
+                    estado_anterior=_valor_contexto(
                         recuperacion.estado_prestamo_anterior_cobro,
                         prestamo_actual,
                         "estado_prestamo_inicio",
                     ),
-                    estado_prestamo_actual_cobro=_valor_contexto(
+                    estado_actual=_valor_contexto(
                         recuperacion.estado_prestamo_actual_cobro,
                         prestamo_actual,
                         "estado_prestamo_fin",
                     ),
-                    calificacion_anterior_cobro=_valor_contexto(
+                    calificacion_anterior=_valor_contexto(
                         recuperacion.calificacion_anterior_cobro,
                         prestamo_actual,
                         "calificacion_inicio",
                     ),
-                    calificacion_actual_cobro=_valor_contexto(
+                    calificacion_actual=_valor_contexto(
                         recuperacion.calificacion_actual_cobro,
                         prestamo_actual,
                         "calificacion_fin",
                     ),
-                    se_cancelo_con_el_cobro=recuperacion.se_cancelo_con_el_cobro,
                 )
             )
 
@@ -401,7 +400,6 @@ class RecuperacionHistoricoService:
                             "calificacion_fin",
                         ),
                     ),
-                    int(recuperacion.se_cancelo_con_el_cobro),
                 ]
             )
 
@@ -425,6 +423,10 @@ def _valor_contexto(
     if valor != "SIN DATOS" or prestamo is None:
         return valor
     return str(getattr(prestamo, atributo) or "SIN DATOS")
+
+
+def _texto_opcional(valor: str) -> str | None:
+    return None if valor == "SIN DATOS" else valor
 
 
 class _CatalogosCompactos:

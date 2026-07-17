@@ -25,7 +25,6 @@ class RecuperacionEtiquetada:
     calificacion_actual_cobro: str = "SIN DATOS"
     es_cancelado_anterior_cobro: bool = False
     es_cancelado_actual_cobro: bool = False
-    se_cancelo_con_el_cobro: bool = False
 
 
 @dataclass(frozen=True)
