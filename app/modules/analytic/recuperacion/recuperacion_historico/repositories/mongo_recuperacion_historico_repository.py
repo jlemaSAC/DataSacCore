@@ -10,6 +10,7 @@ from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
     RecuperacionEtiquetada,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.schemas import (
+    InputRecuperacionHistoricoAgrupado,
     InputRecuperacionHistoricoRango,
 )
 
@@ -20,6 +21,22 @@ COLECCION_RECUPERACION_ACTUAL = "RecuperacionCrediticiaActual"
 COLECCION_SITUACION = "SituacionCrediticia"
 COLECCION_SITUACION_ACTUAL = "SituacionCrediticiaActual"
 TAMANO_LOTE_PRESTAMOS = 1_000
+DIMENSIONES_MOVIMIENTO = {
+    "agencia",
+    "asesor",
+    "tipo_cobro",
+    "tipo_transaccion",
+    "abogado_externo",
+    "nombre_cobranza_apoyo",
+    "estado_prestamo_anterior_cobro",
+    "calificacion_anterior_cobro",
+    "estado_prestamo_actual_cobro",
+    "calificacion_actual_cobro",
+}
+DIMENSIONES_CONTEXTO_INICIAL = {
+    "estado_prestamo_anterior_cobro",
+    "calificacion_anterior_cobro",
+}
 
 
 def _expresion_numero(campo: str) -> dict[str, Any]:
@@ -171,6 +188,81 @@ class MongoRecuperacionHistoricoRepository:
             f"mapping_ms={mapeo_ms:.2f} filas={len(resultado)}"
         )
         return resultado
+
+    def obtener_recuperacion_agrupada(
+        self,
+        input_data: InputRecuperacionHistoricoAgrupado,
+        fecha_actual: date,
+    ) -> dict[str, Any]:
+        """Agrupa en MongoDB y solo materializa series y catálogos pequeños."""
+        fecha_desde = input_data.fecha_desde.strftime("%Y%m%d")
+        fecha_hasta = input_data.fecha_hasta.strftime("%Y%m%d")
+        fecha_actual_str = fecha_actual.strftime("%Y%m%d")
+        fecha_historica_hasta = min(
+            fecha_hasta,
+            (fecha_actual - timedelta(days=1)).strftime("%Y%m%d"),
+        )
+        consultas: list[tuple[str, Collection[MongoDocument], str, str]] = []
+        if fecha_desde <= fecha_historica_hasta:
+            consultas.append(
+                ("historico", self.collection, fecha_desde, fecha_historica_hasta)
+            )
+        if fecha_desde <= fecha_actual_str <= fecha_hasta:
+            consultas.append(
+                ("actual", self.actual_collection, fecha_actual_str, fecha_actual_str)
+            )
+
+        datos: dict[tuple[str, str], dict[str, Any]] = {}
+        agencias: set[str] = set()
+        asesores: set[str] = set()
+        tipos_prestamo: set[str] = set()
+        inicio_total = perf_counter()
+        for nombre, collection, desde, hasta in consultas:
+            pipeline = self._construir_pipeline_agrupado(
+                input_data,
+                desde,
+                hasta,
+                fecha_actual_str,
+            )
+            inicio_fuente = perf_counter()
+            documento = next(iter(collection.aggregate(pipeline, allowDiskUse=True)), None) or {}
+            for fila in documento.get("datos", []):
+                clave = (str(fila["periodo"]), str(fila["etiqueta"]))
+                acumulado = datos.setdefault(
+                    clave,
+                    {
+                        "periodo": clave[0],
+                        "etiqueta": clave[1],
+                        "valor": 0.0,
+                        "cantidad_movimientos": 0,
+                    },
+                )
+                acumulado["valor"] += float(fila.get("valor") or 0)
+                acumulado["cantidad_movimientos"] += int(
+                    fila.get("cantidad_movimientos") or 0
+                )
+            agencias.update(_catalogo_desde_facet(documento.get("agencias", [])))
+            asesores.update(_catalogo_desde_facet(documento.get("asesores", [])))
+            tipos_prestamo.update(
+                _catalogo_desde_facet(documento.get("tipos_prestamo", []))
+            )
+            print(
+                "[recuperacion][mongo][agrupado] "
+                f"fuente={nombre} filas={len(documento.get('datos', []))} "
+                f"total_ms={(perf_counter() - inicio_fuente) * 1000:.2f}"
+            )
+
+        print(
+            "[recuperacion][mongo][agrupado] "
+            f"dimension={input_data.dimension} filas_finales={len(datos)} "
+            f"total_ms={(perf_counter() - inicio_total) * 1000:.2f}"
+        )
+        return {
+            "datos": list(datos.values()),
+            "agencias": sorted(agencias),
+            "asesores": sorted(asesores),
+            "tipos_prestamo": sorted(tipos_prestamo),
+        }
 
     def obtener_prestamos_por_numero(
         self,
@@ -344,6 +436,186 @@ class MongoRecuperacionHistoricoRepository:
             {"$sort": {"fecha_corte": 1, "numero_prestamo": 1, "tipo_transaccion": 1, "tipo_cobro": 1}},
         ]
 
+    @staticmethod
+    def _construir_pipeline_agrupado(
+        input_data: InputRecuperacionHistoricoAgrupado,
+        fecha_desde: str,
+        fecha_hasta: str,
+        fecha_actual: str,
+    ) -> list[dict[str, Any]]:
+        dimension = input_data.dimension
+        dimension_movimiento = _dimension_movimiento_origen(dimension)
+        group_id: dict[str, Any] = {
+            "periodo": "$periodo",
+            "numero": "$numero_prestamo",
+            "agencia": "$agencia",
+            "asesor": "$asesor",
+        }
+        if dimension_movimiento is not None and dimension not in {"agencia", "asesor"}:
+            group_id["dimension"] = dimension_movimiento
+        group_id_consolidado: dict[str, Any] = {
+            "numero": "$_id.numero",
+            "agencia": "$_id.agencia",
+            "asesor": "$_id.asesor",
+        }
+        if "dimension" in group_id:
+            group_id_consolidado["dimension"] = "$_id.dimension"
+
+        pipeline: list[dict[str, Any]] = [
+            {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
+            {
+                "$project": {
+                    "periodo": {"$substrBytes": ["$fecha_corte", 0, 6]},
+                    "numero_prestamo": {
+                        "$trim": {
+                            "input": {
+                                "$convert": {
+                                    "input": {
+                                        "$ifNull": ["$NUMERO_PRESTAMO", "$NumeroPrestamo"]
+                                    },
+                                    "to": "string",
+                                    "onError": "",
+                                    "onNull": "",
+                                }
+                            }
+                        }
+                    },
+                    "tipo_transaccion": {
+                        "$ifNull": ["$TIPO_TRANSACCION", "$TipoTransaccion"]
+                    },
+                    "agencia": "$AGENCIA",
+                    "asesor": {
+                        "$ifNull": ["$NOMBRE_ASESOR_COBRO", "$CODIGO_ASESOR_COBRO"]
+                    },
+                    "abogado_externo": "$ABOGADO_EXTERNO_COBRO",
+                    "nombre_cobranza_apoyo": "$NOMBRE_COBRANZA_APOYO_COBRO",
+                    "estado_prestamo_anterior_cobro": "$ESTADO_PRESTAMO_ANTERIOR_COBRO",
+                    "calificacion_anterior_cobro": "$CALIFICACION_ANTERIOR_COBRO",
+                    "estado_prestamo_actual_cobro": {
+                        "$ifNull": [
+                            "$ESTADO_PRESTAMO_ACTUAL_COBRO",
+                            "$ESTADO_PRESTAMO_COBRO",
+                        ]
+                    },
+                    "calificacion_actual_cobro": {
+                        "$ifNull": ["$CALIFICACION_ACTUAL_COBRO", "$CALIFICACION_COBRO"]
+                    },
+                    "cobros": _cobros(),
+                }
+            },
+            {"$unwind": "$cobros"},
+            {"$match": {"cobros.valor": {"$ne": 0}, "numero_prestamo": {"$ne": ""}}},
+            {
+                "$group": {
+                    "_id": group_id,
+                    "valor": {"$sum": "$cobros.valor"},
+                    "cantidad_movimientos": {"$sum": 1},
+                }
+            },
+            {
+                "$group": {
+                    "_id": group_id_consolidado,
+                    "periodos": {
+                        "$push": {
+                            "periodo": "$_id.periodo",
+                            "valor": "$valor",
+                            "cantidad_movimientos": "$cantidad_movimientos",
+                        }
+                    },
+                }
+            },
+        ]
+        pipeline.extend(
+            _lookup_corte(
+                alias="prestamo_fin",
+                fecha_corte=input_data.fecha_hasta.strftime("%Y%m%d"),
+                fecha_actual=fecha_actual,
+                projection=_proyeccion_inicio(),
+            )
+        )
+        if dimension in DIMENSIONES_CONTEXTO_INICIAL:
+            pipeline.extend(
+                _lookup_corte(
+                    alias="prestamo_inicio",
+                    fecha_corte=input_data.fecha_desde.strftime("%Y%m%d"),
+                    fecha_actual=fecha_actual,
+                    projection={
+                        "_id": 0,
+                        "NumeroPrestamo": 1,
+                        "EstadoPrestamo": 1,
+                        "Calificacion": 1,
+                    },
+                )
+            )
+
+        agencia = _contexto_mongo("$_id.agencia", "$prestamo_fin.Agencia")
+        asesor = _contexto_mongo(
+            "$_id.asesor",
+            {"$ifNull": ["$prestamo_fin.NombreAsesor", "$prestamo_fin.CodigoAsesor"]},
+        )
+        tipo_prestamo = _texto_mongo("$prestamo_fin.TipoPrestamo")
+        pipeline.extend(
+            [
+                {
+                    "$project": {
+                        "_id": 0,
+                        "numero_prestamo": "$_id.numero",
+                        "periodos": 1,
+                        "agencia": agencia,
+                        "asesor": asesor,
+                        "tipo_prestamo": tipo_prestamo,
+                        "dimension": _dimension_agrupada(
+                            dimension,
+                            agencia=agencia,
+                            asesor=asesor,
+                            tipo_prestamo=tipo_prestamo,
+                        ),
+                    }
+                },
+                {
+                    "$facet": {
+                        "datos": [
+                            *_filtros_pipeline(input_data, incluir_tipo=True),
+                            {"$unwind": "$periodos"},
+                            {
+                                "$group": {
+                                    "_id": {
+                                        "periodo": "$periodos.periodo",
+                                        "etiqueta": "$dimension",
+                                    },
+                                    "valor": {"$sum": "$periodos.valor"},
+                                    "cantidad_movimientos": {
+                                        "$sum": "$periodos.cantidad_movimientos"
+                                    },
+                                }
+                            },
+                            {
+                                "$project": {
+                                    "_id": 0,
+                                    "periodo": "$_id.periodo",
+                                    "etiqueta": "$_id.etiqueta",
+                                    "valor": 1,
+                                    "cantidad_movimientos": 1,
+                                }
+                            },
+                            {"$sort": {"periodo": 1, "etiqueta": 1}},
+                        ],
+                        "agencias": _pipeline_catalogo("agencia"),
+                        "asesores": [
+                            *_match_lista("agencia", input_data.agencias),
+                            *_pipeline_catalogo("asesor"),
+                        ],
+                        "tipos_prestamo": [
+                            *_match_lista("agencia", input_data.agencias),
+                            *_match_lista("asesor", input_data.asesores),
+                            *_pipeline_catalogo("tipo_prestamo"),
+                        ],
+                    }
+                },
+            ]
+        )
+        return pipeline
+
 
 def _proyeccion_inicio() -> dict[str, int]:
     return {
@@ -451,3 +723,351 @@ def _prestamo_desde_situacion(
         calificacion_inicio=_texto(inicio.get("Calificacion")),
         calificacion_fin=_texto(fin.get("Calificacion")),
     )
+
+
+def _catalogo_desde_facet(filas: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(fila.get("valor") or "").strip()
+        for fila in filas
+        if str(fila.get("valor") or "").strip()
+    }
+
+
+def _dimension_movimiento_origen(dimension: str) -> Any | None:
+    if dimension not in DIMENSIONES_MOVIMIENTO:
+        return None
+    if dimension == "tipo_cobro":
+        return "$cobros.tipo_cobro"
+    return f"${dimension}"
+
+
+def _lookup_corte(
+    *,
+    alias: str,
+    fecha_corte: str,
+    fecha_actual: str,
+    projection: dict[str, int],
+) -> list[dict[str, Any]]:
+    if fecha_corte != fecha_actual:
+        historico = f"{alias}_historico"
+        return [
+            _lookup_historico(historico, fecha_corte, projection),
+            {
+                "$set": {
+                    alias: {
+                        "$ifNull": [
+                            {"$arrayElemAt": [f"${historico}", 0]},
+                            {},
+                        ]
+                    }
+                }
+            },
+        ]
+
+    actual = f"{alias}_actual"
+    historico = f"{alias}_historico"
+    fecha_anterior = _fecha_anterior(fecha_actual)
+    return [
+        {
+            "$lookup": {
+                "from": COLECCION_SITUACION_ACTUAL,
+                "let": {"numero": "$_id.numero"},
+                "pipeline": [
+                    {
+                        "$match": {
+                            "$expr": {"$eq": ["$NumeroPrestamo", "$$numero"]}
+                        }
+                    },
+                    {"$project": projection},
+                    {"$limit": 1},
+                ],
+                "as": actual,
+            }
+        },
+        _lookup_historico(historico, fecha_anterior, projection),
+        {
+            "$set": {
+                alias: {
+                    "$ifNull": [
+                        {"$arrayElemAt": [f"${actual}", 0]},
+                        {
+                            "$ifNull": [
+                                {"$arrayElemAt": [f"${historico}", 0]},
+                                {},
+                            ]
+                        },
+                    ]
+                }
+            }
+        },
+    ]
+
+
+def _lookup_historico(
+    alias: str,
+    fecha_corte: str,
+    projection: dict[str, int],
+) -> dict[str, Any]:
+    return {
+        "$lookup": {
+            "from": COLECCION_SITUACION,
+            "let": {"numero": "$_id.numero"},
+            "pipeline": [
+                {
+                    "$match": {
+                        "fecha_corte": fecha_corte,
+                        "$expr": {"$eq": ["$NumeroPrestamo", "$$numero"]},
+                    }
+                },
+                {"$project": projection},
+                {"$limit": 1},
+            ],
+            "as": alias,
+        }
+    }
+
+
+def _texto_mongo(valor: Any) -> dict[str, Any]:
+    texto = {
+        "$trim": {
+            "input": {
+                "$convert": {
+                    "input": valor,
+                    "to": "string",
+                    "onError": "",
+                    "onNull": "",
+                }
+            }
+        }
+    }
+    return {
+        "$let": {
+            "vars": {"texto": texto},
+            "in": {
+                "$cond": [
+                    {"$eq": ["$$texto", ""]},
+                    "SIN DATOS",
+                    {"$toUpper": "$$texto"},
+                ]
+            },
+        }
+    }
+
+
+def _contexto_mongo(valor: Any, respaldo: Any) -> dict[str, Any]:
+    return {
+        "$let": {
+            "vars": {"valor": _texto_mongo(valor)},
+            "in": {
+                "$cond": [
+                    {"$eq": ["$$valor", "SIN DATOS"]},
+                    _texto_mongo(respaldo),
+                    "$$valor",
+                ]
+            },
+        }
+    }
+
+
+def _dimension_agrupada(
+    dimension: str,
+    *,
+    agencia: Any,
+    asesor: Any,
+    tipo_prestamo: Any,
+) -> Any:
+    if dimension == "agencia":
+        return agencia
+    if dimension == "asesor":
+        return asesor
+    if dimension == "tipo_prestamo":
+        return tipo_prestamo
+
+    campos_prestamo = {
+        "condicion": "$prestamo_fin.TipoCondicion",
+        "producto": "$prestamo_fin.Producto",
+        "segmento": "$prestamo_fin.Segmento",
+        "provincia": "$prestamo_fin.Provincia",
+        "canton": "$prestamo_fin.Canton",
+        "parroquia": "$prestamo_fin.Parroquia",
+        "educacion": {
+            "$ifNull": [
+                "$prestamo_fin.Educacion",
+                {
+                    "$ifNull": [
+                        "$prestamo_fin.Educación",
+                        {
+                            "$ifNull": [
+                                "$prestamo_fin.NivelEducacion",
+                                "$prestamo_fin.NivelDeEducacion",
+                            ]
+                        },
+                    ]
+                },
+            ]
+        },
+        "garantia": {
+            "$ifNull": [
+                "$prestamo_fin.TipoDeGarantia",
+                {
+                    "$ifNull": [
+                        "$prestamo_fin.TipoGarantia",
+                        "$prestamo_fin.GarantiaTipo",
+                    ]
+                },
+            ]
+        },
+    }
+    if dimension in campos_prestamo:
+        return _texto_mongo(campos_prestamo[dimension])
+    if dimension == "edad":
+        return _rango_mongo(
+            "$prestamo_fin.Edad",
+            [9, 19, 29, 39, 49, 59, 69, 79, 89],
+            [
+                "0-9",
+                "10-19",
+                "20-29",
+                "30-39",
+                "40-49",
+                "50-59",
+                "60-69",
+                "70-79",
+                "80-89",
+                "90+",
+            ],
+        )
+    if dimension == "monto":
+        return _rango_mongo(
+            "$prestamo_fin.DeudaInicial",
+            [3000, 5000, 8000, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000],
+            [
+                "Hasta 3.000",
+                "Hasta 5.000",
+                "Hasta 8.000",
+                "Hasta 10.000",
+                "Hasta 20.000",
+                "Hasta 30.000",
+                "Hasta 40.000",
+                "Hasta 50.000",
+                "Hasta 60.000",
+                "Hasta 70.000",
+                "Hasta 80.000",
+                "Hasta 90.000",
+                "Hasta 100.000",
+                "Más de 100.000",
+            ],
+        )
+    if dimension in {"tasa", "tasa_real"}:
+        campo = "$prestamo_fin.TasaNominal" if dimension == "tasa" else "$prestamo_fin.TasaAnual"
+        return _rango_mongo(
+            campo,
+            [13, 14, 16, 17, 18, 19, 20, 21],
+            [
+                "Hasta 13%",
+                "Hasta 14%",
+                "Hasta 16%",
+                "Hasta 17%",
+                "Hasta 18%",
+                "Hasta 19%",
+                "Hasta 20%",
+                "Hasta 21%",
+                "Más de 22%",
+            ],
+        )
+    if dimension == "plazo":
+        return _rango_mongo(
+            "$prestamo_fin.Plazo",
+            [12, 24, 36, 48, 60, 72, 84, 96, 120],
+            [
+                "Hasta 1 AÑO",
+                "Hasta 2 AÑOS",
+                "Hasta 3 AÑOS",
+                "Hasta 4 AÑOS",
+                "Hasta 5 AÑOS",
+                "Hasta 6 AÑOS",
+                "Hasta 7 AÑOS",
+                "Hasta 8 AÑOS",
+                "Hasta 10 AÑOS",
+                "Más de 10 AÑOS",
+            ],
+        )
+
+    if dimension == "estado_prestamo_anterior_cobro":
+        return _contexto_mongo("$_id.dimension", "$prestamo_inicio.EstadoPrestamo")
+    if dimension == "calificacion_anterior_cobro":
+        return _contexto_mongo("$_id.dimension", "$prestamo_inicio.Calificacion")
+    if dimension == "estado_prestamo_actual_cobro":
+        return _contexto_mongo("$_id.dimension", "$prestamo_fin.EstadoPrestamo")
+    if dimension == "calificacion_actual_cobro":
+        return _contexto_mongo("$_id.dimension", "$prestamo_fin.Calificacion")
+    return _texto_mongo("$_id.dimension")
+
+
+def _rango_mongo(
+    campo: Any,
+    limites: list[int],
+    etiquetas: list[str],
+) -> dict[str, Any]:
+    numero = {
+        "$convert": {
+            "input": campo,
+            "to": "double",
+            "onError": None,
+            "onNull": None,
+        }
+    }
+    return {
+        "$let": {
+            "vars": {"numero": numero},
+            "in": {
+                "$cond": [
+                    {
+                        "$or": [
+                            {"$eq": ["$$numero", None]},
+                            {"$lt": ["$$numero", 0]},
+                        ]
+                    },
+                    "SIN DATOS",
+                    {
+                        "$switch": {
+                            "branches": [
+                                {
+                                    "case": {"$lte": ["$$numero", limite]},
+                                    "then": etiquetas[indice],
+                                }
+                                for indice, limite in enumerate(limites)
+                            ],
+                            "default": etiquetas[-1],
+                        }
+                    },
+                ]
+            },
+        }
+    }
+
+
+def _match_lista(campo: str, valores: list[str]) -> list[dict[str, Any]]:
+    return [{"$match": {campo: {"$in": valores}}}] if valores else []
+
+
+def _filtros_pipeline(
+    input_data: InputRecuperacionHistoricoAgrupado,
+    *,
+    incluir_tipo: bool,
+) -> list[dict[str, Any]]:
+    pipeline = [
+        *_match_lista("agencia", input_data.agencias),
+        *_match_lista("asesor", input_data.asesores),
+    ]
+    if incluir_tipo:
+        pipeline.extend(_match_lista("tipo_prestamo", input_data.tipos_prestamo))
+    return pipeline
+
+
+def _pipeline_catalogo(campo: str) -> list[dict[str, Any]]:
+    return [
+        {"$group": {"_id": f"${campo}"}},
+        {"$project": {"_id": 0, "valor": "$_id"}},
+        {"$sort": {"valor": 1}},
+    ]

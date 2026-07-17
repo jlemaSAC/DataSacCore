@@ -1,6 +1,35 @@
 from datetime import date
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+RecuperacionDimension = Literal[
+    "agencia",
+    "asesor",
+    "tipo_prestamo",
+    "condicion",
+    "producto",
+    "segmento",
+    "provincia",
+    "canton",
+    "parroquia",
+    "educacion",
+    "edad",
+    "garantia",
+    "monto",
+    "tasa",
+    "tasa_real",
+    "plazo",
+    "tipo_cobro",
+    "tipo_transaccion",
+    "abogado_externo",
+    "nombre_cobranza_apoyo",
+    "estado_prestamo_anterior_cobro",
+    "calificacion_anterior_cobro",
+    "estado_prestamo_actual_cobro",
+    "calificacion_actual_cobro",
+]
 
 
 class InputRecuperacionHistoricoRango(BaseModel):
@@ -63,3 +92,59 @@ class PrestamoRecuperacionOut(BaseModel):
 class RecuperacionHistoricoRangoResponse(BaseModel):
     prestamos_por_numero: dict[str, PrestamoRecuperacionOut]
     recuperaciones: list[RecuperacionEtiquetadaOut]
+
+
+class InputRecuperacionHistoricoAgrupado(InputRecuperacionHistoricoRango):
+    """Consulta agregada; los filtros se aplican antes de construir las series."""
+
+    dimension: RecuperacionDimension
+    agencias: list[str] = Field(default_factory=list, max_length=500)
+    asesores: list[str] = Field(default_factory=list, max_length=500)
+    tipos_prestamo: list[str] = Field(default_factory=list, max_length=500)
+
+    @field_validator("agencias", "asesores", "tipos_prestamo", mode="after")
+    @classmethod
+    def normalizar_filtros(cls, valores: list[str]) -> list[str]:
+        normalizados: list[str] = []
+        vistos: set[str] = set()
+        for valor in valores:
+            texto = valor.strip().upper()
+            if texto and texto not in vistos:
+                vistos.add(texto)
+                normalizados.append(texto)
+        return normalizados
+
+
+class RecuperacionPeriodoOut(BaseModel):
+    clave: str
+    anio: int
+    mes: int
+    etiqueta: str
+
+
+class RecuperacionSerieOut(BaseModel):
+    clave: str
+    etiqueta: str
+    valores: list[float]
+    total: float
+
+
+class RecuperacionCatalogosOut(BaseModel):
+    agencias: list[str]
+    asesores: list[str]
+    tipos_prestamo: list[str]
+
+
+class RecuperacionResumenAgrupadoOut(BaseModel):
+    cantidad_movimientos: int
+    cantidad_series: int
+
+
+class RecuperacionHistoricoAgrupadoResponse(BaseModel):
+    dimension: RecuperacionDimension
+    periodos: list[RecuperacionPeriodoOut]
+    series: list[RecuperacionSerieOut]
+    totales_por_periodo: list[float]
+    total_general: float
+    catalogos: RecuperacionCatalogosOut
+    resumen: RecuperacionResumenAgrupadoOut

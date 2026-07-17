@@ -13,6 +13,7 @@ from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
     RecuperacionEtiquetada,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.schemas import (
+    InputRecuperacionHistoricoAgrupado,
     InputRecuperacionHistoricoRango,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.service import RecuperacionHistoricoService
@@ -541,3 +542,111 @@ def test_service_fecha_actual_usa_solo_mongo_para_prestamos() -> None:
         "20260601",
     )
     assert respuesta.recuperaciones[0].agencia == "MATRIZ"
+
+
+def test_entrada_agrupada_normaliza_filtros_y_valida_dimension() -> None:
+    entrada = InputRecuperacionHistoricoAgrupado(
+        fecha_desde=date(2026, 1, 1),
+        fecha_hasta=date(2026, 12, 31),
+        dimension="asesor",
+        agencias=[" Matriz ", "MATRIZ"],
+        asesores=["Ana Asesora"],
+        tipos_prestamo=["Microcredito"],
+    )
+
+    assert entrada.agencias == ["MATRIZ"]
+    assert entrada.asesores == ["ANA ASESORA"]
+    assert entrada.tipos_prestamo == ["MICROCREDITO"]
+    with pytest.raises(ValueError):
+        InputRecuperacionHistoricoAgrupado(
+            fecha_desde=date(2026, 1, 1),
+            fecha_hasta=date(2026, 1, 31),
+            dimension="campo_sql_invalido",
+        )
+
+
+def test_pipeline_agrupado_consolida_antes_del_lookup_y_aplica_filtros_en_facet() -> None:
+    entrada = InputRecuperacionHistoricoAgrupado(
+        fecha_desde=date(2026, 1, 1),
+        fecha_hasta=date(2026, 12, 31),
+        dimension="tipo_cobro",
+        agencias=["MATRIZ"],
+        asesores=["ANA ASESORA"],
+        tipos_prestamo=["MICROCREDITO"],
+    )
+
+    pipeline = MongoRecuperacionHistoricoRepository._construir_pipeline_agrupado(
+        entrada,
+        "20260101",
+        "20261231",
+        "20270101",
+    )
+
+    primer_lookup = next(i for i, stage in enumerate(pipeline) if "$lookup" in stage)
+    grupos_antes_lookup = [stage for stage in pipeline[:primer_lookup] if "$group" in stage]
+    assert len(grupos_antes_lookup) == 2
+    assert grupos_antes_lookup[0]["$group"]["_id"]["dimension"] == "$cobros.tipo_cobro"
+    assert "periodos" in grupos_antes_lookup[1]["$group"]
+    facet = next(stage["$facet"] for stage in pipeline if "$facet" in stage)
+    assert {"$unwind": "$periodos"} in facet["datos"]
+    assert {"$match": {"agencia": {"$in": ["MATRIZ"]}}} in facet["datos"]
+    assert {"$match": {"asesor": {"$in": ["ANA ASESORA"]}}} in facet["datos"]
+    assert {
+        "$match": {"tipo_prestamo": {"$in": ["MICROCREDITO"]}}
+    } in facet["datos"]
+
+
+class FakeMongoAgrupadoRepository:
+    def obtener_recuperacion_agrupada(self, input_data, fecha_hoy):
+        assert fecha_hoy == date(2026, 6, 1)
+        assert input_data.dimension == "asesor"
+        return {
+            "datos": [
+                {
+                    "periodo": "202601",
+                    "etiqueta": "ANA ASESORA",
+                    "valor": 100.5,
+                    "cantidad_movimientos": 2,
+                },
+                {
+                    "periodo": "202602",
+                    "etiqueta": "ANA ASESORA",
+                    "valor": 80,
+                    "cantidad_movimientos": 1,
+                },
+                {
+                    "periodo": "202602",
+                    "etiqueta": "LUIS ASESOR",
+                    "valor": 20,
+                    "cantidad_movimientos": 1,
+                },
+            ],
+            "agencias": ["MATRIZ"],
+            "asesores": ["ANA ASESORA", "LUIS ASESOR"],
+            "tipos_prestamo": ["MICROCREDITO"],
+        }
+
+
+def test_service_agrupado_construye_matriz_mensual_y_totales() -> None:
+    service = RecuperacionHistoricoService(
+        mongo_repository=FakeMongoAgrupadoRepository(),  # type: ignore[arg-type]
+    )
+    entrada = InputRecuperacionHistoricoAgrupado(
+        fecha_desde=date(2026, 1, 1),
+        fecha_hasta=date(2026, 6, 1),
+        dimension="asesor",
+    )
+
+    respuesta = service.obtener_recuperacion_agrupada(
+        entrada,
+        FakeAuthContext(),  # type: ignore[arg-type]
+    )
+
+    assert [periodo.clave for periodo in respuesta.periodos] == ["2026-01", "2026-02"]
+    assert respuesta.series[0].etiqueta == "ANA ASESORA"
+    assert respuesta.series[0].valores == [100.5, 80]
+    assert respuesta.series[1].valores == [0, 20]
+    assert respuesta.totales_por_periodo == [100.5, 100]
+    assert respuesta.total_general == 200.5
+    assert respuesta.resumen.cantidad_movimientos == 4
+    assert respuesta.catalogos.agencias == ["MATRIZ"]

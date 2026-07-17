@@ -1,6 +1,7 @@
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from time import perf_counter
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -15,9 +16,15 @@ from app.modules.analytic.recuperacion.recuperacion_historico.repositories.sql_r
     SqlRecuperacionHistoricoRepository,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.schemas import (
+    InputRecuperacionHistoricoAgrupado,
     InputRecuperacionHistoricoRango,
+    RecuperacionCatalogosOut,
     RecuperacionEtiquetadaOut,
+    RecuperacionHistoricoAgrupadoResponse,
     RecuperacionHistoricoRangoResponse,
+    RecuperacionPeriodoOut,
+    RecuperacionResumenAgrupadoOut,
+    RecuperacionSerieOut,
     PrestamoRecuperacionOut,
 )
 from app.modules.auth.schemas import AuthContext
@@ -25,6 +32,20 @@ from app.modules.auth.schemas import AuthContext
 
 logger = logging.getLogger("uvicorn.error")
 MAX_MESES_RANGO = 60
+MESES = (
+    "Ene",
+    "Feb",
+    "Mar",
+    "Abr",
+    "May",
+    "Jun",
+    "Jul",
+    "Ago",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dic",
+)
 
 
 class RecuperacionHistoricoService:
@@ -44,11 +65,7 @@ class RecuperacionHistoricoService:
         try:
             fecha_sistema = auth_context.usuario.fecha_sistema
             fecha_hoy = fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
-            if input_data.fecha_hasta > fecha_hoy:
-                raise HTTPException(400, "fecha_hasta no puede ser posterior a la fecha del sistema.")
-            meses = (input_data.fecha_hasta.year - input_data.fecha_desde.year) * 12 + input_data.fecha_hasta.month - input_data.fecha_desde.month + 1
-            if meses > MAX_MESES_RANGO:
-                raise HTTPException(400, f"El rango no puede superar {MAX_MESES_RANGO} meses.")
+            self._validar_rango(input_data, fecha_hoy)
 
             inicio_mongo = perf_counter()
             recuperaciones = self.mongo_repository.obtener_recuperaciones(input_data, fecha_hoy)
@@ -81,6 +98,110 @@ class RecuperacionHistoricoService:
         except Exception as exc:
             logger.exception("Error consultando recuperacion en Mongo")
             raise HTTPException(status_code=500, detail=f"Error consultando recuperacion: {exc}") from exc
+
+    def obtener_recuperacion_agrupada(
+        self,
+        input_data: InputRecuperacionHistoricoAgrupado,
+        auth_context: AuthContext,
+    ) -> RecuperacionHistoricoAgrupadoResponse:
+        try:
+            fecha_sistema = auth_context.usuario.fecha_sistema
+            fecha_hoy = fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
+            self._validar_rango(input_data, fecha_hoy)
+            inicio = perf_counter()
+            resultado = self.mongo_repository.obtener_recuperacion_agrupada(
+                input_data,
+                fecha_hoy,
+            )
+            respuesta = self._construir_respuesta_agrupada(input_data, resultado)
+            print(
+                "[recuperacion][service][agrupado] "
+                f"dimension={input_data.dimension} series={len(respuesta.series)} "
+                f"periodos={len(respuesta.periodos)} "
+                f"total_ms={(perf_counter() - inicio) * 1000:.2f}"
+            )
+            return respuesta
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Error consultando recuperacion agrupada en Mongo")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error consultando recuperacion agrupada: {exc}",
+            ) from exc
+
+    @staticmethod
+    def _validar_rango(
+        input_data: InputRecuperacionHistoricoRango,
+        fecha_hoy: date,
+    ) -> None:
+        if input_data.fecha_hasta > fecha_hoy:
+            raise HTTPException(400, "fecha_hasta no puede ser posterior a la fecha del sistema.")
+        meses = (
+            (input_data.fecha_hasta.year - input_data.fecha_desde.year) * 12
+            + input_data.fecha_hasta.month
+            - input_data.fecha_desde.month
+            + 1
+        )
+        if meses > MAX_MESES_RANGO:
+            raise HTTPException(400, f"El rango no puede superar {MAX_MESES_RANGO} meses.")
+
+    @staticmethod
+    def _construir_respuesta_agrupada(
+        input_data: InputRecuperacionHistoricoAgrupado,
+        resultado: dict[str, Any],
+    ) -> RecuperacionHistoricoAgrupadoResponse:
+        filas = resultado.get("datos", [])
+        claves_periodo = sorted({str(fila["periodo"]) for fila in filas})
+        indices = {clave: indice for indice, clave in enumerate(claves_periodo)}
+        series_map: dict[str, dict] = {}
+        cantidad_movimientos = 0
+        for fila in filas:
+            etiqueta = str(fila.get("etiqueta") or "SIN DATOS")
+            serie = series_map.setdefault(
+                etiqueta,
+                {
+                    "valores": [0.0] * len(claves_periodo),
+                    "total": 0.0,
+                },
+            )
+            valor = float(fila.get("valor") or 0)
+            serie["valores"][indices[str(fila["periodo"])]] += valor
+            serie["total"] += valor
+            cantidad_movimientos += int(fila.get("cantidad_movimientos") or 0)
+
+        series = sorted(
+            (
+                RecuperacionSerieOut(
+                    clave=etiqueta,
+                    etiqueta=etiqueta,
+                    valores=datos["valores"],
+                    total=datos["total"],
+                )
+                for etiqueta, datos in series_map.items()
+            ),
+            key=lambda serie: (-serie.total, serie.etiqueta),
+        )
+        totales_por_periodo = [
+            sum(serie.valores[indice] for serie in series)
+            for indice in range(len(claves_periodo))
+        ]
+        return RecuperacionHistoricoAgrupadoResponse(
+            dimension=input_data.dimension,
+            periodos=[_periodo_out(clave) for clave in claves_periodo],
+            series=series,
+            totales_por_periodo=totales_por_periodo,
+            total_general=sum(totales_por_periodo),
+            catalogos=RecuperacionCatalogosOut(
+                agencias=resultado.get("agencias", []),
+                asesores=resultado.get("asesores", []),
+                tipos_prestamo=resultado.get("tipos_prestamo", []),
+            ),
+            resumen=RecuperacionResumenAgrupadoOut(
+                cantidad_movimientos=cantidad_movimientos,
+                cantidad_series=len(series),
+            ),
+        )
 
     @staticmethod
     def _construir_respuesta(
@@ -142,3 +263,14 @@ def _valor_contexto(
     if valor != "SIN DATOS" or prestamo is None:
         return valor
     return str(getattr(prestamo, atributo) or "SIN DATOS")
+
+
+def _periodo_out(clave: str) -> RecuperacionPeriodoOut:
+    anio = int(clave[:4])
+    mes = int(clave[4:6])
+    return RecuperacionPeriodoOut(
+        clave=f"{anio:04d}-{mes:02d}",
+        anio=anio,
+        mes=mes,
+        etiqueta=f"{MESES[mes - 1]} {anio}",
+    )
