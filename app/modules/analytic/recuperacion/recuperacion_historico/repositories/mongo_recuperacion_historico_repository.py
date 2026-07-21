@@ -241,6 +241,68 @@ class MongoRecuperacionHistoricoRepository:
             "tipos_prestamo": sorted(tipos_prestamo),
         }
 
+    def obtener_recuperaciones_diarias(
+        self,
+        input_data: InputRecuperacionHistoricoRango,
+        fecha_actual: date,
+    ) -> list[RecuperacionEtiquetada]:
+        """Consolida todos los cobros de un préstamo dentro del mismo día."""
+        fecha_desde = input_data.fecha_desde.strftime("%Y%m%d")
+        fecha_hasta = input_data.fecha_hasta.strftime("%Y%m%d")
+        fecha_actual_str = fecha_actual.strftime("%Y%m%d")
+        fecha_historica_hasta = min(
+            fecha_hasta,
+            (fecha_actual - timedelta(days=1)).strftime("%Y%m%d"),
+        )
+        consultas: list[tuple[str, Collection[MongoDocument], list[dict[str, Any]]]] = []
+        if fecha_desde <= fecha_historica_hasta:
+            consultas.append(
+                (
+                    "historico",
+                    self.collection,
+                    self._construir_pipeline_diario(fecha_desde, fecha_historica_hasta),
+                )
+            )
+        if fecha_desde <= fecha_actual_str <= fecha_hasta:
+            consultas.append(
+                (
+                    "actual",
+                    self.actual_collection,
+                    self._construir_pipeline_diario(fecha_actual_str, fecha_actual_str),
+                )
+            )
+
+        resultado: list[RecuperacionEtiquetada] = []
+        for nombre, collection, pipeline in consultas:
+            inicio = perf_counter()
+            filas_fuente = 0
+            for fila in collection.aggregate(pipeline, allowDiskUse=True):
+                fecha = datetime.strptime(str(fila["fecha_corte"]), "%Y%m%d").date()
+                resultado.append(
+                    RecuperacionEtiquetada(
+                        fecha_cobro=fecha,
+                        numero_prestamo=str(fila.get("numero_prestamo") or ""),
+                        tipo_cobro="TOTAL",
+                        tipo_transaccion="TOTAL",
+                        valor_recuperado=float(fila.get("valor_recuperado") or 0),
+                        agencia=_texto(fila.get("agencia")),
+                        asesor=_texto(fila.get("asesor")),
+                        abogado_externo=_texto(fila.get("abogado_externo")),
+                        nombre_cobranza_apoyo=_texto(fila.get("nombre_cobranza_apoyo")),
+                        estado_prestamo_anterior_cobro=_texto(fila.get("estado_prestamo_anterior_cobro")),
+                        estado_prestamo_actual_cobro=_texto(fila.get("estado_prestamo_actual_cobro")),
+                        calificacion_anterior_cobro=_texto(fila.get("calificacion_anterior_cobro")),
+                        calificacion_actual_cobro=_texto(fila.get("calificacion_actual_cobro")),
+                    )
+                )
+                filas_fuente += 1
+            print(
+                "[recuperacion][mongo][diaria] "
+                f"fuente={nombre} filas={filas_fuente} total_ms={(perf_counter() - inicio) * 1000:.2f}"
+            )
+        resultado.sort(key=lambda recuperacion: (recuperacion.fecha_cobro, recuperacion.numero_prestamo))
+        return resultado
+
     def obtener_prestamos_por_numero(
         self,
         numeros_prestamo: set[str],
@@ -565,6 +627,67 @@ class MongoRecuperacionHistoricoRepository:
             ]
         )
         return pipeline
+
+    @staticmethod
+    def _construir_pipeline_diario(fecha_desde: str, fecha_hasta: str) -> list[dict[str, Any]]:
+        return [
+            {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
+            {
+                "$project": {
+                    "fecha_corte": 1,
+                    "numero_prestamo": {"$ifNull": ["$NUMERO_PRESTAMO", "$NumeroPrestamo"]},
+                    "agencia": "$AGENCIA",
+                    "asesor": {"$ifNull": ["$NOMBRE_ASESOR_COBRO", "$CODIGO_ASESOR_COBRO"]},
+                    "abogado_externo": "$ABOGADO_EXTERNO_COBRO",
+                    "nombre_cobranza_apoyo": "$NOMBRE_COBRANZA_APOYO_COBRO",
+                    "estado_prestamo_anterior_cobro": "$ESTADO_PRESTAMO_ANTERIOR_COBRO",
+                    "estado_prestamo_actual_cobro": {
+                        "$ifNull": ["$ESTADO_PRESTAMO_ACTUAL_COBRO", "$ESTADO_PRESTAMO_COBRO"]
+                    },
+                    "calificacion_anterior_cobro": "$CALIFICACION_ANTERIOR_COBRO",
+                    "calificacion_actual_cobro": {
+                        "$ifNull": ["$CALIFICACION_ACTUAL_COBRO", "$CALIFICACION_COBRO"]
+                    },
+                    "cobros": _cobros(),
+                }
+            },
+            {"$match": {"numero_prestamo": {"$nin": [None, ""]}}},
+            {"$unwind": "$cobros"},
+            {"$match": {"cobros.valor": {"$ne": 0}}},
+            {
+                "$group": {
+                    "_id": {
+                        "fecha_corte": "$fecha_corte",
+                        "numero_prestamo": "$numero_prestamo",
+                    },
+                    "valor_recuperado": {"$sum": "$cobros.valor"},
+                    "agencia": {"$first": "$agencia"},
+                    "asesor": {"$first": "$asesor"},
+                    "abogado_externo": {"$first": "$abogado_externo"},
+                    "nombre_cobranza_apoyo": {"$first": "$nombre_cobranza_apoyo"},
+                    "estado_prestamo_anterior_cobro": {"$first": "$estado_prestamo_anterior_cobro"},
+                    "estado_prestamo_actual_cobro": {"$first": "$estado_prestamo_actual_cobro"},
+                    "calificacion_anterior_cobro": {"$first": "$calificacion_anterior_cobro"},
+                    "calificacion_actual_cobro": {"$first": "$calificacion_actual_cobro"},
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "fecha_corte": "$_id.fecha_corte",
+                    "numero_prestamo": "$_id.numero_prestamo",
+                    "valor_recuperado": 1,
+                    "agencia": 1,
+                    "asesor": 1,
+                    "abogado_externo": 1,
+                    "nombre_cobranza_apoyo": 1,
+                    "estado_prestamo_anterior_cobro": 1,
+                    "estado_prestamo_actual_cobro": 1,
+                    "calificacion_anterior_cobro": 1,
+                    "calificacion_actual_cobro": 1,
+                }
+            },
+        ]
 
 def _proyeccion_inicio() -> dict[str, int]:
     return {

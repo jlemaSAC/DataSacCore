@@ -50,6 +50,7 @@ class InputRecuperacionHistoricoRango(BaseModel):
 class RecuperacionEtiquetadaOut(BaseModel):
     anio: int = Field(serialization_alias="an")
     mes: int = Field(serialization_alias="me")
+    dia: int = Field(serialization_alias="di")
     numero_prestamo: str = Field(serialization_alias="np")
     tipo_cobro: str = Field(serialization_alias="tc")
     transaccion: str = Field(serialization_alias="tx")

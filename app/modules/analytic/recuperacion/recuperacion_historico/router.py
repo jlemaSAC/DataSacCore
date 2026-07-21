@@ -34,6 +34,21 @@ def obtener_recuperacion_historica_por_rango(
 
 
 @router.post(
+    "/recuperacion/recuperacion-historico-diario",
+    response_model=RecuperacionHistoricoRangoResponse,
+    response_model_by_alias=True,
+    response_model_exclude_none=True,
+    summary="Consultar recuperación histórica consolidada por préstamo y día",
+)
+def obtener_recuperacion_historica_diaria_por_rango(
+    body: InputRecuperacionHistoricoRango,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: RecuperacionHistoricoService = Depends(get_recuperacion_historico_service),
+) -> RecuperacionHistoricoRangoResponse:
+    return service.obtener_recuperacion_diaria_por_rango(body, auth_context)
+
+
+@router.post(
     "/recuperacion/recuperacion-historico-compacto",
     response_model=RecuperacionHistoricoCompactoResponse,
     summary="Consultar recuperación histórica compacta desde MongoDB",

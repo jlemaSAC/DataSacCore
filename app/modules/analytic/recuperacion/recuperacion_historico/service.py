@@ -174,6 +174,41 @@ class RecuperacionHistoricoService:
                 detail=f"Error consultando recuperacion compacta: {exc}",
             ) from exc
 
+    def obtener_recuperacion_diaria_por_rango(
+        self,
+        input_data: InputRecuperacionHistoricoRango,
+        auth_context: AuthContext,
+    ) -> RecuperacionHistoricoRangoResponse:
+        """Devuelve una fila por préstamo y día, con todos los cobros consolidados."""
+        try:
+            fecha_sistema = auth_context.usuario.fecha_sistema
+            fecha_hoy = fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
+            self._validar_rango(input_data, fecha_hoy)
+            recuperaciones = self.mongo_repository.obtener_recuperaciones_diarias(
+                input_data,
+                fecha_hoy,
+            )
+            numeros_prestamo = {
+                recuperacion.numero_prestamo
+                for recuperacion in recuperaciones
+                if recuperacion.numero_prestamo
+            }
+            prestamos_por_numero = self.mongo_repository.obtener_prestamos_por_numero(
+                numeros_prestamo,
+                input_data.fecha_desde.strftime("%Y%m%d"),
+                input_data.fecha_hasta.strftime("%Y%m%d"),
+                fecha_hoy.strftime("%Y%m%d"),
+            )
+            return self._construir_respuesta(input_data, recuperaciones, prestamos_por_numero)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Error consultando recuperacion diaria en Mongo")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error consultando recuperacion diaria: {exc}",
+            ) from exc
+
     @staticmethod
     def _validar_rango(
         input_data: InputRecuperacionHistoricoRango,
@@ -198,7 +233,7 @@ class RecuperacionHistoricoService:
         filas = resultado.get("datos", [])
         claves_periodo = sorted({str(fila["periodo"]) for fila in filas})
         indices = {clave: indice for indice, clave in enumerate(claves_periodo)}
-        series_map: dict[str, dict] = {}
+        series_map: dict[str, dict] = {} # type: ignore
         cantidad_movimientos = 0
         for fila in filas:
             etiqueta = str(fila.get("etiqueta") or "SIN DATOS")
@@ -260,6 +295,7 @@ class RecuperacionHistoricoService:
                 RecuperacionEtiquetadaOut(
                     anio=recuperacion.fecha_cobro.year,
                     mes=recuperacion.fecha_cobro.month,
+                    dia=recuperacion.fecha_cobro.day,
                     numero_prestamo=recuperacion.numero_prestamo,
                     tipo_cobro=recuperacion.tipo_cobro,
                     transaccion=recuperacion.tipo_transaccion,
