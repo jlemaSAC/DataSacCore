@@ -19,12 +19,16 @@ from app.modules.analytic.indicadores_financieros.solvencia.router import (
     router as solvencia_router,
 )
 from app.modules.analytic.menu.router import router as menu_router
+from app.modules.analytic.recuperacion.recuperacion_historico.router import (
+    router as recuperacion_historico_router,
+)
 
 
 router = APIRouter(prefix="/analytic")
 
 router.include_router(menu_router)
 router.include_router(colocacion_historico_router)
+router.include_router(recuperacion_historico_router)
 router.include_router(calidad_de_activos_router)
 router.include_router(indicadores_de_liquidez_router)
 router.include_router(indicadores_de_eficiencia_router)

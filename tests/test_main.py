@@ -19,7 +19,7 @@ from app.db.session import (
     get_secondary_session_factory,
     get_session_factory,
 )
-from app.main import add_cors_middleware, app
+from app.main import add_cors_middleware, add_gzip_middleware, app
 from app.main import (
     verify_database_on_startup,
     verify_mongo_on_startup,
@@ -251,6 +251,21 @@ def test_cors_middleware_allows_any_origin_in_dev() -> None:
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "*"
     assert "access-control-allow-credentials" not in response.headers
+
+
+def test_gzip_middleware_comprime_respuestas_grandes() -> None:
+    gzip_app = FastAPI()
+
+    @gzip_app.get("/")
+    async def gzip_root() -> dict[str, str]:
+        return {"datos": "x" * 2_000}
+
+    add_gzip_middleware(gzip_app)
+    response = TestClient(gzip_app).get("/", headers={"Accept-Encoding": "gzip"})
+
+    assert response.status_code == 200
+    assert response.headers["content-encoding"] == "gzip"
+    assert response.json() == {"datos": "x" * 2_000}
 
 
 def test_database_health_check_without_settings(monkeypatch) -> None:
