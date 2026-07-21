@@ -1,5 +1,5 @@
 from datetime import date, datetime, timedelta
-from time import perf_counter
+# from time import perf_counter
 from typing import Any
 
 from pymongo.collection import Collection
@@ -102,23 +102,23 @@ class MongoRecuperacionHistoricoRepository:
                     self._construir_pipeline(fecha_actual_str, fecha_actual_str),
                 )
             )
-        print(
-            "[recuperacion][mongo] inicio "
-            f"rango={fecha_desde}:{fecha_hasta} fuentes={','.join(nombre for nombre, *_ in consultas) or 'ninguna'}"
-        )
-        mapeo_ms = 0.0
+        # print(
+        #     "[recuperacion][mongo] inicio "
+        #     f"rango={fecha_desde}:{fecha_hasta} fuentes={','.join(nombre for nombre, *_ in consultas) or 'ninguna'}"
+        # )
+        # mapeo_ms = 0.0
         resultado: list[RecuperacionEtiquetada] = []
-        cursor_ms = 0.0
-        fetch_ms = 0.0
-        for nombre, collection, pipeline in consultas:
-            inicio_cursor = perf_counter()
+        # cursor_ms = 0.0
+        # fetch_ms = 0.0
+        for nombre, collection, pipeline in consultas: # type: ignore
+            # inicio_cursor = perf_counter()
             filas = collection.aggregate(pipeline, allowDiskUse=True)
-            cursor_ms += (perf_counter() - inicio_cursor) * 1000
-            inicio_consumo = perf_counter()
-            filas_fuente = 0
-            mapeo_fuente_ms = 0.0
+            # cursor_ms += (perf_counter() - inicio_cursor) * 1000
+            # inicio_consumo = perf_counter()
+            # filas_fuente = 0
+            # mapeo_fuente_ms = 0.0
             for fila in filas:
-                inicio_mapeo = perf_counter()
+                # inicio_mapeo = perf_counter()
                 fecha = datetime.strptime(str(fila["fecha_corte"]), "%Y%m%d").date()
                 resultado.append(
                     RecuperacionEtiquetada(
@@ -145,12 +145,12 @@ class MongoRecuperacionHistoricoRepository:
                         ),
                     )
                 )
-                duracion_mapeo_ms = (perf_counter() - inicio_mapeo) * 1000
-                mapeo_ms += duracion_mapeo_ms
-                mapeo_fuente_ms += duracion_mapeo_ms
-                filas_fuente += 1
-            fetch_ms += (perf_counter() - inicio_consumo) * 1000 - mapeo_fuente_ms
-            print(f"[recuperacion][mongo] fuente={nombre} filas={filas_fuente}")
+                # duracion_mapeo_ms = (perf_counter() - inicio_mapeo) * 1000
+                # mapeo_ms += duracion_mapeo_ms
+                # mapeo_fuente_ms += duracion_mapeo_ms
+                # filas_fuente += 1
+            # fetch_ms += (perf_counter() - inicio_consumo) * 1000 - mapeo_fuente_ms
+            # print(f"[recuperacion][mongo] fuente={nombre} filas={filas_fuente}")
         resultado.sort(
             key=lambda recuperacion: (
                 recuperacion.fecha_cobro,
@@ -159,11 +159,11 @@ class MongoRecuperacionHistoricoRepository:
                 recuperacion.tipo_cobro,
             )
         )
-        print(
-            "[recuperacion][mongo] "
-            f"cursor_ms={cursor_ms:.2f} fetch_ms={fetch_ms:.2f} "
-            f"mapping_ms={mapeo_ms:.2f} filas={len(resultado)}"
-        )
+        # print(
+        #     "[recuperacion][mongo] "
+        #     f"cursor_ms={cursor_ms:.2f} fetch_ms={fetch_ms:.2f} "
+        #     f"mapping_ms={mapeo_ms:.2f} filas={len(resultado)}"
+        # )
         return resultado
 
     def obtener_recuperacion_agrupada(
@@ -193,15 +193,15 @@ class MongoRecuperacionHistoricoRepository:
         agencias: set[str] = set()
         asesores: set[str] = set()
         tipos_prestamo: set[str] = set()
-        inicio_total = perf_counter()
-        for nombre, collection, desde, hasta in consultas:
+        # inicio_total = perf_counter()
+        for nombre, collection, desde, hasta in consultas: # type: ignore
             pipeline = self._construir_pipeline_agrupado(
                 input_data,
                 desde,
                 hasta,
                 fecha_actual_str,
             )
-            inicio_fuente = perf_counter()
+            # inicio_fuente = perf_counter()
             documento = next(iter(collection.aggregate(pipeline, allowDiskUse=True)), None) or {}
             for fila in documento.get("datos", []):
                 clave = (str(fila["periodo"]), str(fila["etiqueta"]))
@@ -223,17 +223,17 @@ class MongoRecuperacionHistoricoRepository:
             tipos_prestamo.update(
                 _catalogo_desde_facet(documento.get("tipos_prestamo", []))
             )
-            print(
-                "[recuperacion][mongo][agrupado] "
-                f"fuente={nombre} filas={len(documento.get('datos', []))} "
-                f"total_ms={(perf_counter() - inicio_fuente) * 1000:.2f}"
-            )
+        #     print(
+        #         "[recuperacion][mongo][agrupado] "
+        #         f"fuente={nombre} filas={len(documento.get('datos', []))} "
+        #         f"total_ms={(perf_counter() - inicio_fuente) * 1000:.2f}"
+        #     )
 
-        print(
-            "[recuperacion][mongo][agrupado] "
-            f"dimension={input_data.dimension} filas_finales={len(datos)} "
-            f"total_ms={(perf_counter() - inicio_total) * 1000:.2f}"
-        )
+        # print(
+        #     "[recuperacion][mongo][agrupado] "
+        #     f"dimension={input_data.dimension} filas_finales={len(datos)} "
+        #     f"total_ms={(perf_counter() - inicio_total) * 1000:.2f}"
+        # )
         return {
             "datos": list(datos.values()),
             "agencias": sorted(agencias),
@@ -273,9 +273,9 @@ class MongoRecuperacionHistoricoRepository:
             )
 
         resultado: list[RecuperacionEtiquetada] = []
-        for nombre, collection, pipeline in consultas:
-            inicio = perf_counter()
-            filas_fuente = 0
+        for nombre, collection, pipeline in consultas: # type: ignore
+            # inicio = perf_counter()
+            # filas_fuente = 0
             for fila in collection.aggregate(pipeline, allowDiskUse=True):
                 fecha = datetime.strptime(str(fila["fecha_corte"]), "%Y%m%d").date()
                 resultado.append(
@@ -295,11 +295,11 @@ class MongoRecuperacionHistoricoRepository:
                         calificacion_actual_cobro=_texto(fila.get("calificacion_actual_cobro")),
                     )
                 )
-                filas_fuente += 1
-            print(
-                "[recuperacion][mongo][diaria] "
-                f"fuente={nombre} filas={filas_fuente} total_ms={(perf_counter() - inicio) * 1000:.2f}"
-            )
+                # filas_fuente += 1
+            # print(
+            #     "[recuperacion][mongo][diaria] "
+            #     f"fuente={nombre} filas={filas_fuente} total_ms={(perf_counter() - inicio) * 1000:.2f}"
+            # )
         resultado.sort(key=lambda recuperacion: (recuperacion.fecha_cobro, recuperacion.numero_prestamo))
         return resultado
 
@@ -314,7 +314,7 @@ class MongoRecuperacionHistoricoRepository:
         if not numeros_prestamo:
             return {}
 
-        inicio_total = perf_counter()
+        # inicio_total = perf_counter()
         situaciones_inicio: dict[str, dict[str, Any]] = {}
         dimensiones: dict[str, dict[str, Any]] = {}
         for lote in _lotes(sorted(numeros_prestamo), TAMANO_LOTE_PRESTAMOS):
@@ -346,12 +346,12 @@ class MongoRecuperacionHistoricoRepository:
             )
             for numero in numeros_prestamo
         }
-        print(
-            "[recuperacion][mongo] prestamos "
-            f"inicio={fecha_inicio} fin={fecha_fin} unicos={len(numeros_prestamo)} "
-            f"inicio_encontrados={len(situaciones_inicio)} fin_encontrados={len(dimensiones)} "
-            f"total_ms={(perf_counter() - inicio_total) * 1000:.2f}"
-        )
+        # print(
+        #     "[recuperacion][mongo] prestamos "
+        #     f"inicio={fecha_inicio} fin={fecha_fin} unicos={len(numeros_prestamo)} "
+        #     f"inicio_encontrados={len(situaciones_inicio)} fin_encontrados={len(dimensiones)} "
+        #     f"total_ms={(perf_counter() - inicio_total) * 1000:.2f}"
+        # )
         return resultado
 
     def _obtener_situaciones_con_fallback_actual(
