@@ -22,25 +22,7 @@ class InputMorosidadHistorica(BaseModel):
         return self
 
 
-class ValoresMorosidad(BaseModel):
-    operaciones: int
-    saldo_capital: float
-    capital_vigente: float
-    capital_no_devenga: float
-    capital_vencido: float
-    cartera_improductiva: float
-    morosidad: float = Field(description="Cartera improductiva / saldo de capital.")
-    morosidad_porcentaje: float
-
-
-class ResumenMensualMorosidad(ValoresMorosidad):
-    periodo: str
-    anio: int
-    mes: int
-    fecha_corte: str = Field(description="Corte consultado en formato YYYYMMDD.")
-
-
-class MorosidadHistoricaAgrupacion(ValoresMorosidad):
+class MorosidadHistoricaAgrupacion(BaseModel):
     periodo: str
     anio: int
     mes: int
@@ -58,17 +40,12 @@ class MorosidadHistoricaAgrupacion(ValoresMorosidad):
     garantia: str
     monto: str
     tasa: str
-    tasa_valor: float | None
     tasa_real: str
-    tasa_real_valor: float | None
     plazo: str
-    plazo_valor: int | None
+    saldo_capital: float
+    cartera_improductiva: float
+    provision_requerida: float
 
 
-class MorosidadHistoricaResponse(ValoresMorosidad):
-    periodo_desde: str
-    periodo_hasta: str
-    resumen_mensual: list[ResumenMensualMorosidad]
+class MorosidadHistoricaResponse(BaseModel):
     agrupaciones: list[MorosidadHistoricaAgrupacion]
-    periodos_sin_datos: list[str]
-

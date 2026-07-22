@@ -9,6 +9,7 @@ from app.modules.analytic.cartera_de_credito.morosidad_historica.dependencies im
     get_morosidad_historica_service,
 )
 from app.modules.analytic.cartera_de_credito.morosidad_historica.domain import (
+    CorteActualMorosidad,
     DimensionesMorosidad,
     MorosidadAgrupada,
 )
@@ -44,10 +45,9 @@ def fake_auth_context(fecha_sistema: date = date(2026, 7, 22)) -> AuthContext:
 def agrupacion(
     *,
     periodo: str = "2026-01",
-    operaciones: int = 2,
     saldo_capital: float = 1000.0,
-    capital_no_devenga: float = 100.0,
-    capital_vencido: float = 50.0,
+    cartera_improductiva: float = 150.0,
+    provision_requerida: float = 75.0,
 ) -> MorosidadAgrupada:
     anio, mes = map(int, periodo.split("-"))
     return MorosidadAgrupada(
@@ -69,17 +69,12 @@ def agrupacion(
             garantia="PERSONAL",
             monto="Hasta 3.000",
             tasa="Hasta 16",
-            tasa_valor=16.0,
             tasa_real="Hasta 17",
-            tasa_real_valor=17.0,
             plazo="Hasta 2 AÑOS",
-            plazo_valor=730,
         ),
-        operaciones=operaciones,
         saldo_capital=saldo_capital,
-        capital_vigente=saldo_capital - capital_no_devenga - capital_vencido,
-        capital_no_devenga=capital_no_devenga,
-        capital_vencido=capital_vencido,
+        cartera_improductiva=cartera_improductiva,
+        provision_requerida=provision_requerida,
     )
 
 
@@ -87,16 +82,21 @@ class FakeRepository:
     def __init__(self, datos: list[MorosidadAgrupada] | None = None) -> None:
         self.datos = datos or []
         self.cortes: dict[str, tuple[int, int]] = {}
+        self.corte_actual: CorteActualMorosidad | None = None
 
     def obtener_morosidad_agrupada(
-        self, cortes: dict[str, tuple[int, int]]
+        self,
+        cortes: dict[str, tuple[int, int]],
+        corte_actual: CorteActualMorosidad | None = None,
     ) -> list[MorosidadAgrupada]:
         self.cortes = cortes
+        self.corte_actual = corte_actual
         return list(self.datos)
 
 
 class FakeMongoCollection:
-    def __init__(self) -> None:
+    def __init__(self, fecha_corte: str) -> None:
+        self.fecha_corte = fecha_corte
         self.pipeline: list[dict] = []
         self.options: dict = {}
 
@@ -106,7 +106,7 @@ class FakeMongoCollection:
         return [
             {
                 "_id": {
-                    "fecha_corte": "20260131",
+                    "fecha_corte": self.fecha_corte,
                     "agencia": "MATRIZ",
                     "condicion": "NUEVO",
                     "tipo_prestamo": "ORDINARIO",
@@ -121,27 +121,25 @@ class FakeMongoCollection:
                     "garantia": "PERSONAL",
                     "monto": "Hasta 3.000",
                     "tasa": "Hasta 16",
-                    "tasa_valor": 16,
                     "tasa_real": "Hasta 17",
-                    "tasa_real_valor": 17,
                     "plazo": "Hasta 2 AÑOS",
-                    "plazo_valor": 730,
                 },
-                "operaciones": 2,
                 "saldo_capital": 1000,
-                "capital_no_devenga": 100,
-                "capital_vencido": 50,
+                "cartera_improductiva": 150,
+                "provision_requerida": 75,
             }
         ]
 
 
 class FakeMongoDatabase:
     def __init__(self) -> None:
-        self.collection = FakeMongoCollection()
+        self.collections = {
+            "SituacionCrediticia": FakeMongoCollection("20260131"),
+            "SituacionCrediticiaActual": FakeMongoCollection("20260722"),
+        }
 
     def __getitem__(self, name: str) -> FakeMongoCollection:
-        assert name == "SituacionCrediticia"
-        return self.collection
+        return self.collections[name]
 
 
 def test_repositorio_consulta_solo_cortes_de_fin_de_mes() -> None:
@@ -152,28 +150,65 @@ def test_repositorio_consulta_solo_cortes_de_fin_de_mes() -> None:
         {"20260131": (2026, 1), "20260228": (2026, 2)}
     )
 
-    match = database.collection.pipeline[0]["$match"]
+    collection = database.collections["SituacionCrediticia"]
+    match = collection.pipeline[0]["$match"]
     assert match["fecha_corte"] == {"$in": ["20260131", "20260228"]}
     assert match["EstadoPrestamo"] == {"$ne": "CANCELADO"}
-    project = database.collection.pipeline[1]["$project"]
+    project = collection.pipeline[1]["$project"]
     assert project["saldo_capital"]["$convert"]["input"] == "$SaldoCapital"
-    assert project["capital_no_devenga"]["$convert"]["input"] == "$CapitalNoDevenga"
-    assert project["capital_vencido"]["$convert"]["input"] == "$CapitalVencido"
-    assert database.collection.options == {"hint": "fecha_corte_1", "allowDiskUse": True}
-    assert resultado[0].capital_vigente == 850
-    assert resultado[0].morosidad == 0.15
+    sumandos = project["cartera_improductiva"]["$add"]
+    assert sumandos[0]["$convert"]["input"] == "$CapitalNoDevenga"
+    assert sumandos[1]["$convert"]["input"] == "$CapitalVencido"
+    assert project["provision_requerida"]["$convert"]["input"] == "$ProvisionRequerida"
+    dimensiones_grupo = collection.pipeline[2]["$group"]["_id"]
+    assert "tasa_valor" not in dimensiones_grupo
+    assert "tasa_real_valor" not in dimensiones_grupo
+    assert "plazo_valor" not in dimensiones_grupo
+    assert collection.options == {
+        "hint": "fecha_corte_1_estado_prestamo_1",
+        "allowDiskUse": True,
+    }
+    assert resultado[0].saldo_capital == 1000
+    assert resultado[0].cartera_improductiva == 150
+    assert resultado[0].provision_requerida == 75
 
 
-def test_servicio_calcula_morosidad_sobre_saldos_agrupados() -> None:
+def test_repositorio_consulta_mes_actual_en_situacion_crediticia_actual() -> None:
+    database = FakeMongoDatabase()
+    repository = MongoMorosidadHistoricaRepository(database)  # type: ignore[arg-type]
+
+    resultado = repository.obtener_morosidad_agrupada(
+        {},
+        CorteActualMorosidad(fecha_corte="20260722", anio=2026, mes=7),
+    )
+
+    collection = database.collections["SituacionCrediticiaActual"]
+    assert collection.pipeline[0]["$match"] == {
+        "EstadoPrestamo": {"$ne": "CANCELADO"}
+    }
+    assert collection.pipeline[1]["$project"]["fecha_corte"] == {
+        "$literal": "20260722"
+    }
+    plazo = collection.pipeline[1]["$project"]["plazo"]
+    assert plazo["$switch"]["branches"][0]["then"] == "Hasta 1 AÑO"
+    condicion_plazo = plazo["$switch"]["branches"][0]["case"]["$and"]
+    assert condicion_plazo[1]["$lte"][0]["$cond"][0]["$gte"][0]["$convert"][
+        "input"
+    ] == "$Plazo"
+    assert condicion_plazo[1]["$lte"][1] == 12
+    assert plazo["$switch"]["default"] == "SIN DATOS"
+    assert collection.options == {"allowDiskUse": True}
+    assert resultado[0].dimensiones.periodo == "2026-07"
+
+
+def test_servicio_devuelve_solo_saldos_por_agrupacion() -> None:
     repository = FakeRepository(
         [
             agrupacion(periodo="2026-01"),
             agrupacion(
                 periodo="2026-02",
-                operaciones=1,
                 saldo_capital=500,
-                capital_no_devenga=50,
-                capital_vencido=50,
+                cartera_improductiva=100,
             ),
         ]
     )
@@ -185,42 +220,62 @@ def test_servicio_calcula_morosidad_sobre_saldos_agrupados() -> None:
     )
 
     assert repository.cortes == {"20260131": (2026, 1), "20260228": (2026, 2)}
-    assert response.operaciones == 3
-    assert response.saldo_capital == 1500
-    assert response.cartera_improductiva == 250
-    assert response.morosidad == 0.166667
-    assert response.morosidad_porcentaje == 16.6667
-    assert response.resumen_mensual[0].morosidad == 0.15
-    assert response.resumen_mensual[1].morosidad == 0.2
-    assert response.periodos_sin_datos == []
+    assert repository.corte_actual is None
+    payload = response.model_dump()
+    assert set(payload) == {"agrupaciones"}
+    assert len(payload["agrupaciones"]) == 2
+    metricas = {"saldo_capital", "cartera_improductiva", "provision_requerida"}
+    for item in payload["agrupaciones"]:
+        assert metricas <= item.keys()
+        assert {
+            "operaciones",
+            "capital_vigente",
+            "capital_no_devenga",
+            "capital_vencido",
+            "morosidad",
+            "morosidad_porcentaje",
+        }.isdisjoint(item)
 
 
-def test_servicio_incluye_periodos_sin_datos() -> None:
+def test_servicio_sin_datos_devuelve_agrupaciones_vacias() -> None:
     service = MorosidadHistoricaService(FakeRepository())  # type: ignore[arg-type]
     response = service.obtener_morosidad_historica(
         InputMorosidadHistorica(periodo_desde="2026-01", periodo_hasta="2026-02"),
         fake_auth_context(),
     )
 
-    assert [item.fecha_corte for item in response.resumen_mensual] == [
-        "20260131",
-        "20260228",
-    ]
-    assert response.periodos_sin_datos == ["2026-01", "2026-02"]
-    assert response.morosidad == 0
+    assert response.agrupaciones == []
 
 
-def test_servicio_rechaza_mes_que_no_ha_finalizado() -> None:
+def test_servicio_usa_coleccion_actual_para_mes_en_curso() -> None:
+    repository = FakeRepository([agrupacion(periodo="2026-07")])
+    service = MorosidadHistoricaService(repository)  # type: ignore[arg-type]
+
+    response = service.obtener_morosidad_historica(
+        InputMorosidadHistorica(periodo_desde="2026-07", periodo_hasta="2026-07"),
+        fake_auth_context(date(2026, 7, 22)),
+    )
+
+    assert repository.cortes == {}
+    assert repository.corte_actual == CorteActualMorosidad(
+        fecha_corte="20260722",
+        anio=2026,
+        mes=7,
+    )
+    assert response.agrupaciones[0].periodo == "2026-07"
+
+
+def test_servicio_rechaza_mes_futuro() -> None:
     service = MorosidadHistoricaService(FakeRepository())  # type: ignore[arg-type]
 
     with pytest.raises(HTTPException) as error:
         service.obtener_morosidad_historica(
-            InputMorosidadHistorica(periodo_desde="2026-07", periodo_hasta="2026-07"),
+            InputMorosidadHistorica(periodo_desde="2026-08", periodo_hasta="2026-08"),
             fake_auth_context(date(2026, 7, 22)),
         )
 
     assert error.value.status_code == 400
-    assert error.value.detail == "periodo_hasta debe corresponder a un mes finalizado."
+    assert error.value.detail == "periodo_hasta no puede ser posterior al mes actual."
 
 
 def test_endpoint_requiere_token() -> None:
@@ -231,7 +286,7 @@ def test_endpoint_requiere_token() -> None:
     assert response.status_code == 401
 
 
-def test_endpoint_devuelve_agrupaciones_y_resumen_mensual() -> None:
+def test_endpoint_devuelve_unicamente_agrupaciones_con_dos_metricas() -> None:
     service = MorosidadHistoricaService(  # type: ignore[arg-type]
         FakeRepository([agrupacion()])
     )
@@ -248,8 +303,13 @@ def test_endpoint_devuelve_agrupaciones_y_resumen_mensual() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["resumen_mensual"][0]["fecha_corte"] == "20260131"
+    assert set(payload) == {"agrupaciones"}
     assert payload["agrupaciones"][0]["agencia"] == "MATRIZ"
+    assert payload["agrupaciones"][0]["saldo_capital"] == 1000
     assert payload["agrupaciones"][0]["cartera_improductiva"] == 150
-    assert payload["agrupaciones"][0]["morosidad_porcentaje"] == 15
-
+    assert payload["agrupaciones"][0]["provision_requerida"] == 75
+    assert "morosidad" not in payload["agrupaciones"][0]
+    assert "morosidad_porcentaje" not in payload["agrupaciones"][0]
+    assert "tasa_valor" not in payload["agrupaciones"][0]
+    assert "tasa_real_valor" not in payload["agrupaciones"][0]
+    assert "plazo_valor" not in payload["agrupaciones"][0]

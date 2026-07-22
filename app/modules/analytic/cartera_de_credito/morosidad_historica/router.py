@@ -20,11 +20,13 @@ router = APIRouter(tags=["Analytic Sac - Cartera de credito"])
 @router.post(
     "/cartera-de-credito/morosidad-historica",
     response_model=MorosidadHistoricaResponse,
-    summary="Consultar morosidad historica por meses cerrados",
+    summary="Consultar morosidad historica por meses",
     description="""
-Consulta `SituacionCrediticia` en el ultimo dia calendario de cada mes.
-La morosidad se calcula como `(CapitalNoDevenga + CapitalVencido) / SaldoCapital`.
-Solo se admiten meses que hayan finalizado a la fecha del sistema.
+Consulta `SituacionCrediticia` en el ultimo dia calendario de los meses cerrados
+y `SituacionCrediticiaActual` para el mes actual.
+Devuelve saldo de capital y cartera improductiva por agrupacion para que el
+frontend calcule la morosidad.
+No se admiten meses posteriores al mes de la fecha del sistema.
 """,
 )
 def obtener_morosidad_historica(
@@ -33,4 +35,3 @@ def obtener_morosidad_historica(
     service: MorosidadHistoricaService = Depends(get_morosidad_historica_service),
 ) -> MorosidadHistoricaResponse:
     return service.obtener_morosidad_historica(body, auth_context)
-

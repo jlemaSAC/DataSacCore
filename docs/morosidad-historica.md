@@ -1,4 +1,6 @@
-# Morosidad historica por meses
+# Morosidad histórica
+
+## Endpoint
 
 ```text
 POST /analytic/cartera-de-credito/morosidad-historica
@@ -8,6 +10,15 @@ Content-Type: application/json
 
 ## Entrada
 
+```ts
+interface MorosidadHistoricaRequest {
+  periodo_desde: string; // YYYY-MM
+  periodo_hasta: string; // YYYY-MM
+}
+```
+
+Ejemplo:
+
 ```json
 {
   "periodo_desde": "2025-01",
@@ -15,39 +26,79 @@ Content-Type: application/json
 }
 ```
 
-Ambos períodos usan el formato `YYYY-MM`. El rango máximo es de 60 meses y
-`periodo_hasta` debe ser un mes ya finalizado según la fecha del sistema del
-token. Cada período se consulta en `SituacionCrediticia` usando como
-`fecha_corte` su último día calendario (`YYYYMMDD`).
-
-## Cálculos
-
-```text
-capital_vigente       = saldo_capital - capital_no_devenga - capital_vencido
-cartera_improductiva  = capital_no_devenga + capital_vencido
-morosidad             = cartera_improductiva / saldo_capital
-morosidad_porcentaje  = morosidad * 100
-```
-
-Si `saldo_capital` es cero, ambas medidas de morosidad son cero. Las fórmulas
-se aplican después de sumar los saldos de cada agrupación; no se promedian
-porcentajes individuales.
+- El rango máximo es de 60 meses.
+- `periodo_hasta` debe ser igual o posterior a `periodo_desde`.
+- No se aceptan meses posteriores al mes actual.
+- Los meses cerrados consultan `SituacionCrediticia` en su último día calendario.
+- El mes actual consulta `SituacionCrediticiaActual` y se identifica con la
+  fecha del sistema incluida en el token.
+- Se excluyen préstamos con `EstadoPrestamo = CANCELADO`.
+- En meses cerrados, `plazo` se obtiene de las fechas de adjudicación y
+  vencimiento. En el mes actual, se clasifica usando `Plazo` en meses.
 
 ## Salida
 
-La respuesta incluye:
+```ts
+interface MorosidadHistoricaAgrupacion {
+  periodo: string; // YYYY-MM
+  anio: number;
+  mes: number;
+  agencia: string;
+  condicion: string;
+  tipo_prestamo: string;
+  producto: string;
+  segmento: string;
+  asesor: string;
+  provincia: string;
+  canton: string;
+  parroquia: string;
+  educacion: string;
+  edad: string;
+  garantia: string;
+  monto: string;
+  tasa: string;
+  tasa_real: string;
+  plazo: string;
+  saldo_capital: number;
+  cartera_improductiva: number;
+  provision_requerida: number;
+}
 
-- los totales del rango;
-- `resumen_mensual`, con un elemento por mes y su `fecha_corte`;
-- `agrupaciones`, con las mismas dimensiones de colocación histórica;
-- `periodos_sin_datos`, para cierres mensuales sin documentos.
+interface MorosidadHistoricaResponse {
+  agrupaciones: MorosidadHistoricaAgrupacion[];
+}
+```
 
-Las medidas monetarias disponibles en cada nivel son `saldo_capital`,
-`capital_vigente`, `capital_no_devenga`, `capital_vencido` y
-`cartera_improductiva`. También se entregan `operaciones`, `morosidad` como
-proporción y `morosidad_porcentaje`.
+## Cálculo de morosidad
 
-Los totales monetarios del rango suman los saldos de sus cortes mensuales. No
-deben interpretarse como el saldo vigente de una única fecha. De la misma
-manera, `operaciones` en los totales puede contar un mismo préstamo una vez por
-cada cierre mensual en el que forme parte de la cartera.
+El backend calcula:
+
+```text
+cartera_improductiva = CapitalNoDevenga + CapitalVencido
+```
+
+`provision_requerida` corresponde a la suma de `ProvisionRequerida` dentro de
+cada agrupación.
+
+El frontend calcula por cada agrupación:
+
+```text
+morosidad = cartera_improductiva / saldo_capital
+morosidad_porcentaje = morosidad * 100
+```
+
+Si `saldo_capital` es cero:
+
+```text
+morosidad = 0
+morosidad_porcentaje = 0
+```
+
+Ejemplo TypeScript:
+
+```ts
+const morosidad = agrupacion.saldo_capital === 0
+  ? 0
+  : agrupacion.cartera_improductiva / agrupacion.saldo_capital;
+
+```

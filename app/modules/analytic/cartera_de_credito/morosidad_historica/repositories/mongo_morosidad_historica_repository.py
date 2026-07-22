@@ -1,15 +1,15 @@
+from time import perf_counter
 from typing import Any
 
 from pymongo.collection import Collection
 from pymongo.database import Database
 
 from app.modules.analytic.cartera_de_credito.morosidad_historica.domain import (
+    CorteActualMorosidad,
     DimensionesMorosidad,
     MorosidadAgrupada,
 )
 from app.modules.analytic.colocacion.colocacion_historico.repositories.mongo_colocacion_historico_repository import (
-    _numero_valido,
-    _plazo_dias,
     _rango_edad,
     _rango_numerico,
     _rango_plazo,
@@ -31,18 +31,43 @@ def _numero(campo: str) -> dict[str, Any]:
     }
 
 
+def _rango_plazo_meses() -> dict[str, Any]:
+    return _rango_numerico(
+        "Plazo",
+        (
+            (12, "Hasta 1 AÑO"),
+            (24, "Hasta 2 AÑOS"),
+            (36, "Hasta 3 AÑOS"),
+            (48, "Hasta 4 AÑOS"),
+            (60, "Hasta 5 AÑOS"),
+            (72, "Hasta 6 AÑOS"),
+            (84, "Hasta 7 AÑOS"),
+            (96, "Hasta 8 AÑOS"),
+            (120, "Hasta 10 AÑOS"),
+        ),
+        "Mas de 10 AÑOS",
+    )
+
+
 class MongoMorosidadHistoricaRepository:
     collection_name = "SituacionCrediticia"
+    actual_collection_name = "SituacionCrediticiaActual"
 
     def __init__(self, mongo_db: Database[MongoDocument]) -> None:
         self.collection: Collection[MongoDocument] = mongo_db[self.collection_name]
+        self.actual_collection: Collection[MongoDocument] = mongo_db[
+            self.actual_collection_name
+        ]
 
     def obtener_morosidad_agrupada(
         self,
         cortes: dict[str, tuple[int, int]],
+        corte_actual: CorteActualMorosidad | None = None,
     ) -> list[MorosidadAgrupada]:
-        if not cortes:
+        if not cortes and corte_actual is None:
             return []
+
+        inicio_total = perf_counter()
 
         dimensiones = {
             "agencia": _texto_normalizado("Agencia"),
@@ -85,7 +110,6 @@ class MongoMorosidadHistoricaRepository:
                  (20, "Hasta 20"), (21, "Hasta 21")),
                 "Mas de 22",
             ),
-            "tasa_valor": _numero_valido("TasaNominal"),
             "tasa_real": _rango_numerico(
                 "TasaAnual",
                 ((13, "Hasta 13"), (14, "Hasta 14"), (16, "Hasta 16"),
@@ -93,24 +117,107 @@ class MongoMorosidadHistoricaRepository:
                  (20, "Hasta 20"), (21, "Hasta 21")),
                 "Mas de 22",
             ),
-            "tasa_real_valor": _numero_valido("TasaAnual"),
             "plazo": _rango_plazo(),
-            "plazo_valor": _plazo_dias(),
         }
-        pipeline: list[dict[str, Any]] = [
-            {
-                "$match": {
-                    "fecha_corte": {"$in": list(cortes)},
-                    "EstadoPrestamo": {"$ne": "CANCELADO"},
-                }
-            },
+        dimensiones_actual = {
+            **dimensiones,
+            "plazo": _rango_plazo_meses(),
+        }
+        resultado: list[MorosidadAgrupada] = []
+        consultas: list[
+            tuple[
+                str,
+                Collection[MongoDocument],
+                list[dict[str, Any]],
+                dict[str, tuple[int, int]],
+                dict[str, Any],
+            ]
+        ] = []
+        if cortes:
+            consultas.append(
+                (
+                    "historico",
+                    self.collection,
+                    self._construir_pipeline(
+                        dimensiones,
+                        {
+                            "fecha_corte": {"$in": list(cortes)},
+                            "EstadoPrestamo": {"$ne": "CANCELADO"},
+                        },
+                        1,
+                    ),
+                    cortes,
+                    {
+                        "hint": "fecha_corte_1_estado_prestamo_1",
+                        "allowDiskUse": True,
+                    },
+                )
+            )
+        if corte_actual is not None:
+            consultas.append(
+                (
+                    "actual",
+                    self.actual_collection,
+                    self._construir_pipeline(
+                        dimensiones_actual,
+                        {"EstadoPrestamo": {"$ne": "CANCELADO"}},
+                        {"$literal": corte_actual.fecha_corte},
+                    ),
+                    {
+                        corte_actual.fecha_corte: (
+                            corte_actual.anio,
+                            corte_actual.mes,
+                        )
+                    },
+                    {"allowDiskUse": True},
+                )
+            )
+
+        for fuente, collection, pipeline, periodos, opciones in consultas:
+            inicio_cursor = perf_counter()
+            rows = collection.aggregate(pipeline, **opciones)
+            cursor_ms = (perf_counter() - inicio_cursor) * 1000
+            inicio_consumo = perf_counter()
+            filas_iniciales = len(resultado)
+            self._agregar_resultados(resultado, rows, periodos, dimensiones)
+            consumo_mapeo_ms = (perf_counter() - inicio_consumo) * 1000
+            print(
+                "[morosidad-historica][mongo] "
+                f"fuente={fuente} cortes={len(periodos)} "
+                f"agrupaciones={len(resultado) - filas_iniciales} "
+                f"cursor_ms={cursor_ms:.2f} "
+                f"consumo_mapeo_ms={consumo_mapeo_ms:.2f}"
+            )
+
+        total_ms = (perf_counter() - inicio_total) * 1000
+        print(
+            "[morosidad-historica][mongo] "
+            f"fuentes={len(consultas)} cortes={len(cortes) + int(corte_actual is not None)} "
+            f"agrupaciones={len(resultado)} "
+            f"total_ms={total_ms:.2f}"
+        )
+        return resultado
+
+    @staticmethod
+    def _construir_pipeline(
+        dimensiones: dict[str, Any],
+        match: dict[str, Any],
+        fecha_corte: int | dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        return [
+            {"$match": match},
             {
                 "$project": {
-                    "fecha_corte": 1,
+                    "fecha_corte": fecha_corte,
                     **dimensiones,
                     "saldo_capital": _numero("SaldoCapital"),
-                    "capital_no_devenga": _numero("CapitalNoDevenga"),
-                    "capital_vencido": _numero("CapitalVencido"),
+                    "cartera_improductiva": {
+                        "$add": [
+                            _numero("CapitalNoDevenga"),
+                            _numero("CapitalVencido"),
+                        ]
+                    },
+                    "provision_requerida": _numero("ProvisionRequerida"),
                 }
             },
             {
@@ -119,52 +226,36 @@ class MongoMorosidadHistoricaRepository:
                         "fecha_corte": "$fecha_corte",
                         **{campo: f"${campo}" for campo in dimensiones},
                     },
-                    "operaciones": {"$sum": 1},
                     "saldo_capital": {"$sum": "$saldo_capital"},
-                    "capital_no_devenga": {"$sum": "$capital_no_devenga"},
-                    "capital_vencido": {"$sum": "$capital_vencido"},
+                    "cartera_improductiva": {"$sum": "$cartera_improductiva"},
+                    "provision_requerida": {"$sum": "$provision_requerida"},
                 }
             },
         ]
 
-        resultado: list[MorosidadAgrupada] = []
-        for row in self.collection.aggregate(
-            pipeline,
-            hint="fecha_corte_1",
-            allowDiskUse=True,
-        ):
+    @staticmethod
+    def _agregar_resultados(
+        resultado: list[MorosidadAgrupada],
+        rows: Any,
+        periodos: dict[str, tuple[int, int]],
+        dimensiones: dict[str, Any],
+    ) -> None:
+        for row in rows:
             identificador = row.get("_id") or {}
             fecha_corte = str(identificador.get("fecha_corte") or "")
-            periodo = cortes.get(fecha_corte)
+            periodo = periodos.get(fecha_corte)
             if periodo is None:
                 continue
             anio, mes = periodo
             valores: dict[str, Any] = {}
             for campo in dimensiones:
                 valor = identificador.get(campo)
-                if campo in {"tasa_valor", "tasa_real_valor"}:
-                    valores[campo] = (
-                        float(valor)
-                        if isinstance(valor, int | float) and valor >= 0
-                        else None
-                    )
-                elif campo == "plazo_valor":
-                    valores[campo] = (
-                        int(valor)
-                        if isinstance(valor, int | float) and valor >= 0
-                        else None
-                    )
-                else:
-                    texto = str(valor or "SIN DATOS").strip() or "SIN DATOS"
-                    valores[campo] = (
-                        texto
-                        if campo in {"monto", "tasa", "tasa_real", "plazo"}
-                        else texto.upper()
-                    )
-
-            saldo_capital = float(row.get("saldo_capital") or 0.0)
-            capital_no_devenga = float(row.get("capital_no_devenga") or 0.0)
-            capital_vencido = float(row.get("capital_vencido") or 0.0)
+                texto = str(valor or "SIN DATOS").strip() or "SIN DATOS"
+                valores[campo] = (
+                    texto
+                    if campo in {"monto", "tasa", "tasa_real", "plazo"}
+                    else texto.upper()
+                )
             resultado.append(
                 MorosidadAgrupada(
                     dimensiones=DimensionesMorosidad(
@@ -173,11 +264,8 @@ class MongoMorosidadHistoricaRepository:
                         mes=mes,
                         **valores,
                     ),
-                    operaciones=int(row.get("operaciones") or 0),
-                    saldo_capital=saldo_capital,
-                    capital_vigente=saldo_capital - capital_no_devenga - capital_vencido,
-                    capital_no_devenga=capital_no_devenga,
-                    capital_vencido=capital_vencido,
+                    saldo_capital=float(row.get("saldo_capital") or 0.0),
+                    cartera_improductiva=float(row.get("cartera_improductiva") or 0.0),
+                    provision_requerida=float(row.get("provision_requerida") or 0.0),
                 )
             )
-        return resultado
