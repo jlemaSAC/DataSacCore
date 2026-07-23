@@ -31,6 +31,101 @@ def _numero(campo: str) -> dict[str, Any]:
     }
 
 
+def _numero_opcional(campo: str) -> dict[str, Any]:
+    return {
+        "$convert": {
+            "input": f"${campo}",
+            "to": "double",
+            "onError": None,
+            "onNull": None,
+        }
+    }
+
+
+def _cuota_aproximada() -> dict[str, Any]:
+    capital = _numero_opcional("DeudaInicial")
+    tasa_anual = _numero_opcional("TasaNominal")
+    plazo_meses = _numero_opcional("Plazo")
+    tasa_mensual = {"$divide": [tasa_anual, 1200]}
+    return {
+        "$cond": [
+            {
+                "$and": [
+                    {"$ne": [capital, None]},
+                    {"$gte": [capital, 0]},
+                    {"$ne": [tasa_anual, None]},
+                    {"$gte": [tasa_anual, 0]},
+                    {"$ne": [plazo_meses, None]},
+                    {"$gt": [plazo_meses, 0]},
+                ]
+            },
+            {
+                "$cond": [
+                    {"$eq": [tasa_anual, 0]},
+                    {"$divide": [capital, plazo_meses]},
+                    {
+                        "$divide": [
+                            {"$multiply": [capital, tasa_mensual]},
+                            {
+                                "$subtract": [
+                                    1,
+                                    {
+                                        "$pow": [
+                                            {"$add": [1, tasa_mensual]},
+                                            {"$multiply": [-1, plazo_meses]},
+                                        ]
+                                    },
+                                ]
+                            },
+                        ]
+                    },
+                ]
+            },
+            None,
+        ]
+    }
+
+
+def _rango_cuota_aproximada() -> dict[str, Any]:
+    cuota = _cuota_aproximada()
+    rangos = (
+        (100, "Hasta 100"),
+        (300, "Hasta 300"),
+        (500, "Hasta 500"),
+        (700, "Hasta 700"),
+        (900, "Hasta 900"),
+        (1100, "Hasta 1.100"),
+        (1300, "Hasta 1.300"),
+        (1500, "Hasta 1.500"),
+        (1700, "Hasta 1.700"),
+        (1900, "Hasta 1.900"),
+    )
+    return {
+        "$switch": {
+            "branches": [
+                {
+                    "case": {
+                        "$and": [
+                            {"$ne": [cuota, None]},
+                            {"$gte": [cuota, 0]},
+                            {"$lte": [cuota, limite]},
+                        ]
+                    },
+                    "then": etiqueta,
+                }
+                for limite, etiqueta in rangos
+            ]
+            + [
+                {
+                    "case": {"$gt": [cuota, 1900]},
+                    "then": "Mas de 1.900",
+                }
+            ],
+            "default": "SIN DATOS",
+        }
+    }
+
+
 def _rango_plazo_meses() -> dict[str, Any]:
     return _rango_numerico(
         "Plazo",
@@ -118,6 +213,7 @@ class MongoMorosidadHistoricaRepository:
                 "Mas de 22",
             ),
             "plazo": _rango_plazo(),
+            "cuota": _rango_cuota_aproximada(),
         }
         dimensiones_actual = {
             **dimensiones,
@@ -253,7 +349,7 @@ class MongoMorosidadHistoricaRepository:
                 texto = str(valor or "SIN DATOS").strip() or "SIN DATOS"
                 valores[campo] = (
                     texto
-                    if campo in {"monto", "tasa", "tasa_real", "plazo"}
+                    if campo in {"monto", "tasa", "tasa_real", "plazo", "cuota"}
                     else texto.upper()
                 )
             resultado.append(

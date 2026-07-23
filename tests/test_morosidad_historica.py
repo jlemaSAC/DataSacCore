@@ -71,6 +71,7 @@ def agrupacion(
             tasa="Hasta 16",
             tasa_real="Hasta 17",
             plazo="Hasta 2 AÑOS",
+            cuota="Hasta 500",
         ),
         saldo_capital=saldo_capital,
         cartera_improductiva=cartera_improductiva,
@@ -123,6 +124,7 @@ class FakeMongoCollection:
                     "tasa": "Hasta 16",
                     "tasa_real": "Hasta 17",
                     "plazo": "Hasta 2 AÑOS",
+                    "cuota": "Hasta 500",
                 },
                 "saldo_capital": 1000,
                 "cartera_improductiva": 150,
@@ -171,6 +173,34 @@ def test_repositorio_consulta_solo_cortes_de_fin_de_mes() -> None:
     assert resultado[0].saldo_capital == 1000
     assert resultado[0].cartera_improductiva == 150
     assert resultado[0].provision_requerida == 75
+    assert resultado[0].dimensiones.cuota == "Hasta 500"
+
+
+def test_pipeline_calcula_rango_cuota_con_datos_fuente() -> None:
+    database = FakeMongoDatabase()
+    repository = MongoMorosidadHistoricaRepository(database)  # type: ignore[arg-type]
+    repository.obtener_morosidad_agrupada({"20260131": (2026, 1)})
+
+    cuota = database.collections["SituacionCrediticia"].pipeline[1]["$project"]["cuota"]
+    assert [branch["then"] for branch in cuota["$switch"]["branches"]] == [
+        "Hasta 100",
+        "Hasta 300",
+        "Hasta 500",
+        "Hasta 700",
+        "Hasta 900",
+        "Hasta 1.100",
+        "Hasta 1.300",
+        "Hasta 1.500",
+        "Hasta 1.700",
+        "Hasta 1.900",
+        "Mas de 1.900",
+    ]
+    calculo = cuota["$switch"]["branches"][0]["case"]["$and"][0]["$ne"][0]
+    datos_validos = calculo["$cond"][0]["$and"]
+    assert datos_validos[0]["$ne"][0]["$convert"]["input"] == "$DeudaInicial"
+    assert datos_validos[2]["$ne"][0]["$convert"]["input"] == "$TasaNominal"
+    assert datos_validos[4]["$ne"][0]["$convert"]["input"] == "$Plazo"
+    assert cuota["$switch"]["default"] == "SIN DATOS"
 
 
 def test_repositorio_consulta_mes_actual_en_situacion_crediticia_actual() -> None:
@@ -201,7 +231,7 @@ def test_repositorio_consulta_mes_actual_en_situacion_crediticia_actual() -> Non
     assert resultado[0].dimensiones.periodo == "2026-07"
 
 
-def test_servicio_devuelve_solo_saldos_por_agrupacion() -> None:
+def test_servicio_devuelve_metricas_por_agrupacion() -> None:
     repository = FakeRepository(
         [
             agrupacion(periodo="2026-01"),
@@ -286,7 +316,7 @@ def test_endpoint_requiere_token() -> None:
     assert response.status_code == 401
 
 
-def test_endpoint_devuelve_unicamente_agrupaciones_con_dos_metricas() -> None:
+def test_endpoint_devuelve_agrupaciones_con_metricas() -> None:
     service = MorosidadHistoricaService(  # type: ignore[arg-type]
         FakeRepository([agrupacion()])
     )
@@ -308,6 +338,7 @@ def test_endpoint_devuelve_unicamente_agrupaciones_con_dos_metricas() -> None:
     assert payload["agrupaciones"][0]["saldo_capital"] == 1000
     assert payload["agrupaciones"][0]["cartera_improductiva"] == 150
     assert payload["agrupaciones"][0]["provision_requerida"] == 75
+    assert payload["agrupaciones"][0]["cuota"] == "Hasta 500"
     assert "morosidad" not in payload["agrupaciones"][0]
     assert "morosidad_porcentaje" not in payload["agrupaciones"][0]
     assert "tasa_valor" not in payload["agrupaciones"][0]

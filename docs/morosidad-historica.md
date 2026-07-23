@@ -59,6 +59,7 @@ interface MorosidadHistoricaAgrupacion {
   tasa: string;
   tasa_real: string;
   plazo: string;
+  cuota: string;
   saldo_capital: number;
   cartera_improductiva: number;
   provision_requerida: number;
@@ -79,6 +80,39 @@ cartera_improductiva = CapitalNoDevenga + CapitalVencido
 
 `provision_requerida` corresponde a la suma de `ProvisionRequerida` dentro de
 cada agrupación.
+
+## Cuota aproximada
+
+La dimensión `cuota` se calcula durante la consulta usando los campos
+`DeudaInicial`, `TasaNominal` y `Plazo` disponibles en ambas colecciones:
+
+```text
+tasa_mensual = (TasaNominal / 100) / 12
+cuota_aproximada = DeudaInicial * tasa_mensual
+                    / (1 - (1 + tasa_mensual) ^ -Plazo)
+```
+
+Si la tasa es cero, `cuota_aproximada = DeudaInicial / Plazo`. Valores sin
+capital, tasa o plazo válido se clasifican como `SIN DATOS`.
+
+Rangos:
+
+```text
+Hasta 100
+Hasta 300
+Hasta 500
+Hasta 700
+Hasta 900
+Hasta 1.100
+Hasta 1.300
+Hasta 1.500
+Hasta 1.700
+Hasta 1.900
+Mas de 1.900
+```
+
+Los límites superiores son inclusivos; por ejemplo, `Hasta 300` representa
+`100 < cuota <= 300`, porque el rango anterior finaliza en 100.
 
 El frontend calcula por cada agrupación:
 

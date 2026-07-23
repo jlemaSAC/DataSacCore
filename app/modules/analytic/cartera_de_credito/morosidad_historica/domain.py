@@ -29,6 +29,7 @@ class DimensionesMorosidad:
     tasa: str
     tasa_real: str
     plazo: str
+    cuota: str
 
 
 @dataclass
