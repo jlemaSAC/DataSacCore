@@ -35,6 +35,7 @@ class DimensionesMorosidad:
 @dataclass
 class MorosidadAgrupada:
     dimensiones: DimensionesMorosidad
+    operaciones: int
     saldo_capital: float
     cartera_improductiva: float
     provision_requerida: float

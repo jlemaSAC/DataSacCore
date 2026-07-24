@@ -121,6 +121,7 @@ class MorosidadHistoricaService:
             agrupaciones=[
                 MorosidadHistoricaAgrupacion(
                     **agrupacion.dimensiones.__dict__,
+                    operaciones=agrupacion.operaciones,
                     saldo_capital=round(agrupacion.saldo_capital, 2),
                     cartera_improductiva=round(agrupacion.cartera_improductiva, 2),
                     provision_requerida=round(agrupacion.provision_requerida, 2),

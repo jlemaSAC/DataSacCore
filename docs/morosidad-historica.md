@@ -60,6 +60,7 @@ interface MorosidadHistoricaAgrupacion {
   tasa_real: string;
   plazo: string;
   cuota: string;
+  operaciones: number;
   saldo_capital: number;
   cartera_improductiva: number;
   provision_requerida: number;
@@ -80,6 +81,9 @@ cartera_improductiva = CapitalNoDevenga + CapitalVencido
 
 `provision_requerida` corresponde a la suma de `ProvisionRequerida` dentro de
 cada agrupación.
+
+`operaciones` corresponde al número de créditos representados por cada
+agrupación mensual y se calcula en MongoDB mediante `{ $sum: 1 }`.
 
 ## Cuota aproximada
 

@@ -43,6 +43,7 @@ class MorosidadHistoricaAgrupacion(BaseModel):
     tasa_real: str
     plazo: str
     cuota: str
+    operaciones: int
     saldo_capital: float
     cartera_improductiva: float
     provision_requerida: float

@@ -48,6 +48,7 @@ def agrupacion(
     saldo_capital: float = 1000.0,
     cartera_improductiva: float = 150.0,
     provision_requerida: float = 75.0,
+    operaciones: int = 3,
 ) -> MorosidadAgrupada:
     anio, mes = map(int, periodo.split("-"))
     return MorosidadAgrupada(
@@ -73,6 +74,7 @@ def agrupacion(
             plazo="Hasta 2 AÑOS",
             cuota="Hasta 500",
         ),
+        operaciones=operaciones,
         saldo_capital=saldo_capital,
         cartera_improductiva=cartera_improductiva,
         provision_requerida=provision_requerida,
@@ -126,6 +128,7 @@ class FakeMongoCollection:
                     "plazo": "Hasta 2 AÑOS",
                     "cuota": "Hasta 500",
                 },
+                "operaciones": 3,
                 "saldo_capital": 1000,
                 "cartera_improductiva": 150,
                 "provision_requerida": 75,
@@ -162,6 +165,7 @@ def test_repositorio_consulta_solo_cortes_de_fin_de_mes() -> None:
     assert sumandos[0]["$convert"]["input"] == "$CapitalNoDevenga"
     assert sumandos[1]["$convert"]["input"] == "$CapitalVencido"
     assert project["provision_requerida"]["$convert"]["input"] == "$ProvisionRequerida"
+    assert collection.pipeline[2]["$group"]["operaciones"] == {"$sum": 1}
     dimensiones_grupo = collection.pipeline[2]["$group"]["_id"]
     assert "tasa_valor" not in dimensiones_grupo
     assert "tasa_real_valor" not in dimensiones_grupo
@@ -171,6 +175,7 @@ def test_repositorio_consulta_solo_cortes_de_fin_de_mes() -> None:
         "allowDiskUse": True,
     }
     assert resultado[0].saldo_capital == 1000
+    assert resultado[0].operaciones == 3
     assert resultado[0].cartera_improductiva == 150
     assert resultado[0].provision_requerida == 75
     assert resultado[0].dimensiones.cuota == "Hasta 500"
@@ -254,11 +259,10 @@ def test_servicio_devuelve_metricas_por_agrupacion() -> None:
     payload = response.model_dump()
     assert set(payload) == {"agrupaciones"}
     assert len(payload["agrupaciones"]) == 2
-    metricas = {"saldo_capital", "cartera_improductiva", "provision_requerida"}
+    metricas = {"operaciones", "saldo_capital", "cartera_improductiva", "provision_requerida"}
     for item in payload["agrupaciones"]:
         assert metricas <= item.keys()
         assert {
-            "operaciones",
             "capital_vigente",
             "capital_no_devenga",
             "capital_vencido",
@@ -336,6 +340,7 @@ def test_endpoint_devuelve_agrupaciones_con_metricas() -> None:
     assert set(payload) == {"agrupaciones"}
     assert payload["agrupaciones"][0]["agencia"] == "MATRIZ"
     assert payload["agrupaciones"][0]["saldo_capital"] == 1000
+    assert payload["agrupaciones"][0]["operaciones"] == 3
     assert payload["agrupaciones"][0]["cartera_improductiva"] == 150
     assert payload["agrupaciones"][0]["provision_requerida"] == 75
     assert payload["agrupaciones"][0]["cuota"] == "Hasta 500"
