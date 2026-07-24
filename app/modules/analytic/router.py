@@ -1,5 +1,8 @@
 from fastapi import APIRouter
 
+from app.modules.analytic.cartera_de_credito.morosidad_historica.router import (
+    router as morosidad_historica_router,
+)
 from app.modules.analytic.colocacion.colocacion_historico.router import (
     router as colocacion_historico_router,
 )
@@ -27,6 +30,7 @@ from app.modules.analytic.recuperacion.recuperacion_historico.router import (
 router = APIRouter(prefix="/analytic")
 
 router.include_router(menu_router)
+router.include_router(morosidad_historica_router)
 router.include_router(colocacion_historico_router)
 router.include_router(recuperacion_historico_router)
 router.include_router(calidad_de_activos_router)
