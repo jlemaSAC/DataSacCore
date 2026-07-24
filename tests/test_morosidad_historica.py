@@ -1,4 +1,6 @@
 from datetime import date
+from collections.abc import Iterable
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -6,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.modules.analytic.cartera_de_credito.morosidad_historica.dependencies import (
+    get_morosidad_historica_cache_admin_service,
     get_morosidad_historica_service,
 )
 from app.modules.analytic.cartera_de_credito.morosidad_historica.domain import (
@@ -16,10 +19,15 @@ from app.modules.analytic.cartera_de_credito.morosidad_historica.domain import (
 from app.modules.analytic.cartera_de_credito.morosidad_historica.repositories.mongo_morosidad_historica_repository import (
     MongoMorosidadHistoricaRepository,
 )
+from app.modules.analytic.cartera_de_credito.morosidad_historica.repositories.redis_morosidad_historica_cache import (
+    RedisMorosidadHistoricaCache,
+)
 from app.modules.analytic.cartera_de_credito.morosidad_historica.schemas import (
     InputMorosidadHistorica,
+    MorosidadHistoricaAgrupacion,
 )
 from app.modules.analytic.cartera_de_credito.morosidad_historica.service import (
+    MorosidadHistoricaCacheAdminService,
     MorosidadHistoricaService,
 )
 from app.modules.auth.dependencies import get_current_auth_context
@@ -86,15 +94,78 @@ class FakeRepository:
         self.datos = datos or []
         self.cortes: dict[str, tuple[int, int]] = {}
         self.corte_actual: CorteActualMorosidad | None = None
+        self.calls = 0
 
     def obtener_morosidad_agrupada(
         self,
         cortes: dict[str, tuple[int, int]],
         corte_actual: CorteActualMorosidad | None = None,
     ) -> list[MorosidadAgrupada]:
+        self.calls += 1
         self.cortes = cortes
         self.corte_actual = corte_actual
         return list(self.datos)
+
+
+class FakeCache:
+    def __init__(
+        self, datos: dict[str, list[MorosidadHistoricaAgrupacion]] | None = None
+    ) -> None:
+        self.datos = datos or {}
+        self.periodos_solicitados: list[str] = []
+        self.periodos_guardados: dict[str, list[MorosidadHistoricaAgrupacion]] = {}
+
+    def obtener_meses(
+        self, periodos: Iterable[str]
+    ) -> dict[str, list[MorosidadHistoricaAgrupacion]]:
+        self.periodos_solicitados = list(periodos)
+        return {
+            periodo: self.datos[periodo]
+            for periodo in self.periodos_solicitados
+            if periodo in self.datos
+        }
+
+    def guardar_mes(
+        self, periodo: str, agrupaciones: list[MorosidadHistoricaAgrupacion]
+    ) -> None:
+        self.periodos_guardados[periodo] = agrupaciones
+
+
+class FakeRedisClient:
+    def __init__(self, valores: dict[str, str]) -> None:
+        self.valores = valores
+
+    def scan_iter(self, *, match: str, count: int) -> Iterable[str]:
+        _ = count
+        prefijo = match.removesuffix("*")
+        return iter([clave for clave in self.valores if clave.startswith(prefijo)])
+
+    def unlink(self, *claves: str) -> int:
+        eliminadas = 0
+        for clave in claves:
+            if clave in self.valores:
+                del self.valores[clave]
+                eliminadas += 1
+        return eliminadas
+
+
+class FakeCacheAdmin:
+    def __init__(self, claves_eliminadas: int = 0) -> None:
+        self.claves_eliminadas = claves_eliminadas
+        self.llamadas = 0
+
+    def limpiar_cache(self) -> int:
+        self.llamadas += 1
+        return self.claves_eliminadas
+
+
+class FakeSqlAuthRepository:
+    def __init__(self, roles: list[str]) -> None:
+        self.roles = roles
+
+    def get_roles_usuario(self, codigo_usuario: str) -> list[SimpleNamespace]:
+        _ = codigo_usuario
+        return [SimpleNamespace(codigo=rol) for rol in self.roles]
 
 
 class FakeMongoCollection:
@@ -279,6 +350,131 @@ def test_servicio_sin_datos_devuelve_agrupaciones_vacias() -> None:
     )
 
     assert response.agrupaciones == []
+
+
+def test_servicio_reutiliza_meses_cacheados_y_consulta_solo_los_faltantes() -> None:
+    enero = agrupacion(periodo="2026-01", saldo_capital=100)
+    febrero = agrupacion(periodo="2026-02", saldo_capital=200)
+    cache = FakeCache(
+        {"2026-01": MorosidadHistoricaService._construir_agrupaciones([enero])}
+    )
+    repository = FakeRepository([febrero])
+    service = MorosidadHistoricaService(repository, cache=cache)  # type: ignore[arg-type]
+
+    response = service.obtener_morosidad_historica(
+        InputMorosidadHistorica(periodo_desde="2026-01", periodo_hasta="2026-02"),
+        fake_auth_context(),
+    )
+
+    assert cache.periodos_solicitados == ["2026-01", "2026-02"]
+    assert repository.calls == 1
+    assert repository.cortes == {"20260228": (2026, 2)}
+    assert [item.periodo for item in response.agrupaciones] == ["2026-01", "2026-02"]
+    assert [item.saldo_capital for item in response.agrupaciones] == [100, 200]
+    assert list(cache.periodos_guardados) == ["2026-02"]
+
+
+def test_servicio_no_consulta_mongo_cuando_todos_los_meses_cerrados_estan_cacheados() -> None:
+    enero = agrupacion(periodo="2026-01", saldo_capital=100)
+    febrero = agrupacion(periodo="2026-02", saldo_capital=200)
+    cache = FakeCache(
+        {
+            "2026-01": MorosidadHistoricaService._construir_agrupaciones([enero]),
+            "2026-02": MorosidadHistoricaService._construir_agrupaciones([febrero]),
+        }
+    )
+    repository = FakeRepository()
+    service = MorosidadHistoricaService(repository, cache=cache)  # type: ignore[arg-type]
+
+    response = service.obtener_morosidad_historica(
+        InputMorosidadHistorica(periodo_desde="2026-01", periodo_hasta="2026-02"),
+        fake_auth_context(),
+    )
+
+    assert repository.cortes == {}
+    assert repository.corte_actual is None
+    assert repository.calls == 0
+    assert [item.periodo for item in response.agrupaciones] == ["2026-01", "2026-02"]
+    assert cache.periodos_guardados == {}
+
+
+def test_servicio_no_cachea_el_mes_actual() -> None:
+    cache = FakeCache({"2026-07": MorosidadHistoricaService._construir_agrupaciones([])})
+    repository = FakeRepository([agrupacion(periodo="2026-07")])
+    service = MorosidadHistoricaService(repository, cache=cache)  # type: ignore[arg-type]
+
+    response = service.obtener_morosidad_historica(
+        InputMorosidadHistorica(periodo_desde="2026-07", periodo_hasta="2026-07"),
+        fake_auth_context(date(2026, 7, 22)),
+    )
+
+    assert cache.periodos_solicitados == []
+    assert repository.calls == 1
+    assert repository.cortes == {}
+    assert repository.corte_actual == CorteActualMorosidad("20260722", 2026, 7)
+    assert [item.periodo for item in response.agrupaciones] == ["2026-07"]
+
+
+def test_cache_limpia_solo_las_claves_de_morosidad_historica() -> None:
+    valores = {
+        "cartera:morosidad-historica:v1:2026-01": "enero",
+        "cartera:morosidad-historica:v1:2026-02": "febrero",
+        "cartera:colocacion-historica:v1:2026-01": "no eliminar",
+        "otra-aplicacion:clave": "no eliminar",
+    }
+    cache = RedisMorosidadHistoricaCache(FakeRedisClient(valores))  # type: ignore[arg-type]
+
+    eliminadas = cache.limpiar_cache()
+
+    assert eliminadas == 2
+    assert valores == {
+        "cartera:colocacion-historica:v1:2026-01": "no eliminar",
+        "otra-aplicacion:clave": "no eliminar",
+    }
+
+
+def test_servicio_admin_limpia_cache_solo_para_rol_administrador() -> None:
+    cache = FakeCacheAdmin(claves_eliminadas=4)
+    service = MorosidadHistoricaCacheAdminService(  # type: ignore[arg-type]
+        cache=cache,
+        sql_repository=FakeSqlAuthRepository(["001"]),
+    )
+
+    respuesta = service.limpiar_cache(fake_auth_context())
+
+    assert respuesta.claves_eliminadas == 4
+    assert cache.llamadas == 1
+
+
+def test_servicio_admin_rechaza_limpieza_sin_rol_administrador() -> None:
+    service = MorosidadHistoricaCacheAdminService(  # type: ignore[arg-type]
+        cache=FakeCacheAdmin(),
+        sql_repository=FakeSqlAuthRepository(["002"]),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        service.limpiar_cache(fake_auth_context())
+
+    assert error.value.status_code == 403
+
+
+def test_endpoint_admin_limpia_cache_de_morosidad_historica() -> None:
+    cache = FakeCacheAdmin(claves_eliminadas=3)
+    service = MorosidadHistoricaCacheAdminService(  # type: ignore[arg-type]
+        cache=cache,
+        sql_repository=FakeSqlAuthRepository(["001"]),
+    )
+    app.dependency_overrides[get_current_auth_context] = fake_auth_context
+    app.dependency_overrides[get_morosidad_historica_cache_admin_service] = lambda: service
+    try:
+        response = client.delete("/analytic/cartera-de-credito/morosidad-historica/cache")
+    finally:
+        app.dependency_overrides.pop(get_current_auth_context, None)
+        app.dependency_overrides.pop(get_morosidad_historica_cache_admin_service, None)
+
+    assert response.status_code == 200
+    assert response.json() == {"claves_eliminadas": 3}
+    assert cache.llamadas == 1
 
 
 def test_servicio_usa_coleccion_actual_para_mes_en_curso() -> None:

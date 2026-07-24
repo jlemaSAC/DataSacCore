@@ -51,3 +51,10 @@ class MorosidadHistoricaAgrupacion(BaseModel):
 
 class MorosidadHistoricaResponse(BaseModel):
     agrupaciones: list[MorosidadHistoricaAgrupacion]
+
+
+class MorosidadHistoricaCacheClearResponse(BaseModel):
+    claves_eliminadas: int = Field(
+        ge=0,
+        description="Numero de meses historicos eliminados de la cache Redis.",
+    )

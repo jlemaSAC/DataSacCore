@@ -1,13 +1,16 @@
 from fastapi import APIRouter, Depends
 
 from app.modules.analytic.cartera_de_credito.morosidad_historica.dependencies import (
+    get_morosidad_historica_cache_admin_service,
     get_morosidad_historica_service,
 )
 from app.modules.analytic.cartera_de_credito.morosidad_historica.schemas import (
     InputMorosidadHistorica,
+    MorosidadHistoricaCacheClearResponse,
     MorosidadHistoricaResponse,
 )
 from app.modules.analytic.cartera_de_credito.morosidad_historica.service import (
+    MorosidadHistoricaCacheAdminService,
     MorosidadHistoricaService,
 )
 from app.modules.auth.dependencies import get_current_auth_context
@@ -35,3 +38,18 @@ def obtener_morosidad_historica(
     service: MorosidadHistoricaService = Depends(get_morosidad_historica_service),
 ) -> MorosidadHistoricaResponse:
     return service.obtener_morosidad_historica(body, auth_context)
+
+
+@router.delete(
+    "/cartera-de-credito/morosidad-historica/cache",
+    response_model=MorosidadHistoricaCacheClearResponse,
+    summary="Limpiar cache Redis de morosidad historica",
+    description="Elimina unicamente las claves Redis de morosidad historica. Requiere rol administrador.",
+)
+def limpiar_cache_morosidad_historica(
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: MorosidadHistoricaCacheAdminService = Depends(
+        get_morosidad_historica_cache_admin_service
+    ),
+) -> MorosidadHistoricaCacheClearResponse:
+    return service.limpiar_cache(auth_context)

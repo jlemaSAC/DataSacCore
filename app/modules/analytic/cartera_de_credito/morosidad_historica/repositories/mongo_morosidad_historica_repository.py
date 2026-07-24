@@ -277,21 +277,21 @@ class MongoMorosidadHistoricaRepository:
             filas_iniciales = len(resultado)
             self._agregar_resultados(resultado, rows, periodos, dimensiones)
             consumo_mapeo_ms = (perf_counter() - inicio_consumo) * 1000
-            print(
-                "[morosidad-historica][mongo] "
-                f"fuente={fuente} cortes={len(periodos)} "
-                f"agrupaciones={len(resultado) - filas_iniciales} "
-                f"cursor_ms={cursor_ms:.2f} "
-                f"consumo_mapeo_ms={consumo_mapeo_ms:.2f}"
-            )
+            # print(
+            #     "[morosidad-historica][mongo] "
+            #     f"fuente={fuente} cortes={len(periodos)} "
+            #     f"agrupaciones={len(resultado) - filas_iniciales} "
+            #     f"cursor_ms={cursor_ms:.2f} "
+            #     f"consumo_mapeo_ms={consumo_mapeo_ms:.2f}"
+            # )
 
         total_ms = (perf_counter() - inicio_total) * 1000
-        print(
-            "[morosidad-historica][mongo] "
-            f"fuentes={len(consultas)} cortes={len(cortes) + int(corte_actual is not None)} "
-            f"agrupaciones={len(resultado)} "
-            f"total_ms={total_ms:.2f}"
-        )
+        # print(
+        #     "[morosidad-historica][mongo] "
+        #     f"fuentes={len(consultas)} cortes={len(cortes) + int(corte_actual is not None)} "
+        #     f"agrupaciones={len(resultado)} "
+        #     f"total_ms={total_ms:.2f}"
+        # )
         return resultado
 
     @staticmethod

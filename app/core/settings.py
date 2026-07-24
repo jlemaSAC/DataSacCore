@@ -121,6 +121,13 @@ class MongoSettings:
 
 
 @dataclass(frozen=True)
+class RedisSettings:
+    url: str
+    socket_connect_timeout_ms: int
+    socket_timeout_ms: int
+
+
+@dataclass(frozen=True)
 class JwtSettings:
     secret_key: str
     algorithm: str
@@ -198,6 +205,15 @@ def get_mongo_settings() -> MongoSettings:
         datasac_db=_optional("MONGO_DATASAC_DB_NAME", "DataSac"),
         mayor_auxiliar_db=_optional("MONGO_MAYOR_AUXILIAR_DB_NAME", "MayorAuxiliar"),
         analytic_sac_db=_optional("MONGO_ANALYTIC_SAC_DB_NAME", "AnalyticSac"),
+    )
+
+
+@lru_cache
+def get_redis_settings() -> RedisSettings:
+    return RedisSettings(
+        url=_optional("REDIS_URL", ""),
+        socket_connect_timeout_ms=_optional_int("REDIS_SOCKET_CONNECT_TIMEOUT_MS", 500),
+        socket_timeout_ms=_optional_int("REDIS_SOCKET_TIMEOUT_MS", 1000),
     )
 
 
