@@ -128,6 +128,12 @@ class RedisSettings:
 
 
 @dataclass(frozen=True)
+class EtlSettings:
+    base_url: str
+    timeout_seconds: int
+
+
+@dataclass(frozen=True)
 class JwtSettings:
     secret_key: str
     algorithm: str
@@ -214,6 +220,14 @@ def get_redis_settings() -> RedisSettings:
         url=_optional("REDIS_URL", ""),
         socket_connect_timeout_ms=_optional_int("REDIS_SOCKET_CONNECT_TIMEOUT_MS", 500),
         socket_timeout_ms=_optional_int("REDIS_SOCKET_TIMEOUT_MS", 1000),
+    )
+
+
+@lru_cache
+def get_etl_settings() -> EtlSettings:
+    return EtlSettings(
+        base_url=_optional("ETL_BASE_URL", "http://127.0.0.1:9000"),
+        timeout_seconds=_optional_int("ETL_TIMEOUT_SECONDS", 180),
     )
 
 
