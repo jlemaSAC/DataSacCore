@@ -25,7 +25,6 @@ from app.modules.auth.schemas import AuthContext
 
 
 logger = logging.getLogger("uvicorn.error")
-MAX_MESES_RANGO = 60
 
 
 @dataclass(frozen=True)
@@ -56,11 +55,6 @@ class ReporteInversionesService:
             raise HTTPException(status_code=400, detail="fecha_hasta no puede ser posterior a la fecha del sistema.")
 
         meses = _meses_del_rango(fecha_desde, fecha_hasta)
-        if len(meses) > MAX_MESES_RANGO:
-            raise HTTPException(
-                status_code=400,
-                detail=f"El rango no puede superar {MAX_MESES_RANGO} meses.",
-            )
 
         self.mongo_repository.ensure_indexes()
         inicio_mes_actual = date(fecha_hoy.year, fecha_hoy.month, 1)
