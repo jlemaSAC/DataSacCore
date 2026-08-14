@@ -108,14 +108,14 @@ class SqlColocacionHistoricoRepository:
         tasa_real = _rango_sql(
             Prestamo.tea,
             (
-                (13, "D.Hasta 13"),
-                (14, "E.Hasta 14"),
-                (16, "G.Hasta 16"),
-                (17, "H.Hasta 17"),
-                (18, "I.Hasta 18"),
-                (19, "J.Hasta 19"),
-                (20, "K.Hasta 20"),
-                (21, "L.Hasta 21"),
+                (13, "Hasta 13"),
+                (14, "Hasta 14"),
+                (16, "Hasta 16"),
+                (17, "Hasta 17"),
+                (18, "Hasta 18"),
+                (19, "Hasta 19"),
+                (20, "Hasta 20"),
+                (21, "Hasta 21"),
             ),
             "Mas de 22",
         )

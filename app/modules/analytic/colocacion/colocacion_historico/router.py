@@ -43,7 +43,7 @@ def obtener_saldo_inicial_agencias_por_mes(
 Divide el rango solicitado en segmentos mensuales y devuelve un resumen por
 período `YYYY-MM`, además de las agrupaciones dimensionales para dashboards.
 
-- El rango máximo permitido es de 24 meses.
+- El rango máximo permitido es de 60 meses.
 - `fecha_hasta` no puede superar la fecha del sistema incluida en el token.
 - En el mes actual, MongoDB aporta hasta ayer y SQL Server aporta el día actual.
 - Para rangos parciales históricos se utiliza como corte Mongo el último día

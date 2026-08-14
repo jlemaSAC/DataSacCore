@@ -1,6 +1,5 @@
 import logging
 from datetime import date, datetime
-from time import perf_counter
 from typing import Any
 
 from fastapi import HTTPException
@@ -70,10 +69,7 @@ class RecuperacionHistoricoService:
             fecha_hoy = fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
             self._validar_rango(input_data, fecha_hoy)
 
-            inicio_mongo = perf_counter()
             recuperaciones = self.mongo_repository.obtener_recuperaciones(input_data, fecha_hoy)
-            print(f"[recuperacion][service] mongo_total_ms={(perf_counter() - inicio_mongo) * 1000:.2f}")
-            inicio_prestamos = perf_counter()
             numeros_prestamo = {
                 recuperacion.numero_prestamo
                 for recuperacion in recuperaciones
@@ -85,15 +81,15 @@ class RecuperacionHistoricoService:
                 input_data.fecha_hasta.strftime("%Y%m%d"),
                 fecha_hoy.strftime("%Y%m%d"),
             )
-            print(
-                "[recuperacion][service] prestamos_total_ms="
-                f"{(perf_counter() - inicio_prestamos) * 1000:.2f} prestamos={len(prestamos_por_numero)}"
-            )
-            inicio_respuesta = perf_counter()
             respuesta = self._construir_respuesta(input_data, recuperaciones, prestamos_por_numero)
-            print(
-                "[recuperacion][service] respuesta_ms="
-                f"{(perf_counter() - inicio_respuesta) * 1000:.2f} recuperaciones={len(recuperaciones)}"
+            logger.debug(
+                "recuperacion_consulta_completada",
+                extra={
+                    "fecha_desde": input_data.fecha_desde.isoformat(),
+                    "fecha_hasta": input_data.fecha_hasta.isoformat(),
+                    "prestamos": len(prestamos_por_numero),
+                    "recuperaciones": len(recuperaciones),
+                },
             )
             return respuesta
         except HTTPException:
@@ -111,17 +107,18 @@ class RecuperacionHistoricoService:
             fecha_sistema = auth_context.usuario.fecha_sistema
             fecha_hoy = fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
             self._validar_rango(input_data, fecha_hoy)
-            inicio = perf_counter()
             resultado = self.mongo_repository.obtener_recuperacion_agrupada(
                 input_data,
                 fecha_hoy,
             )
             respuesta = self._construir_respuesta_agrupada(input_data, resultado)
-            print(
-                "[recuperacion][service][agrupado] "
-                f"dimension={input_data.dimension} series={len(respuesta.series)} "
-                f"periodos={len(respuesta.periodos)} "
-                f"total_ms={(perf_counter() - inicio) * 1000:.2f}"
+            logger.debug(
+                "recuperacion_consulta_agrupada_completada",
+                extra={
+                    "dimension": input_data.dimension,
+                    "series": len(respuesta.series),
+                    "periodos": len(respuesta.periodos),
+                },
             )
             return respuesta
         except HTTPException:
@@ -159,10 +156,12 @@ class RecuperacionHistoricoService:
                 recuperaciones,
                 prestamos_por_numero,
             )
-            print(
-                "[recuperacion][service][compacto] "
-                f"prestamos={respuesta.resumen.cantidad_prestamos} "
-                f"recuperaciones={respuesta.resumen.cantidad_recuperaciones}"
+            logger.debug(
+                "recuperacion_consulta_compacta_completada",
+                extra={
+                    "prestamos": respuesta.resumen.cantidad_prestamos,
+                    "recuperaciones": respuesta.resumen.cantidad_recuperaciones,
+                },
             )
             return respuesta
         except HTTPException:
