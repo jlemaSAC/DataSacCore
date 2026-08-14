@@ -25,4 +25,20 @@ class SqlReporteInversionesRepository:
         )
         if not result.returns_rows:
             raise RuntimeError("El SP de inversiones no devolvió columnas.")
-        return [dict(row) for row in result.mappings().all()]
+
+        filas: list[dict[str, Any]] = []
+        for row in result.mappings().all():
+            fila = dict(row)
+            fila["tipo_prestamo"] = _lista_desde_separador(
+                fila.pop("tipo_prestamo_lista", None)
+            )
+            fila["producto"] = _lista_desde_separador(fila.pop("producto_lista", None))
+            filas.append(fila)
+        return filas
+
+
+def _lista_desde_separador(value: Any) -> list[str]:
+    if not value:
+        return []
+
+    return [elemento.strip() for elemento in str(value).split("\u200b") if elemento.strip()]

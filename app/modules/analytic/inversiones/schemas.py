@@ -1,11 +1,15 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ReporteInversionesFila(BaseModel):
     fecha_corte: str
+    fecha_creacion: date | None = Field(
+        default=None,
+        description="Fecha de creación del depósito a plazo.",
+    )
     periodo: str
     anio: int
     mes: int
@@ -21,11 +25,44 @@ class ReporteInversionesFila(BaseModel):
     canton: str
     parroquia: str
     tiene_prestamo: bool
+    cantidad_prestamos: int | None = Field(
+        default=None,
+        description="Préstamos no cancelados del cliente principal al corte.",
+    )
+    tipo_prestamo: list[str] | None = Field(
+        default=None,
+        description="Tipos de préstamo distintos del cliente.",
+    )
+    producto: list[str] | None = Field(
+        default=None,
+        description="Productos de préstamo distintos del cliente.",
+    )
     tasa_efectiva: float
     tasa_entera: int
     tasa_decimal: float
     operaciones: int
     saldo: float
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalizar_listas_de_prestamos(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        fila = dict(value)
+        for campo, campo_origen in (
+            ("tipo_prestamo", "tipo_prestamo_lista"),
+            ("producto", "producto_lista"),
+        ):
+            if campo in fila or campo_origen not in fila:
+                continue
+            valor = fila[campo_origen]
+            fila[campo] = (
+                [elemento.strip() for elemento in str(valor).split("\u200b") if elemento.strip()]
+                if valor
+                else []
+            )
+        return fila
 
     @field_validator("fecha_corte", mode="before")
     @classmethod

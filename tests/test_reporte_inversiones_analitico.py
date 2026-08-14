@@ -4,6 +4,9 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.modules.analytic.inversiones.dependencies import get_reporte_inversiones_service
+from app.modules.analytic.inversiones.repositories.sql_reporte_inversiones_repository import (
+    _lista_desde_separador,
+)
 from app.modules.analytic.inversiones.service import ReporteInversionesService
 from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.auth.schemas import AuthContext, UsuarioTokenPayload
@@ -85,6 +88,15 @@ def _auth(fecha_sistema: date) -> AuthContext:
             fecha_sistema=fecha_sistema,
         ),
     )
+
+
+def test_normaliza_tipos_y_productos_de_prestamo_como_listas() -> None:
+    assert _lista_desde_separador("CREDI INVERSION SAC") == ["CREDI INVERSION SAC"]
+    assert _lista_desde_separador("Producto A\u200bProducto B") == [
+        "Producto A",
+        "Producto B",
+    ]
+    assert _lista_desde_separador(None) == []
 
 
 def test_genera_mes_cerrado_faltante_y_consulta_sql_para_hoy() -> None:

@@ -2,6 +2,9 @@
     Reemplazo optimizado de INVERSION.REPORTE_PBI_BANDAS_INVERSIONES.
 
     Devuelve una fotografía mensual agregada de depósitos ACTIVO y EXIGIBLE.
+    La condición diferencia depósitos nuevos y vigentes, según su fecha de
+    creación y las operaciones de renovación realizadas desde el inicio del
+    mes hasta la fecha efectiva de cada corte.
     Cada corte usa las tablas temporales de inversiones y colocación; las
     relaciones no temporales se usan únicamente para las dimensiones vigentes.
 
@@ -107,6 +110,7 @@ BEGIN
 
     CREATE TABLE #DepositosCorte (
         id_deposito int NOT NULL PRIMARY KEY CLUSTERED,
+        fecha_creacion date NOT NULL,
         saldo decimal(18, 2) NOT NULL,
         id_agencia int NULL,
         codigo_usuario nvarchar(100) NULL,
@@ -127,7 +131,19 @@ BEGIN
 
     CREATE TABLE #PrestamosPorCliente (
         id_cliente int NOT NULL PRIMARY KEY CLUSTERED,
-        saldo_prestamo decimal(28, 2) NOT NULL
+        saldo_prestamo decimal(28, 2) NOT NULL,
+        cantidad_prestamos int NOT NULL,
+        tipo_prestamo_lista nvarchar(max) NOT NULL,
+        producto_lista nvarchar(max) NOT NULL
+    );
+
+    CREATE TABLE #PrestamosDetalle (
+        id_cliente int NOT NULL,
+        id_prestamo int NOT NULL,
+        saldo_prestamo decimal(18, 2) NOT NULL,
+        tipo_prestamo nvarchar(150) NOT NULL,
+        producto nvarchar(150) NOT NULL,
+        PRIMARY KEY CLUSTERED (id_cliente, id_prestamo)
     );
 
     CREATE TABLE #Periodicidades (
@@ -149,6 +165,7 @@ BEGIN
 
     CREATE TABLE #Resultado (
         fecha_corte date NOT NULL,
+        fecha_creacion date NOT NULL,
         periodo char(7) NOT NULL,
         anio int NOT NULL,
         mes int NOT NULL,
@@ -164,6 +181,9 @@ BEGIN
         canton nvarchar(150) NOT NULL,
         parroquia nvarchar(150) NOT NULL,
         tiene_prestamo bit NOT NULL,
+        cantidad_prestamos int NOT NULL,
+        tipo_prestamo_lista nvarchar(max) NOT NULL,
+        producto_lista nvarchar(max) NOT NULL,
         tasa_efectiva decimal(18, 4) NOT NULL,
         tasa_entera int NOT NULL,
         tasa_decimal decimal(18, 2) NOT NULL,
@@ -174,7 +194,9 @@ BEGIN
     DECLARE
         @FechaCorte date,
         @FechaCierrePlazo datetime,
-        @FechaCierreColocacion datetime;
+        @FechaCierreColocacion datetime,
+        @InicioMes datetime,
+        @FinRangoRenovacion datetime;
 
     DECLARE CursorCortes CURSOR LOCAL FAST_FORWARD FOR
         SELECT FechaCorte, FechaCierrePlazo, FechaCierreColocacion
@@ -190,20 +212,30 @@ BEGIN
         TRUNCATE TABLE #DepositosCorte;
         TRUNCATE TABLE #ClientesCorte;
         TRUNCATE TABLE #PrestamosPorCliente;
+        TRUNCATE TABLE #PrestamosDetalle;
         TRUNCATE TABLE #Periodicidades;
         TRUNCATE TABLE #Bandas;
         TRUNCATE TABLE #Renovaciones;
+
+        /*
+           Para cortes históricos se llega hasta el último día operativo del
+           mes; para el corte vigente, hasta la fecha actual del sistema.
+           El límite superior exclusivo conserva todas las horas del corte.
+        */
+        SET @InicioMes = DATEFROMPARTS(YEAR(@FechaCorte), MONTH(@FechaCorte), 1);
+        SET @FinRangoRenovacion = DATEADD(day, 1, CONVERT(datetime, @FechaCorte));
 
         /* Una sola lectura de depósitos para el corte actual o histórico. */
         IF @FechaCorte = @FechaSistema
         BEGIN
             INSERT INTO #DepositosCorte (
-                id_deposito, saldo, id_agencia, codigo_usuario,
+                id_deposito, fecha_creacion, saldo, id_agencia, codigo_usuario,
                 codigo_tipo_deposito, codigo_estado_deposito, pago_periodico_interes,
                 tasa_normal, tasa_variacion, plazo_dias, id_cliente, id_residencia
             )
             SELECT
                 D.ID,
+                CAST(D.FECHACREACION AS date),
                 D.MONTO,
                 D.IDAGENCIA,
                 D.CODIGOUSUARIO,
@@ -229,12 +261,13 @@ BEGIN
         ELSE
         BEGIN
             INSERT INTO #DepositosCorte (
-                id_deposito, saldo, id_agencia, codigo_usuario,
+                id_deposito, fecha_creacion, saldo, id_agencia, codigo_usuario,
                 codigo_tipo_deposito, codigo_estado_deposito, pago_periodico_interes,
                 tasa_normal, tasa_variacion, plazo_dias, id_cliente, id_residencia
             )
             SELECT
                 D.ID,
+                CAST(D.FECHACREACION AS date),
                 D.MONTO,
                 D.IDAGENCIA,
                 D.CODIGOUSUARIO,
@@ -265,30 +298,87 @@ BEGIN
         /* Una sola lectura de préstamos, restringida a clientes del corte. */
         IF @FechaCorte = @FechaSistema
         BEGIN
-            INSERT INTO #PrestamosPorCliente (id_cliente, saldo_prestamo)
-            SELECT PC.IDCLIENTE, CONVERT(decimal(28, 2), SUM(P.SALDO))
+            INSERT INTO #PrestamosDetalle (
+                id_cliente, id_prestamo, saldo_prestamo, tipo_prestamo, producto
+            )
+            SELECT
+                PC.IDCLIENTE,
+                P.ID,
+                P.SALDO,
+                COALESCE(NULLIF(LTRIM(RTRIM(TP.NOMBRE)), ''), 'SIN DATOS'),
+                COALESCE(NULLIF(LTRIM(RTRIM(CAL.NOMBRE)), ''), 'SIN DATOS')
             FROM COLOCACION.PRESTAMO AS P WITH (NOLOCK)
             INNER JOIN COLOCACION.PRESTAMO_CLIENTE AS PC WITH (NOLOCK)
                 ON PC.IDPRESTAMO = P.ID
                AND PC.ACTIVO = 1
-            INNER JOIN #ClientesCorte AS CC
-                ON CC.id_cliente = PC.IDCLIENTE
+            INNER JOIN #ClientesCorte AS CLC
+                ON CLC.id_cliente = PC.IDCLIENTE
+            LEFT JOIN CREDITO.TIPO_PRESTAMO AS TP WITH (NOLOCK)
+                ON TP.CODIGO = P.CODIGOTIPOPRESTAMO
+            LEFT JOIN CREDITO.SUBCALIFICACION_CONTABLE AS SCC WITH (NOLOCK)
+                ON SCC.CODIGO = P.CODIGOSUBCALIFICACIONCONTABLE
+            LEFT JOIN CREDITO.CALIFICACION_CONTABLE AS CAL WITH (NOLOCK)
+                ON CAL.CODIGO = SCC.CODIGOCALIFICACIONCONTABLE
             WHERE P.CODIGOESTADO <> 'C'
-            GROUP BY PC.IDCLIENTE;
+            GROUP BY PC.IDCLIENTE, P.ID, P.SALDO, TP.NOMBRE, CAL.NOMBRE;
         END
         ELSE
         BEGIN
-            INSERT INTO #PrestamosPorCliente (id_cliente, saldo_prestamo)
-            SELECT PC.IDCLIENTE, CONVERT(decimal(28, 2), SUM(P.SALDO))
+            INSERT INTO #PrestamosDetalle (
+                id_cliente, id_prestamo, saldo_prestamo, tipo_prestamo, producto
+            )
+            SELECT
+                PC.IDCLIENTE,
+                P.ID,
+                P.SALDO,
+                COALESCE(NULLIF(LTRIM(RTRIM(TP.NOMBRE)), ''), 'SIN DATOS'),
+                COALESCE(NULLIF(LTRIM(RTRIM(CAL.NOMBRE)), ''), 'SIN DATOS')
             FROM COLOCACION.PRESTAMO FOR SYSTEM_TIME AS OF @FechaCierreColocacion AS P
             INNER JOIN COLOCACION.PRESTAMO_CLIENTE AS PC WITH (NOLOCK)
                 ON PC.IDPRESTAMO = P.ID
                AND PC.ACTIVO = 1
-            INNER JOIN #ClientesCorte AS CC
-                ON CC.id_cliente = PC.IDCLIENTE
+            INNER JOIN #ClientesCorte AS CLC
+                ON CLC.id_cliente = PC.IDCLIENTE
+            LEFT JOIN CREDITO.TIPO_PRESTAMO AS TP WITH (NOLOCK)
+                ON TP.CODIGO = P.CODIGOTIPOPRESTAMO
+            LEFT JOIN CREDITO.SUBCALIFICACION_CONTABLE AS SCC WITH (NOLOCK)
+                ON SCC.CODIGO = P.CODIGOSUBCALIFICACIONCONTABLE
+            LEFT JOIN CREDITO.CALIFICACION_CONTABLE AS CAL WITH (NOLOCK)
+                ON CAL.CODIGO = SCC.CODIGOCALIFICACIONCONTABLE
             WHERE P.CODIGOESTADO <> 'C'
-            GROUP BY PC.IDCLIENTE;
+            GROUP BY PC.IDCLIENTE, P.ID, P.SALDO, TP.NOMBRE, CAL.NOMBRE;
         END;
+
+        INSERT INTO #PrestamosPorCliente (
+            id_cliente, saldo_prestamo, cantidad_prestamos,
+            tipo_prestamo_lista, producto_lista
+        )
+        SELECT
+            PD.id_cliente,
+            CONVERT(decimal(28, 2), SUM(PD.saldo_prestamo)),
+            COUNT(*),
+            STUFF((
+                SELECT NCHAR(8203) + Tipos.tipo_prestamo
+                FROM (
+                    SELECT DISTINCT PD2.tipo_prestamo
+                    FROM #PrestamosDetalle AS PD2
+                    WHERE PD2.id_cliente = PD.id_cliente
+                ) AS Tipos
+                ORDER BY Tipos.tipo_prestamo
+                FOR XML PATH(''), TYPE
+            ).value('.', 'nvarchar(max)'), 1, 1, ''),
+            STUFF((
+                SELECT NCHAR(8203) + Productos.producto
+                FROM (
+                    SELECT DISTINCT PD2.producto
+                    FROM #PrestamosDetalle AS PD2
+                    WHERE PD2.id_cliente = PD.id_cliente
+                ) AS Productos
+                ORDER BY Productos.producto
+                FOR XML PATH(''), TYPE
+            ).value('.', 'nvarchar(max)'), 1, 1, '')
+        FROM #PrestamosDetalle AS PD
+        GROUP BY PD.id_cliente;
 
         INSERT INTO #Periodicidades (id_deposito, periodicidad_pago)
         SELECT
@@ -346,17 +436,21 @@ BEGIN
         FROM INVERSION.DEPOSITO_RENOVACION AS DR WITH (NOLOCK)
         INNER JOIN #DepositosCorte AS D
             ON D.id_deposito = DR.IDDEPOSITODESTINO
+        WHERE DR.FECHA >= @InicioMes
+          AND DR.FECHA < @FinRangoRenovacion
         GROUP BY DR.IDDEPOSITODESTINO;
 
         INSERT INTO #Resultado (
-            fecha_corte, periodo, anio, mes, agencia, asesor,
+            fecha_corte, fecha_creacion, periodo, anio, mes, agencia, asesor,
             periodicidad_pago, tipo_pago, condicion, periodo_plazo, plazo_dias,
             estado,
-            provincia, canton, parroquia, tiene_prestamo, tasa_efectiva,
+            provincia, canton, parroquia, tiene_prestamo, cantidad_prestamos,
+            tipo_prestamo_lista, producto_lista, tasa_efectiva,
             tasa_entera, tasa_decimal, operaciones, saldo
         )
         SELECT
             @FechaCorte,
+            D.fecha_creacion,
             CONVERT(char(7), @FechaCorte, 120),
             YEAR(@FechaCorte),
             MONTH(@FechaCorte),
@@ -367,7 +461,17 @@ BEGIN
                 ELSE COALESCE(NULLIF(LTRIM(RTRIM(F.periodicidad_pago)), ''), 'SIN DATOS')
             END,
             CASE WHEN D.codigo_tipo_deposito = '001' THEN 'PERIODICO' ELSE 'VENCIMIENTO' END,
-            CASE WHEN R.id_deposito IS NULL THEN 'NUEVO' ELSE 'RENOVADO' END,
+            CASE
+                WHEN D.fecha_creacion >= @InicioMes
+                     AND R.id_deposito IS NULL
+                    THEN 'NUEVO'
+                WHEN D.fecha_creacion >= @InicioMes
+                     AND R.id_deposito IS NOT NULL
+                    THEN 'RENOVADO'
+                WHEN R.id_deposito IS NULL
+                    THEN 'VIGENTE NUEVO'
+                ELSE 'VIGENTE RENOVADO'
+            END,
             COALESCE(B.periodo_plazo, 'SIN DATOS'),
             D.plazo_dias,
             CASE D.codigo_estado_deposito WHEN 'A' THEN 'ACTIVO' WHEN 'E' THEN 'EXIGIBLE' END,
@@ -375,6 +479,9 @@ BEGIN
             COALESCE(NULLIF(LTRIM(RTRIM(DPC.CANTON)), ''), 'SIN DATOS'),
             COALESCE(NULLIF(LTRIM(RTRIM(DPC.PARROQUIA)), ''), 'SIN DATOS'),
             CONVERT(bit, CASE WHEN PP.id_cliente IS NULL THEN 0 ELSE 1 END),
+            COALESCE(PP.cantidad_prestamos, 0),
+            COALESCE(PP.tipo_prestamo_lista, ''),
+            COALESCE(PP.producto_lista, ''),
             Tasa.tasa_efectiva,
             CONVERT(int, FLOOR(Tasa.tasa_efectiva)),
             CONVERT(decimal(18, 2), Tasa.tasa_efectiva),
@@ -400,9 +507,10 @@ BEGIN
         ) AS Tasa
         GROUP BY
             A.NOMBRE, U.NOMBRE, D.codigo_usuario, D.pago_periodico_interes, F.periodicidad_pago,
-            D.codigo_tipo_deposito, R.id_deposito, B.periodo_plazo,
+            D.fecha_creacion, D.codigo_tipo_deposito, R.id_deposito, B.periodo_plazo,
             D.plazo_dias, D.codigo_estado_deposito, DPC.PROVINCIA, DPC.CANTON, DPC.PARROQUIA,
-            PP.id_cliente, Tasa.tasa_efectiva;
+            PP.id_cliente, PP.cantidad_prestamos, PP.tipo_prestamo_lista, PP.producto_lista,
+            Tasa.tasa_efectiva;
 
         FETCH NEXT FROM CursorCortes
             INTO @FechaCorte, @FechaCierrePlazo, @FechaCierreColocacion;
@@ -413,6 +521,7 @@ BEGIN
 
     SELECT
         fecha_corte,
+        fecha_creacion,
         periodo,
         anio,
         mes,
@@ -428,6 +537,9 @@ BEGIN
         canton,
         parroquia,
         tiene_prestamo,
+        cantidad_prestamos,
+        tipo_prestamo_lista,
+        producto_lista,
         tasa_efectiva,
         tasa_entera,
         tasa_decimal,
@@ -436,6 +548,7 @@ BEGIN
     FROM #Resultado
     ORDER BY
         fecha_corte,
+        fecha_creacion,
         agencia,
         asesor,
         periodicidad_pago,
