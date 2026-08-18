@@ -51,7 +51,9 @@ class ReporteAhorroVistaService:
                 periodo=mes.periodo,
                 fecha_corte=max((fila.fecha_corte for fila in filas_por_periodo.get(mes.periodo, [])), default=None),
                 total_filas=len(filas_por_periodo.get(mes.periodo, [])),
-                numero_depositos=sum(fila.numero_depositos for fila in filas_por_periodo.get(mes.periodo, [])),
+                numero_transacciones_mes=sum(
+                    fila.numero_transacciones_mes for fila in filas_por_periodo.get(mes.periodo, [])
+                ),
                 saldo=sum(fila.saldo for fila in filas_por_periodo.get(mes.periodo, [])),
             )
             for mes in meses
@@ -59,7 +61,7 @@ class ReporteAhorroVistaService:
         return ReporteAhorroVistaRangoResponse(
             fecha_desde=fecha_desde,
             fecha_hasta=fecha_hasta,
-            total_depositos=sum(fila.numero_depositos for fila in filas),
+            total_transacciones_mes=sum(fila.numero_transacciones_mes for fila in filas),
             total_saldo=sum(fila.saldo for fila in filas),
             cortes=cortes,
             filas=sorted(filas, key=lambda fila: (fila.fecha_corte, fila.agencia, fila.asesor)),

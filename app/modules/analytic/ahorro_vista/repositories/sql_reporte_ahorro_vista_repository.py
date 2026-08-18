@@ -17,8 +17,8 @@ class SqlReporteAhorroVistaRepository:
                 f"""
                 SET NOCOUNT ON;
                 EXEC {REPORTE_AHORRO_VISTA_SP}
-                    @PeriodoDesde = :fecha_desde,
-                    @PeriodoHasta = :fecha_hasta;
+                    @FechaInicio = :fecha_desde,
+                    @FechaFin = :fecha_hasta;
                 """
             ),
             {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},

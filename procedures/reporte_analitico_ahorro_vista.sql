@@ -9,18 +9,18 @@
     históricos con datos vigentes cuando falta alguno de esos cierres.
 */
 CREATE OR ALTER PROCEDURE [AHORROS].[REPORTE_ANALITICO_AHORROS_VISTA]
-    @PeriodoDesde date,
-    @PeriodoHasta date
+    @FechaInicio date,
+    @FechaFin date
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF @PeriodoDesde IS NULL OR @PeriodoHasta IS NULL
-        THROW 50000, 'PeriodoDesde y PeriodoHasta son obligatorios.', 1;
+    IF @FechaInicio IS NULL OR @FechaFin IS NULL
+        THROW 50000, 'FechaInicio y FechaFin son obligatorios.', 1;
 
-    IF @PeriodoHasta < @PeriodoDesde
-        THROW 50001, 'PeriodoHasta no puede ser menor que PeriodoDesde.', 1;
+    IF @FechaFin < @FechaInicio
+        THROW 50001, 'FechaFin no puede ser menor que FechaInicio.', 1;
 
     /*
        El calendario contiene días abiertos futuros. La fecha operativa es el
@@ -42,11 +42,11 @@ BEGIN
     IF @FechaSistema IS NULL
         THROW 50002, 'No se encontró la fecha del sistema abierta.', 1;
 
-    IF @PeriodoHasta > @FechaSistema
-        THROW 50003, 'PeriodoHasta no puede ser posterior a la fecha del sistema.', 1;
+    IF @FechaFin > @FechaSistema
+        THROW 50003, 'FechaFin no puede ser posterior a la fecha del sistema.', 1;
 
-    DECLARE @MesDesde date = DATEFROMPARTS(YEAR(@PeriodoDesde), MONTH(@PeriodoDesde), 1);
-    DECLARE @MesHasta date = DATEFROMPARTS(YEAR(@PeriodoHasta), MONTH(@PeriodoHasta), 1);
+    DECLARE @MesDesde date = DATEFROMPARTS(YEAR(@FechaInicio), MONTH(@FechaInicio), 1);
+    DECLARE @MesHasta date = DATEFROMPARTS(YEAR(@FechaFin), MONTH(@FechaFin), 1);
     DECLARE @CantidadMeses int = DATEDIFF(month, @MesDesde, @MesHasta) + 1;
 
     DECLARE @Cortes TABLE (
@@ -111,14 +111,26 @@ BEGIN
         Saldo decimal(18, 6) NOT NULL
     );
 
+    CREATE TABLE #CuentasCorte (
+        NumeroCuenta nvarchar(50) NOT NULL PRIMARY KEY,
+        IdCliente int NOT NULL,
+        FechaUltimaTransaccion datetime NULL
+    );
+
+    CREATE TABLE #ClientesCorte (
+        IdCliente int NOT NULL PRIMARY KEY
+    );
+
     CREATE TABLE #TasasPorCuenta (
         NumeroCuenta nvarchar(50) NOT NULL PRIMARY KEY,
         Tasa decimal(18, 2) NOT NULL
     );
 
-    CREATE TABLE #UltimasTransaccionesPorCuenta (
+    CREATE TABLE #TransaccionesPorCuenta (
         NumeroCuenta nvarchar(50) NOT NULL PRIMARY KEY,
-        Nombre nvarchar(150) NOT NULL
+        NumeroTransaccionesMes int NOT NULL,
+        NumeroDebitosMes int NOT NULL,
+        NumeroCreditosMes int NOT NULL
     );
 
     CREATE TABLE #HechosAhorroVista (
@@ -126,11 +138,12 @@ BEGIN
         NumeroCuenta nvarchar(50) NOT NULL,
         Agencia nvarchar(150) NOT NULL,
         Asesor nvarchar(150) NOT NULL,
-        Periodicidad nvarchar(30) NOT NULL,
-        TipoTransaccion nvarchar(150) NOT NULL,
+        Periodicidad int NULL,
+        NumeroTransaccionesMes int NOT NULL,
+        NumeroDebitosMes int NOT NULL,
+        NumeroCreditosMes int NOT NULL,
         TasaEntera int NOT NULL,
         TasaDecimal decimal(18, 2) NOT NULL,
-        TiempoInactivoDias int NULL,
         Estado nvarchar(150) NOT NULL,
         Provincia nvarchar(150) NOT NULL,
         Canton nvarchar(150) NOT NULL,
@@ -140,6 +153,7 @@ BEGIN
         TipoPrestamoLista nvarchar(max) NOT NULL,
         ProductoLista nvarchar(max) NOT NULL,
         ProductoAhorro nvarchar(150) NOT NULL,
+        EsProgramado bit NOT NULL,
         Saldo decimal(18, 2) NOT NULL,
         PRIMARY KEY (FechaCorte, NumeroCuenta)
     );
@@ -163,27 +177,48 @@ BEGIN
         TRUNCATE TABLE #PrestamosPorCliente;
         TRUNCATE TABLE #PrestamosDetalle;
         TRUNCATE TABLE #SaldosPorCuenta;
+        TRUNCATE TABLE #CuentasCorte;
+        TRUNCATE TABLE #ClientesCorte;
         TRUNCATE TABLE #TasasPorCuenta;
-        TRUNCATE TABLE #UltimasTransaccionesPorCuenta;
+        TRUNCATE TABLE #TransaccionesPorCuenta;
 
         IF @FechaCorte = @FechaSistema
         BEGIN
+            INSERT INTO #CuentasCorte (NumeroCuenta, IdCliente, FechaUltimaTransaccion)
+            SELECT CU.NUMERO, MIN(CC.IDCLIENTE), MAX(CU.FECHAULTIMATRANSACCION)
+            FROM AHORROS.CUENTA AS CU
+            INNER JOIN AHORROS.CUENTA_CLIENTE AS CC
+                ON CC.NUMEROCUENTA = CU.NUMERO
+               AND CC.PRINCIPAL = 1
+            WHERE CU.CODIGOESTADO IN (N'A', N'I', N'B')
+              AND CU.CODIGOTIPOCUENTA <> N'001'
+            GROUP BY CU.NUMERO;
+
+            INSERT INTO #ClientesCorte (IdCliente)
+            SELECT IdCliente
+            FROM #CuentasCorte
+            GROUP BY IdCliente;
+
             INSERT INTO #PrestamosDetalle (IdCliente, IdPrestamo, TipoPrestamo, Producto)
             SELECT
                 PC.IDCLIENTE,
                 P.ID,
                 COALESCE(NULLIF(LTRIM(RTRIM(TP.NOMBRE)), N''), N'SIN DATOS'),
-                COALESCE(NULLIF(LTRIM(RTRIM(PR.NOMBRE)), N''), N'SIN DATOS')
+                COALESCE(NULLIF(LTRIM(RTRIM(CC.NOMBRE)), N''), N'SIN DATOS')
             FROM COLOCACION.PRESTAMO AS P
             INNER JOIN COLOCACION.PRESTAMO_CLIENTE AS PC
                 ON PC.IDPRESTAMO = P.ID
                AND PC.ACTIVO = 1
+            INNER JOIN #ClientesCorte AS Clientes
+                ON Clientes.IdCliente = PC.IDCLIENTE
             LEFT JOIN CREDITO.TIPO_PRESTAMO AS TP
                 ON TP.CODIGO = P.CODIGOTIPOPRESTAMO
-            LEFT JOIN FINANCIERO.PRODUCTO AS PR
-                ON PR.CODIGO = P.CODIGOPRODUCTO
+            LEFT JOIN CREDITO.CALIFICACION_CONTABLE_SEGMENTO AS CCS
+                ON CCS.ID = P.IDCALIFICACIONCONTABLESEGMENTO
+            LEFT JOIN CREDITO.CALIFICACION_CONTABLE AS CC
+                ON CC.CODIGO = CCS.CODIGOCALIFICACIONCONTABLE
             WHERE P.CODIGOESTADO <> N'C'
-            GROUP BY PC.IDCLIENTE, P.ID, TP.NOMBRE, PR.NOMBRE;
+            GROUP BY PC.IDCLIENTE, P.ID, TP.NOMBRE, CC.NOMBRE;
 
             INSERT INTO #PrestamosPorCliente (
                 IdCliente, CantidadPrestamos, TipoPrestamoLista, ProductoLista
@@ -216,7 +251,9 @@ BEGIN
 
             INSERT INTO #SaldosPorCuenta (NumeroCuenta, Saldo)
             SELECT CI.NUMEROCUENTA, SUM(CI.SALDO)
-            FROM AHORROS.CUENTA_ITEMSALDO AS CI
+            FROM #CuentasCorte AS Cuentas
+            INNER JOIN AHORROS.CUENTA_ITEMSALDO AS CI
+                ON CI.NUMEROCUENTA = Cuentas.NumeroCuenta
             INNER JOIN AHORROS.ITEMSALDO AS ISa
                 ON ISa.ID = CI.IDITEM
                AND ISa.SUMASALDO = 1
@@ -237,53 +274,54 @@ BEGIN
               AND S.Saldo <= IST.SALDOFINAL
             GROUP BY S.NumeroCuenta;
 
-            ;WITH TransaccionesOrdenadas AS (
+            ;WITH MovimientosUnicos AS (
                 SELECT
-                    CM.NUMEROCUENTA,
-                    T.NOMBRE,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY CM.NUMEROCUENTA
-                        ORDER BY MT.FECHASISTEMA DESC, MT.ID DESC
-                    ) AS Orden
-                FROM AHORROS.CUENTA_MOVIMIENTOTRANSACCIONDETALLE AS CM
+                    CM.NUMEROCUENTA AS NumeroCuenta,
+                    MT.ID AS IdMovimiento,
+                    MAX(CASE WHEN MD.DEBITO = 1 THEN 1 ELSE 0 END) AS TieneDebito,
+                    MAX(CASE WHEN MD.DEBITO = 0 THEN 1 ELSE 0 END) AS TieneCredito
+                FROM FINANCIERO.MOVIMIENTO_TRANSACCION AS MT
                 INNER JOIN FINANCIERO.MOVIMIENTO_TRANSACCION_DETALLE AS MD
-                    ON MD.ID = CM.IDMOVIMIENTOTRANSACCIONDETALLE
-                INNER JOIN FINANCIERO.MOVIMIENTO_TRANSACCION AS MT
-                    ON MT.ID = MD.IDMOVIMIENTOTRANSACCION
-                INNER JOIN FINANCIERO.TRANSACCION AS T
-                    ON T.ID = MT.IDTRANSACCION
-                WHERE MT.FECHASISTEMA < DATEADD(day, 1, @FechaCorte)
+                    ON MD.IDMOVIMIENTOTRANSACCION = MT.ID
+                INNER JOIN AHORROS.CUENTA_MOVIMIENTOTRANSACCIONDETALLE AS CM
+                    ON CM.IDMOVIMIENTOTRANSACCIONDETALLE = MD.ID
+                INNER JOIN #CuentasCorte AS Cuentas
+                    ON Cuentas.NumeroCuenta = CM.NUMEROCUENTA
+                WHERE MT.FECHASISTEMA >= DATEFROMPARTS(YEAR(@FechaCorte), MONTH(@FechaCorte), 1)
+                  AND MT.FECHASISTEMA < DATEADD(day, 1, @FechaCorte)
                   AND MT.ESREVERSO = 0
+                GROUP BY CM.NUMEROCUENTA, MT.ID
             )
-            INSERT INTO #UltimasTransaccionesPorCuenta (NumeroCuenta, Nombre)
-            SELECT NUMEROCUENTA, NOMBRE
-            FROM TransaccionesOrdenadas
-            WHERE Orden = 1;
+            INSERT INTO #TransaccionesPorCuenta (
+                NumeroCuenta, NumeroTransaccionesMes, NumeroDebitosMes, NumeroCreditosMes
+            )
+            SELECT
+                NumeroCuenta,
+                COUNT(*),
+                SUM(TieneDebito),
+                SUM(TieneCredito)
+            FROM MovimientosUnicos
+            GROUP BY NumeroCuenta
+            OPTION (RECOMPILE);
 
             INSERT INTO #HechosAhorroVista (
                 FechaCorte, NumeroCuenta, Agencia, Asesor, Periodicidad,
-                TipoTransaccion, TasaEntera, TasaDecimal, TiempoInactivoDias,
+                NumeroTransaccionesMes, NumeroDebitosMes, NumeroCreditosMes, TasaEntera, TasaDecimal,
                 Estado, Provincia, Canton, Parroquia, TienePrestamo,
                 CantidadPrestamos, TipoPrestamoLista, ProductoLista,
-                ProductoAhorro, Saldo
+                ProductoAhorro, EsProgramado, Saldo
             )
             SELECT
                 @FechaCorte,
                 CU.NUMERO,
                 COALESCE(NULLIF(LTRIM(RTRIM(AG.NOMBRE)), N''), N'SIN DATOS'),
                 COALESCE(NULLIF(LTRIM(RTRIM(U.NOMBRE)), N''), CU.CODIGOUSUARIOOFICIAL, N'SIN DATOS'),
-                CASE
-                    WHEN Inactividad.Dias IS NULL THEN N'SIN DATOS'
-                    WHEN Inactividad.Dias <= 30 THEN N'0 A 30'
-                    WHEN Inactividad.Dias <= 90 THEN N'31 A 90'
-                    WHEN Inactividad.Dias <= 180 THEN N'91 A 180'
-                    WHEN Inactividad.Dias <= 360 THEN N'181 A 360'
-                    ELSE N'MAS DE 360'
-                END,
-                COALESCE(NULLIF(LTRIM(RTRIM(UltimaTransaccion.Nombre)), N''), N'SIN DATOS'),
+                Inactividad.Dias,
+                COALESCE(Transacciones.NumeroTransaccionesMes, 0),
+                COALESCE(Transacciones.NumeroDebitosMes, 0),
+                COALESCE(Transacciones.NumeroCreditosMes, 0),
                 CONVERT(int, FLOOR(COALESCE(Tasa.Tasa, 0))),
                 CONVERT(decimal(18, 2), COALESCE(Tasa.Tasa, 0)),
-                Inactividad.Dias,
                 COALESCE(NULLIF(LTRIM(RTRIM(EC.NOMBRE)), N''), N'SIN DATOS'),
                 COALESCE(NULLIF(LTRIM(RTRIM(DPC.PROVINCIA)), N''), N'SIN DATOS'),
                 COALESCE(NULLIF(LTRIM(RTRIM(DPC.CANTON)), N''), N'SIN DATOS'),
@@ -292,16 +330,16 @@ BEGIN
                 COALESCE(Prestamo.CantidadPrestamos, 0),
                 COALESCE(Prestamo.TipoPrestamoLista, N''),
                 COALESCE(Prestamo.ProductoLista, N''),
-                COALESCE(NULLIF(LTRIM(RTRIM(ProductoAhorro.NOMBRE)), N''), N'SIN DATOS'),
+                COALESCE(NULLIF(LTRIM(RTRIM(TipoCuenta.NOMBRE)), N''), N'SIN DATOS'),
+                CONVERT(bit, COALESCE(TipoCuenta.ESPROGRAMADO, 0)),
                 CONVERT(decimal(18, 2), Saldo.Saldo)
-            FROM AHORROS.CUENTA AS CU
+            FROM #CuentasCorte AS Cuentas
+            INNER JOIN AHORROS.CUENTA AS CU
+                ON CU.NUMERO = Cuentas.NumeroCuenta
             INNER JOIN #SaldosPorCuenta AS Saldo
                 ON Saldo.NumeroCuenta = CU.NUMERO
-            INNER JOIN AHORROS.CUENTA_CLIENTE AS CC
-                ON CC.NUMEROCUENTA = CU.NUMERO
-               AND CC.PRINCIPAL = 1
             INNER JOIN CLIENTES.CLIENTE AS C
-                ON C.ID = CC.IDCLIENTE
+                ON C.ID = Cuentas.IdCliente
             INNER JOIN SUJETO.PERSONA AS P
                 ON P.ID = C.IDPERSONA
             LEFT JOIN GENERAL.AGENCIA AS AG
@@ -312,14 +350,14 @@ BEGIN
                 ON EC.CODIGO = CU.CODIGOESTADO
             LEFT JOIN GENERAL.DIVISIONPOLITICA_CONSOLIDADO AS DPC
                 ON DPC.IDDIVISIONNIVELBAJO = P.IDRESIDENCIA
-            LEFT JOIN FINANCIERO.PRODUCTO AS ProductoAhorro
-                ON ProductoAhorro.CODIGO = CU.CODIGOPRODUCTO
+            LEFT JOIN AHORROS.TIPO_CUENTA AS TipoCuenta
+                ON TipoCuenta.CODIGO = CU.CODIGOTIPOCUENTA
             LEFT JOIN #PrestamosPorCliente AS Prestamo
                 ON Prestamo.IdCliente = C.ID
             LEFT JOIN #TasasPorCuenta AS Tasa
                 ON Tasa.NumeroCuenta = CU.NUMERO
-            LEFT JOIN #UltimasTransaccionesPorCuenta AS UltimaTransaccion
-                ON UltimaTransaccion.NumeroCuenta = CU.NUMERO
+            LEFT JOIN #TransaccionesPorCuenta AS Transacciones
+                ON Transacciones.NumeroCuenta = CU.NUMERO
             CROSS APPLY (
                 SELECT CASE
                     WHEN CU.FECHAULTIMATRANSACCION IS NULL
@@ -332,22 +370,41 @@ BEGIN
         END
         ELSE
         BEGIN
+            INSERT INTO #CuentasCorte (NumeroCuenta, IdCliente, FechaUltimaTransaccion)
+            SELECT CU.NUMERO, MIN(CC.IDCLIENTE), MAX(CU.FECHAULTIMATRANSACCION)
+            FROM AHORROS.CUENTA FOR SYSTEM_TIME AS OF @FechaCierreVista AS CU
+            INNER JOIN AHORROS.CUENTA_CLIENTE AS CC
+                ON CC.NUMEROCUENTA = CU.NUMERO
+               AND CC.PRINCIPAL = 1
+            WHERE CU.CODIGOESTADO IN (N'A', N'I', N'B')
+              AND CU.CODIGOTIPOCUENTA <> N'001'
+            GROUP BY CU.NUMERO;
+
+            INSERT INTO #ClientesCorte (IdCliente)
+            SELECT IdCliente
+            FROM #CuentasCorte
+            GROUP BY IdCliente;
+
             INSERT INTO #PrestamosDetalle (IdCliente, IdPrestamo, TipoPrestamo, Producto)
             SELECT
                 PC.IDCLIENTE,
                 P.ID,
                 COALESCE(NULLIF(LTRIM(RTRIM(TP.NOMBRE)), N''), N'SIN DATOS'),
-                COALESCE(NULLIF(LTRIM(RTRIM(PR.NOMBRE)), N''), N'SIN DATOS')
+                COALESCE(NULLIF(LTRIM(RTRIM(CC.NOMBRE)), N''), N'SIN DATOS')
             FROM COLOCACION.PRESTAMO FOR SYSTEM_TIME AS OF @FechaCierreColocacion AS P
             INNER JOIN COLOCACION.PRESTAMO_CLIENTE AS PC
                 ON PC.IDPRESTAMO = P.ID
                AND PC.ACTIVO = 1
+            INNER JOIN #ClientesCorte AS Clientes
+                ON Clientes.IdCliente = PC.IDCLIENTE
             LEFT JOIN CREDITO.TIPO_PRESTAMO AS TP
                 ON TP.CODIGO = P.CODIGOTIPOPRESTAMO
-            LEFT JOIN FINANCIERO.PRODUCTO AS PR
-                ON PR.CODIGO = P.CODIGOPRODUCTO
+            LEFT JOIN CREDITO.CALIFICACION_CONTABLE_SEGMENTO AS CCS
+                ON CCS.ID = P.IDCALIFICACIONCONTABLESEGMENTO
+            LEFT JOIN CREDITO.CALIFICACION_CONTABLE AS CC
+                ON CC.CODIGO = CCS.CODIGOCALIFICACIONCONTABLE
             WHERE P.CODIGOESTADO <> N'C'
-            GROUP BY PC.IDCLIENTE, P.ID, TP.NOMBRE, PR.NOMBRE;
+            GROUP BY PC.IDCLIENTE, P.ID, TP.NOMBRE, CC.NOMBRE;
 
             INSERT INTO #PrestamosPorCliente (
                 IdCliente, CantidadPrestamos, TipoPrestamoLista, ProductoLista
@@ -380,7 +437,9 @@ BEGIN
 
             INSERT INTO #SaldosPorCuenta (NumeroCuenta, Saldo)
             SELECT CI.NUMEROCUENTA, SUM(CI.SALDO)
-            FROM AHORROS.CUENTA_ITEMSALDO FOR SYSTEM_TIME AS OF @FechaCierreVista AS CI
+            FROM #CuentasCorte AS Cuentas
+            INNER JOIN AHORROS.CUENTA_ITEMSALDO FOR SYSTEM_TIME AS OF @FechaCierreVista AS CI
+                ON CI.NUMEROCUENTA = Cuentas.NumeroCuenta
             INNER JOIN AHORROS.ITEMSALDO AS ISa
                 ON ISa.ID = CI.IDITEM
                AND ISa.SUMASALDO = 1
@@ -401,53 +460,54 @@ BEGIN
               AND S.Saldo <= IST.SALDOFINAL
             GROUP BY S.NumeroCuenta;
 
-            ;WITH TransaccionesOrdenadas AS (
+            ;WITH MovimientosUnicos AS (
                 SELECT
-                    CM.NUMEROCUENTA,
-                    T.NOMBRE,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY CM.NUMEROCUENTA
-                        ORDER BY MT.FECHASISTEMA DESC, MT.ID DESC
-                    ) AS Orden
-                FROM AHORROS.CUENTA_MOVIMIENTOTRANSACCIONDETALLE AS CM
+                    CM.NUMEROCUENTA AS NumeroCuenta,
+                    MT.ID AS IdMovimiento,
+                    MAX(CASE WHEN MD.DEBITO = 1 THEN 1 ELSE 0 END) AS TieneDebito,
+                    MAX(CASE WHEN MD.DEBITO = 0 THEN 1 ELSE 0 END) AS TieneCredito
+                FROM FINANCIERO.MOVIMIENTO_TRANSACCION AS MT
                 INNER JOIN FINANCIERO.MOVIMIENTO_TRANSACCION_DETALLE AS MD
-                    ON MD.ID = CM.IDMOVIMIENTOTRANSACCIONDETALLE
-                INNER JOIN FINANCIERO.MOVIMIENTO_TRANSACCION AS MT
-                    ON MT.ID = MD.IDMOVIMIENTOTRANSACCION
-                INNER JOIN FINANCIERO.TRANSACCION AS T
-                    ON T.ID = MT.IDTRANSACCION
-                WHERE MT.FECHASISTEMA < DATEADD(day, 1, @FechaCorte)
+                    ON MD.IDMOVIMIENTOTRANSACCION = MT.ID
+                INNER JOIN AHORROS.CUENTA_MOVIMIENTOTRANSACCIONDETALLE AS CM
+                    ON CM.IDMOVIMIENTOTRANSACCIONDETALLE = MD.ID
+                INNER JOIN #CuentasCorte AS Cuentas
+                    ON Cuentas.NumeroCuenta = CM.NUMEROCUENTA
+                WHERE MT.FECHASISTEMA >= DATEFROMPARTS(YEAR(@FechaCorte), MONTH(@FechaCorte), 1)
+                  AND MT.FECHASISTEMA < DATEADD(day, 1, @FechaCorte)
                   AND MT.ESREVERSO = 0
+                GROUP BY CM.NUMEROCUENTA, MT.ID
             )
-            INSERT INTO #UltimasTransaccionesPorCuenta (NumeroCuenta, Nombre)
-            SELECT NUMEROCUENTA, NOMBRE
-            FROM TransaccionesOrdenadas
-            WHERE Orden = 1;
+            INSERT INTO #TransaccionesPorCuenta (
+                NumeroCuenta, NumeroTransaccionesMes, NumeroDebitosMes, NumeroCreditosMes
+            )
+            SELECT
+                NumeroCuenta,
+                COUNT(*),
+                SUM(TieneDebito),
+                SUM(TieneCredito)
+            FROM MovimientosUnicos
+            GROUP BY NumeroCuenta
+            OPTION (RECOMPILE);
 
             INSERT INTO #HechosAhorroVista (
                 FechaCorte, NumeroCuenta, Agencia, Asesor, Periodicidad,
-                TipoTransaccion, TasaEntera, TasaDecimal, TiempoInactivoDias,
+                NumeroTransaccionesMes, NumeroDebitosMes, NumeroCreditosMes, TasaEntera, TasaDecimal,
                 Estado, Provincia, Canton, Parroquia, TienePrestamo,
                 CantidadPrestamos, TipoPrestamoLista, ProductoLista,
-                ProductoAhorro, Saldo
+                ProductoAhorro, EsProgramado, Saldo
             )
             SELECT
                 @FechaCorte,
                 CU.NUMERO,
                 COALESCE(NULLIF(LTRIM(RTRIM(AG.NOMBRE)), N''), N'SIN DATOS'),
                 COALESCE(NULLIF(LTRIM(RTRIM(U.NOMBRE)), N''), CU.CODIGOUSUARIOOFICIAL, N'SIN DATOS'),
-                CASE
-                    WHEN Inactividad.Dias IS NULL THEN N'SIN DATOS'
-                    WHEN Inactividad.Dias <= 30 THEN N'0 A 30'
-                    WHEN Inactividad.Dias <= 90 THEN N'31 A 90'
-                    WHEN Inactividad.Dias <= 180 THEN N'91 A 180'
-                    WHEN Inactividad.Dias <= 360 THEN N'181 A 360'
-                    ELSE N'MAS DE 360'
-                END,
-                COALESCE(NULLIF(LTRIM(RTRIM(UltimaTransaccion.Nombre)), N''), N'SIN DATOS'),
+                Inactividad.Dias,
+                COALESCE(Transacciones.NumeroTransaccionesMes, 0),
+                COALESCE(Transacciones.NumeroDebitosMes, 0),
+                COALESCE(Transacciones.NumeroCreditosMes, 0),
                 CONVERT(int, FLOOR(COALESCE(Tasa.Tasa, 0))),
                 CONVERT(decimal(18, 2), COALESCE(Tasa.Tasa, 0)),
-                Inactividad.Dias,
                 COALESCE(NULLIF(LTRIM(RTRIM(EC.NOMBRE)), N''), N'SIN DATOS'),
                 COALESCE(NULLIF(LTRIM(RTRIM(DPC.PROVINCIA)), N''), N'SIN DATOS'),
                 COALESCE(NULLIF(LTRIM(RTRIM(DPC.CANTON)), N''), N'SIN DATOS'),
@@ -456,16 +516,16 @@ BEGIN
                 COALESCE(Prestamo.CantidadPrestamos, 0),
                 COALESCE(Prestamo.TipoPrestamoLista, N''),
                 COALESCE(Prestamo.ProductoLista, N''),
-                COALESCE(NULLIF(LTRIM(RTRIM(ProductoAhorro.NOMBRE)), N''), N'SIN DATOS'),
+                COALESCE(NULLIF(LTRIM(RTRIM(TipoCuenta.NOMBRE)), N''), N'SIN DATOS'),
+                CONVERT(bit, COALESCE(TipoCuenta.ESPROGRAMADO, 0)),
                 CONVERT(decimal(18, 2), Saldo.Saldo)
-            FROM AHORROS.CUENTA FOR SYSTEM_TIME AS OF @FechaCierreVista AS CU
+            FROM #CuentasCorte AS Cuentas
+            INNER JOIN AHORROS.CUENTA FOR SYSTEM_TIME AS OF @FechaCierreVista AS CU
+                ON CU.NUMERO = Cuentas.NumeroCuenta
             INNER JOIN #SaldosPorCuenta AS Saldo
                 ON Saldo.NumeroCuenta = CU.NUMERO
-            INNER JOIN AHORROS.CUENTA_CLIENTE AS CC
-                ON CC.NUMEROCUENTA = CU.NUMERO
-               AND CC.PRINCIPAL = 1
             INNER JOIN CLIENTES.CLIENTE AS C
-                ON C.ID = CC.IDCLIENTE
+                ON C.ID = Cuentas.IdCliente
             INNER JOIN SUJETO.PERSONA AS P
                 ON P.ID = C.IDPERSONA
             LEFT JOIN GENERAL.AGENCIA AS AG
@@ -476,14 +536,14 @@ BEGIN
                 ON EC.CODIGO = CU.CODIGOESTADO
             LEFT JOIN GENERAL.DIVISIONPOLITICA_CONSOLIDADO AS DPC
                 ON DPC.IDDIVISIONNIVELBAJO = P.IDRESIDENCIA
-            LEFT JOIN FINANCIERO.PRODUCTO AS ProductoAhorro
-                ON ProductoAhorro.CODIGO = CU.CODIGOPRODUCTO
+            LEFT JOIN AHORROS.TIPO_CUENTA AS TipoCuenta
+                ON TipoCuenta.CODIGO = CU.CODIGOTIPOCUENTA
             LEFT JOIN #PrestamosPorCliente AS Prestamo
                 ON Prestamo.IdCliente = C.ID
             LEFT JOIN #TasasPorCuenta AS Tasa
                 ON Tasa.NumeroCuenta = CU.NUMERO
-            LEFT JOIN #UltimasTransaccionesPorCuenta AS UltimaTransaccion
-                ON UltimaTransaccion.NumeroCuenta = CU.NUMERO
+            LEFT JOIN #TransaccionesPorCuenta AS Transacciones
+                ON Transacciones.NumeroCuenta = CU.NUMERO
             CROSS APPLY (
                 SELECT CASE
                     WHEN CU.FECHAULTIMATRANSACCION IS NULL
@@ -510,10 +570,12 @@ BEGIN
         H.Agencia AS agencia,
         H.Asesor AS asesor,
         H.Periodicidad AS periodicidad,
-        H.TipoTransaccion AS tipo_transaccion,
+        SUM(H.NumeroTransaccionesMes) AS numero_transacciones_mes,
+        SUM(H.NumeroDebitosMes) AS numero_debitos_mes,
+        SUM(H.NumeroCreditosMes) AS numero_creditos_mes,
         H.TasaEntera AS tasa_entera,
         H.TasaDecimal AS tasa_decimal,
-        H.TiempoInactivoDias AS tiempo_inactivo_dias,
+        H.Periodicidad AS tiempo_inactivo_dias,
         H.Estado AS estado,
         H.Provincia AS provincia,
         H.Canton AS canton,
@@ -523,23 +585,24 @@ BEGIN
         H.TipoPrestamoLista AS tipo_prestamo_lista,
         H.ProductoLista AS producto_lista,
         H.ProductoAhorro AS producto_ahorro,
-        COUNT(DISTINCT H.NumeroCuenta) AS numero_depositos,
+        H.EsProgramado AS es_programado,
         SUM(H.Saldo) AS saldo
     FROM #HechosAhorroVista AS H
     GROUP BY
-        H.FechaCorte, H.Agencia, H.Asesor, H.Periodicidad, H.TipoTransaccion,
-        H.TasaEntera, H.TasaDecimal, H.TiempoInactivoDias, H.Estado,
+        H.FechaCorte, H.Agencia, H.Asesor, H.Periodicidad,
+        H.TasaEntera, H.TasaDecimal, H.Estado,
         H.Provincia, H.Canton, H.Parroquia, H.TienePrestamo,
         H.CantidadPrestamos, H.TipoPrestamoLista, H.ProductoLista,
-        H.ProductoAhorro
+        H.ProductoAhorro, H.EsProgramado
     ORDER BY
         H.FechaCorte, H.Agencia, H.Asesor, H.Periodicidad,
-        H.TipoTransaccion, H.Estado;
+        H.Estado
+    OPTION (RECOMPILE);
 END;
 GO
 
 /*
 EXEC AHORROS.REPORTE_ANALITICO_AHORROS_VISTA
-    @PeriodoDesde = '2026-07-01',
-    @PeriodoHasta = '2026-07-31';
+    @FechaInicio = '2026-07-01',
+    @FechaFin = '2026-07-31';
 */

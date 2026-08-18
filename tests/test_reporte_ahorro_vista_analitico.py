@@ -19,8 +19,10 @@ def _fila(fecha_corte: str, periodo: str, *, saldo: float = 100.0) -> dict:
         "mes": int(periodo[5:]),
         "agencia": "MATRIZ",
         "asesor": "ASESOR 1",
-        "periodicidad": "31 A 90",
-        "tipo_transaccion": "DEPOSITO",
+        "periodicidad": 60,
+        "numero_transacciones_mes": 12,
+        "numero_debitos_mes": 7,
+        "numero_creditos_mes": 5,
         "tasa_entera": 2,
         "tasa_decimal": 2.5,
         "tiempo_inactivo_dias": 60,
@@ -33,7 +35,7 @@ def _fila(fecha_corte: str, periodo: str, *, saldo: float = 100.0) -> dict:
         "tipo_prestamo_lista": "MICROCREDITO\u200bCONSUMO",
         "producto_lista": "Producto A\u200bProducto B",
         "producto_ahorro": "AHORRO A LA VISTA",
-        "numero_depositos": 1,
+        "es_programado": False,
         "saldo": saldo,
     }
 
@@ -72,7 +74,9 @@ def test_consulta_sql_directa_normaliza_dimensiones_y_listas() -> None:
     )
 
     assert repository.rangos == [(date(2026, 8, 1), date(2026, 8, 18))]
-    assert response.total_depositos == 1
+    assert response.total_transacciones_mes == 12
+    assert response.filas[0].numero_debitos_mes == 7
+    assert response.filas[0].numero_creditos_mes == 5
     assert response.total_saldo == 200.0
     assert response.cortes[0].fecha_corte == "20260818"
     assert response.filas[0].tipo_prestamo == ["MICROCREDITO", "CONSUMO"]
@@ -93,8 +97,10 @@ def test_endpoint_consulta_rango_autenticado_sin_etl() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json()["total_depositos"] == 1
-    assert response.json()["filas"][0]["tipo_transaccion"] == "DEPOSITO"
+    assert response.json()["total_transacciones_mes"] == 12
+    assert response.json()["filas"][0]["numero_transacciones_mes"] == 12
+    assert response.json()["filas"][0]["numero_debitos_mes"] == 7
+    assert response.json()["filas"][0]["numero_creditos_mes"] == 5
 
 
 def test_rechaza_fecha_posterior_a_fecha_sistema() -> None:
