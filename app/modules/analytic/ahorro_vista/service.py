@@ -1,8 +1,15 @@
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException
 
+from app.modules.analytic.ahorro_vista.etl_client import (
+    EtlReporteAhorroVistaClient,
+    EtlReporteAhorroVistaError,
+)
+from app.modules.analytic.ahorro_vista.repositories.mongo_reporte_ahorro_vista_repository import (
+    MongoReporteAhorroVistaRepository,
+)
 from app.modules.analytic.ahorro_vista.repositories.sql_reporte_ahorro_vista_repository import (
     SqlReporteAhorroVistaRepository,
 )
@@ -20,14 +27,22 @@ class MesConsultado:
 
 
 class ReporteAhorroVistaService:
-    def __init__(self, sql_repository: SqlReporteAhorroVistaRepository) -> None:
+    def __init__(
+        self,
+        sql_repository: SqlReporteAhorroVistaRepository,
+        mongo_repository: MongoReporteAhorroVistaRepository,
+        etl_client: EtlReporteAhorroVistaClient,
+    ) -> None:
         self.sql_repository = sql_repository
+        self.mongo_repository = mongo_repository
+        self.etl_client = etl_client
 
     def obtener_por_rango(
         self,
         fecha_desde: date,
         fecha_hasta: date,
         auth_context: AuthContext,
+        es_programado: bool | None = None,
     ) -> ReporteAhorroVistaRangoResponse:
         if fecha_hasta < fecha_desde:
             raise HTTPException(status_code=422, detail="fecha_hasta no puede ser menor que fecha_desde.")
@@ -37,11 +52,21 @@ class ReporteAhorroVistaService:
         if fecha_hasta > fecha_hoy:
             raise HTTPException(status_code=400, detail="fecha_hasta no puede ser posterior a la fecha del sistema.")
 
-        filas = [
-            ReporteAhorroVistaFila.model_validate(fila)
-            for fila in self.sql_repository.obtener_por_rango(fecha_desde, fecha_hasta)
-        ]
         meses = _meses_del_rango(fecha_desde, fecha_hasta)
+        filas: list[ReporteAhorroVistaFila] = []
+        for mes in meses:
+            fecha_mes = date.fromisoformat(f"{mes.periodo}-01")
+            if mes.periodo == f"{fecha_hoy:%Y-%m}":
+                filas_origen = self.sql_repository.obtener_por_rango(
+                    fecha_hoy,
+                    fecha_hoy,
+                    es_programado,
+                )
+            else:
+                if not self.mongo_repository.existe_corte_mensual(fecha_mes):
+                    self._materializar_mes_faltante(fecha_mes)
+                filas_origen = self.mongo_repository.obtener_por_mes(fecha_mes, es_programado)
+            filas.extend(ReporteAhorroVistaFila.model_validate(fila) for fila in filas_origen)
         filas_por_periodo: dict[str, list[ReporteAhorroVistaFila]] = {}
         for fila in filas:
             filas_por_periodo.setdefault(fila.periodo, []).append(fila)
@@ -67,6 +92,12 @@ class ReporteAhorroVistaService:
             filas=sorted(filas, key=lambda fila: (fila.fecha_corte, fila.agencia, fila.asesor)),
         )
 
+    def _materializar_mes_faltante(self, fecha_inicio: date) -> None:
+        try:
+            self.etl_client.cargar_mes(fecha_inicio, _ultimo_dia_mes(fecha_inicio))
+        except EtlReporteAhorroVistaError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
 
 def _meses_del_rango(fecha_desde: date, fecha_hasta: date) -> list[MesConsultado]:
     meses: list[MesConsultado] = []
@@ -76,3 +107,7 @@ def _meses_del_rango(fecha_desde: date, fecha_hasta: date) -> list[MesConsultado
         meses.append(MesConsultado(periodo=f"{cursor:%Y-%m}"))
         cursor = date(cursor.year + (cursor.month == 12), (cursor.month % 12) + 1, 1)
     return meses
+
+
+def _ultimo_dia_mes(mes: date) -> date:
+    return date(mes.year + (mes.month == 12), (mes.month % 12) + 1, 1) - timedelta(days=1)

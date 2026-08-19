@@ -10,7 +10,8 @@
 */
 CREATE OR ALTER PROCEDURE [AHORROS].[REPORTE_ANALITICO_AHORROS_VISTA]
     @FechaInicio date,
-    @FechaFin date
+    @FechaFin date,
+    @EsProgramado bit = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -190,8 +191,11 @@ BEGIN
             INNER JOIN AHORROS.CUENTA_CLIENTE AS CC
                 ON CC.NUMEROCUENTA = CU.NUMERO
                AND CC.PRINCIPAL = 1
+            INNER JOIN AHORROS.TIPO_CUENTA AS TC
+                ON TC.CODIGO = CU.CODIGOTIPOCUENTA
             WHERE CU.CODIGOESTADO IN (N'A', N'I', N'B')
               AND CU.CODIGOTIPOCUENTA <> N'001'
+              AND (@EsProgramado IS NULL OR TC.ESPROGRAMADO = @EsProgramado)
             GROUP BY CU.NUMERO;
 
             INSERT INTO #ClientesCorte (IdCliente)
@@ -376,8 +380,11 @@ BEGIN
             INNER JOIN AHORROS.CUENTA_CLIENTE AS CC
                 ON CC.NUMEROCUENTA = CU.NUMERO
                AND CC.PRINCIPAL = 1
+            INNER JOIN AHORROS.TIPO_CUENTA AS TC
+                ON TC.CODIGO = CU.CODIGOTIPOCUENTA
             WHERE CU.CODIGOESTADO IN (N'A', N'I', N'B')
               AND CU.CODIGOTIPOCUENTA <> N'001'
+              AND (@EsProgramado IS NULL OR TC.ESPROGRAMADO = @EsProgramado)
             GROUP BY CU.NUMERO;
 
             INSERT INTO #ClientesCorte (IdCliente)
@@ -604,5 +611,6 @@ GO
 /*
 EXEC AHORROS.REPORTE_ANALITICO_AHORROS_VISTA
     @FechaInicio = '2026-07-01',
-    @FechaFin = '2026-07-31';
+    @FechaFin = '2026-07-31',
+    @EsProgramado = NULL;
 */

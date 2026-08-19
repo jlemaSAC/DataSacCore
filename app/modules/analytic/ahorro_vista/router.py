@@ -18,22 +18,36 @@ router = APIRouter(tags=["Analytic Sac - Ahorro a la vista"])
     response_model=ReporteAhorroVistaRangoResponse,
     summary="Consultar saldos de ahorros a la vista por rango de meses",
     description=(
-        "Consulta directamente SQL Server para evaluación. Los meses históricos "
-        "se reconstruyen con los cierres de vista y colocación; no usa ETL ni MongoDB."
+        "Consulta cortes históricos desde MongoDB; si falta un mes cerrado, solicita "
+        "su carga al ETL. El mes actual se consulta desde SQL Server con la fecha del sistema."
     ),
 )
 def obtener_reporte_ahorro_vista(
     fecha_desde: Annotated[
         date,
-        Query(description="Fecha inicial en formato YYYY-MM-DD.", examples=["2025-01-01"]),
+        Query(
+            alias="fecha_inicio",
+            description="Fecha inicial en formato YYYY-MM-DD.",
+            examples=["2025-01-01"],
+        ),
     ],
     fecha_hasta: Annotated[
         date,
-        Query(description="Fecha final en formato YYYY-MM-DD.", examples=["2025-12-31"]),
+        Query(
+            alias="fecha_fin",
+            description="Fecha final en formato YYYY-MM-DD.",
+            examples=["2025-12-31"],
+        ),
     ],
+    es_programado: Annotated[
+        bool | None,
+        Query(
+            description="true: solo cuentas programadas; false: solo no programadas; omitido: ambas."
+        ),
+    ] = None,
     auth_context: AuthContext = Depends(get_current_auth_context),
     service: ReporteAhorroVistaService = Depends(get_reporte_ahorro_vista_service),
 ) -> ReporteAhorroVistaRangoResponse:
     if fecha_hasta < fecha_desde:
         raise HTTPException(status_code=422, detail="fecha_hasta no puede ser menor que fecha_desde.")
-    return service.obtener_por_rango(fecha_desde, fecha_hasta, auth_context)
+    return service.obtener_por_rango(fecha_desde, fecha_hasta, auth_context, es_programado)
