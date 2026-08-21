@@ -20,6 +20,9 @@ def _fila(fecha_corte: str, periodo: str, *, saldo: float = 100.0) -> dict:
         "agencia": "MATRIZ",
         "asesor": "ASESOR 1",
         "periodicidad": 60,
+        "periodicidad_normal": 60,
+        "periodicidad_usuario": 45,
+        "numero_cuentas": 3,
         "numero_transacciones_mes": 12,
         "numero_debitos_mes": 7,
         "numero_creditos_mes": 5,
@@ -105,6 +108,9 @@ def test_consulta_sql_directa_normaliza_dimensiones_y_listas() -> None:
 
     assert repository.rangos == [(date(2026, 8, 18), date(2026, 8, 18), None)]
     assert response.total_transacciones_mes == 12
+    assert response.filas[0].periodicidad_normal == 60
+    assert response.filas[0].periodicidad_usuario == 45
+    assert response.filas[0].numero_cuentas == 3
     assert response.filas[0].numero_debitos_mes == 7
     assert response.filas[0].numero_creditos_mes == 5
     assert response.total_saldo == 200.0
@@ -133,6 +139,9 @@ def test_endpoint_consulta_rango_autenticado_sin_etl() -> None:
     assert response.status_code == 200
     assert response.json()["total_transacciones_mes"] == 12
     assert response.json()["filas"][0]["numero_transacciones_mes"] == 12
+    assert response.json()["filas"][0]["periodicidad_normal"] == 60
+    assert response.json()["filas"][0]["periodicidad_usuario"] == 45
+    assert response.json()["filas"][0]["numero_cuentas"] == 3
     assert response.json()["filas"][0]["numero_debitos_mes"] == 7
     assert response.json()["filas"][0]["numero_creditos_mes"] == 5
 
