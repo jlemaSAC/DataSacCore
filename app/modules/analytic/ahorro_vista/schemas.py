@@ -12,14 +12,31 @@ class ReporteAhorroVistaFila(BaseModel):
     agencia: str
     asesor: str
     periodicidad: int | None = Field(
-        description="Días desde la última transacción al corte; coincide temporalmente con tiempo_inactivo_dias."
+        description="Días desde la última transacción al corte; equivale a periodicidad_normal."
+    )
+    periodicidad_normal: int | None = Field(
+        default=None,
+        description="Días desde la última transacción de la cuenta, sin distinguir usuario.",
+    )
+    periodicidad_usuario: int | None = Field(
+        default=None,
+        description="Días desde la última transacción registrada por un usuario distinto de ADMIN.",
+    )
+    numero_cuentas: int | None = Field(
+        default=None,
+        ge=0,
+        description="Cantidad de cuentas representadas por la fila agregada.",
     )
     numero_transacciones_mes: int = Field(ge=0)
     numero_debitos_mes: int = Field(ge=0)
     numero_creditos_mes: int = Field(ge=0)
     tasa_entera: int
     tasa_decimal: float
-    tiempo_inactivo_dias: int | None
+    tasa_itemsaldo: float | None = None
+    tasa_programada: float | None = None
+    tiempo_inactivo_dias: int | None = Field(
+        description="Días desde la última transacción activa de la cuenta al corte."
+    )
     estado: str
     provincia: str
     canton: str
@@ -42,6 +59,10 @@ class ReporteAhorroVistaFila(BaseModel):
             return value
 
         fila = dict(value)
+        if "periodicidad_normal" not in fila and "periodicidad" in fila:
+            fila["periodicidad_normal"] = fila["periodicidad"]
+        for campo in ("tasa_itemsaldo", "tasa_programada"):
+            fila.setdefault(campo, None)
         for campo, campo_origen in (
             ("tipo_prestamo", "tipo_prestamo_lista"),
             ("producto", "producto_lista"),

@@ -15,10 +15,19 @@ class EtlReporteAhorroVistaClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
-    def cargar_mes(self, fecha_inicio: date, fecha_fin: date) -> dict[str, Any]:
-        parametros = urlencode(
-            {"fecha_inicio": fecha_inicio.isoformat(), "fecha_fin": fecha_fin.isoformat()}
-        )
+    def cargar_mes(
+        self,
+        fecha_inicio: date,
+        fecha_fin: date,
+        es_programado: bool | None = None,
+    ) -> dict[str, Any]:
+        parametros_carga: dict[str, str | bool] = {
+            "fecha_inicio": fecha_inicio.isoformat(),
+            "fecha_fin": fecha_fin.isoformat(),
+        }
+        if es_programado is not None:
+            parametros_carga["es_programado"] = es_programado
+        parametros = urlencode(parametros_carga)
         request = Request(
             f"{self.base_url}/mongo/reporte-analitico-ahorros-vista?{parametros}",
             method="POST",

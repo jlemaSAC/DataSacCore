@@ -20,11 +20,16 @@ def _fila(fecha_corte: str, periodo: str, *, saldo: float = 100.0) -> dict:
         "agencia": "MATRIZ",
         "asesor": "ASESOR 1",
         "periodicidad": 60,
+        "periodicidad_normal": 60,
+        "periodicidad_usuario": 45,
+        "numero_cuentas": 3,
         "numero_transacciones_mes": 12,
         "numero_debitos_mes": 7,
         "numero_creditos_mes": 5,
         "tasa_entera": 2,
         "tasa_decimal": 2.5,
+        "tasa_itemsaldo": 2.5,
+        "tasa_programada": None,
         "tiempo_inactivo_dias": 60,
         "estado": "ACTIVA",
         "provincia": "PICHINCHA",
@@ -60,23 +65,28 @@ class FakeMongoRepository:
         self.filas = filas or []
         self.corte_existe = filas is not None if corte_existe is None else corte_existe
         self.meses: list[tuple[date, bool | None]] = []
-        self.cortes_verificados: list[date] = []
+        self.cortes_verificados: list[tuple[date, bool | None]] = []
 
     def obtener_por_mes(self, mes: date, es_programado: bool | None = None) -> list[dict]:
         self.meses.append((mes, es_programado))
         return self.filas
 
-    def existe_corte_mensual(self, mes: date) -> bool:
-        self.cortes_verificados.append(mes)
+    def existe_corte_mensual(self, mes: date, es_programado: bool | None = None) -> bool:
+        self.cortes_verificados.append((mes, es_programado))
         return self.corte_existe
 
 
 class FakeEtlClient:
     def __init__(self) -> None:
-        self.meses: list[tuple[date, date]] = []
+        self.meses: list[tuple[date, date, bool | None]] = []
 
-    def cargar_mes(self, fecha_inicio: date, fecha_fin: date) -> dict:
-        self.meses.append((fecha_inicio, fecha_fin))
+    def cargar_mes(
+        self,
+        fecha_inicio: date,
+        fecha_fin: date,
+        es_programado: bool | None = None,
+    ) -> dict:
+        self.meses.append((fecha_inicio, fecha_fin, es_programado))
         return {"total_cortes_procesados": 1}
 
 
@@ -105,8 +115,13 @@ def test_consulta_sql_directa_normaliza_dimensiones_y_listas() -> None:
 
     assert repository.rangos == [(date(2026, 8, 18), date(2026, 8, 18), None)]
     assert response.total_transacciones_mes == 12
+    assert response.filas[0].periodicidad_normal == 60
+    assert response.filas[0].periodicidad_usuario == 45
+    assert response.filas[0].numero_cuentas == 3
     assert response.filas[0].numero_debitos_mes == 7
     assert response.filas[0].numero_creditos_mes == 5
+    assert response.filas[0].tasa_itemsaldo == 2.5
+    assert response.filas[0].tasa_programada is None
     assert response.total_saldo == 200.0
     assert response.cortes[0].fecha_corte == "20260818"
     assert response.filas[0].tipo_prestamo == ["MICROCREDITO", "CONSUMO"]
@@ -133,6 +148,9 @@ def test_endpoint_consulta_rango_autenticado_sin_etl() -> None:
     assert response.status_code == 200
     assert response.json()["total_transacciones_mes"] == 12
     assert response.json()["filas"][0]["numero_transacciones_mes"] == 12
+    assert response.json()["filas"][0]["periodicidad_normal"] == 60
+    assert response.json()["filas"][0]["periodicidad_usuario"] == 45
+    assert response.json()["filas"][0]["numero_cuentas"] == 3
     assert response.json()["filas"][0]["numero_debitos_mes"] == 7
     assert response.json()["filas"][0]["numero_creditos_mes"] == 5
 
@@ -187,4 +205,4 @@ def test_mes_historico_sin_carga_se_materializa_en_el_etl() -> None:
 
     assert mongo.meses == [(date(2026, 7, 1), True)]
     assert sql.rangos == []
-    assert etl.meses == [(date(2026, 7, 1), date(2026, 7, 31))]
+    assert etl.meses == [(date(2026, 7, 1), date(2026, 7, 31), True)]
