@@ -63,8 +63,8 @@ class ReporteAhorroVistaService:
                     es_programado,
                 )
             else:
-                if not self.mongo_repository.existe_corte_mensual(fecha_mes):
-                    self._materializar_mes_faltante(fecha_mes)
+                if not self.mongo_repository.existe_corte_mensual(fecha_mes, es_programado):
+                    self._materializar_mes_faltante(fecha_mes, es_programado)
                 filas_origen = self.mongo_repository.obtener_por_mes(fecha_mes, es_programado)
             filas.extend(ReporteAhorroVistaFila.model_validate(fila) for fila in filas_origen)
         filas_por_periodo: dict[str, list[ReporteAhorroVistaFila]] = {}
@@ -92,9 +92,17 @@ class ReporteAhorroVistaService:
             filas=sorted(filas, key=lambda fila: (fila.fecha_corte, fila.agencia, fila.asesor)),
         )
 
-    def _materializar_mes_faltante(self, fecha_inicio: date) -> None:
+    def _materializar_mes_faltante(
+        self,
+        fecha_inicio: date,
+        es_programado: bool | None,
+    ) -> None:
         try:
-            self.etl_client.cargar_mes(fecha_inicio, _ultimo_dia_mes(fecha_inicio))
+            self.etl_client.cargar_mes(
+                fecha_inicio,
+                _ultimo_dia_mes(fecha_inicio),
+                es_programado,
+            )
         except EtlReporteAhorroVistaError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 

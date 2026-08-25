@@ -28,14 +28,14 @@ class MongoReporteAhorroVistaRepository:
             filtro["es_programado"] = es_programado
         return list(self.collection.find(filtro, {"_id": 0}))
 
-    def existe_corte_mensual(self, mes: date) -> bool:
+    def existe_corte_mensual(self, mes: date, es_programado: bool | None = None) -> bool:
         fecha_desde = f"{mes:%Y%m}01"
         fecha_hasta = f"{_primer_dia_mes_siguiente(mes):%Y%m}01"
+        filtro: MongoDocument = {"fecha_corte": {"$gte": fecha_desde, "$lt": fecha_hasta}}
+        if es_programado is not None:
+            filtro["es_programado"] = es_programado
         return (
-            self.collection.find_one(
-                {"fecha_corte": {"$gte": fecha_desde, "$lt": fecha_hasta}},
-                {"_id": 1},
-            )
+            self.collection.find_one(filtro, {"_id": 1})
             is not None
         )
 

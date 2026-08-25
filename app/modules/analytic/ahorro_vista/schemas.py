@@ -32,6 +32,8 @@ class ReporteAhorroVistaFila(BaseModel):
     numero_creditos_mes: int = Field(ge=0)
     tasa_entera: int
     tasa_decimal: float
+    tasa_itemsaldo: float | None = None
+    tasa_programada: float | None = None
     tiempo_inactivo_dias: int | None = Field(
         description="Días desde la última transacción activa de la cuenta al corte."
     )
@@ -59,6 +61,8 @@ class ReporteAhorroVistaFila(BaseModel):
         fila = dict(value)
         if "periodicidad_normal" not in fila and "periodicidad" in fila:
             fila["periodicidad_normal"] = fila["periodicidad"]
+        for campo in ("tasa_itemsaldo", "tasa_programada"):
+            fila.setdefault(campo, None)
         for campo, campo_origen in (
             ("tipo_prestamo", "tipo_prestamo_lista"),
             ("producto", "producto_lista"),
