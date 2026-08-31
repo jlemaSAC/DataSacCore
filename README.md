@@ -98,11 +98,12 @@ Healthchecks:
 
 Auth:
 
-- `POST /auth/login`: valida credenciales contra SQL Server y emite JWT.
-- `GET /auth/menu/data-sac-web`: valida el token Bearer y devuelve el menu permitido para los roles del usuario.
-- `GET /auth/menu/data-sac-web/completo`: devuelve el arbol completo del menu DataSacWeb, incluidos los items inactivos y roles asignados; requiere el rol administrador `001`.
+- `POST /auth/login`: login compartido que conserva el contrato usado por AnalyticSac.
+- `POST /data-sac-web/auth/login`: login exclusivo de DataSacWeb; valida credenciales contra SQL Server y emite JWT.
+- `GET /data-sac-web/auth/menu`: valida el token Bearer y devuelve el menu permitido para los roles del usuario.
+- `GET /data-sac-web/auth/menu/completo`: devuelve el arbol completo del menu DataSacWeb, incluidos los items inactivos y roles asignados; requiere el rol administrador `001`.
 
-La respuesta de `POST /auth/login` no incluye el campo `menu`. El menu se obtiene por separado desde `GET /auth/menu/data-sac-web`, usando la base MongoDB `DataSacWebAppMenu`: primero cruza los roles SQL del usuario con `rol_permisos`, valida los permisos activos y finalmente construye el arbol desde `menu`.
+La respuesta de `POST /data-sac-web/auth/login` no incluye el campo `menu`. El menu se obtiene por separado desde `GET /data-sac-web/auth/menu`, usando la base MongoDB `DataSacWebAppMenu`: primero cruza los roles SQL del usuario con `rol_permisos`, valida los permisos activos y finalmente construye el arbol desde `menu`.
 
 ## Ejecutar pruebas
 

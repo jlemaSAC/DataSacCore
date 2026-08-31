@@ -100,24 +100,24 @@ def test_auth_status_endpoint_is_not_registered() -> None:
 
 
 def test_auth_menu_endpoint_requires_bearer_token() -> None:
-    response = client.get("/auth/menu/data-sac-web")
+    response = client.get("/data-sac-web/auth/menu")
 
     assert response.status_code == 401
 
 
 def test_auth_complete_menu_endpoint_requires_bearer_token() -> None:
-    response = client.get("/auth/menu/data-sac-web/completo")
+    response = client.get("/data-sac-web/auth/menu/completo")
 
     assert response.status_code == 401
 
 
 def test_auth_menu_administration_endpoints_require_bearer_token() -> None:
     create_response = client.post(
-        "/auth/menu/data-sac-web",
+        "/data-sac-web/auth/menu",
         json={"label": "NEGOCIOS", "roles_codigo": ["001"]},
     )
     update_response = client.patch(
-        "/auth/menu/data-sac-web/507f1f77bcf86cd799439011",
+        "/data-sac-web/auth/menu/507f1f77bcf86cd799439011",
         json={"roles_codigo": ["001"]},
     )
 
@@ -167,11 +167,17 @@ def test_login_response_does_not_include_menu() -> None:
     app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
     try:
         response = client.post("/auth/login", json={"codigo": "jdoe", "clave": "secret"})
+        data_sac_web_response = client.post(
+            "/data-sac-web/auth/login",
+            json={"codigo": "jdoe", "clave": "secret"},
+        )
     finally:
         app.dependency_overrides.pop(get_auth_service, None)
 
     assert response.status_code == 200
     assert "menu" not in response.json()
+    assert data_sac_web_response.status_code == 200
+    assert "menu" not in data_sac_web_response.json()
 
 
 def test_app_settings_dev_allows_all_cors_origins(monkeypatch) -> None:

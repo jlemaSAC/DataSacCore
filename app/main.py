@@ -13,6 +13,7 @@ from app.db.mongo import check_mongo_connection
 from app.db.session import check_database_connection, check_secondary_database_connection
 from app.modules.auth.router import router as auth_router
 from app.modules.analytic.router import router as analytic_router
+from app.modules.data_sac_web.router import router as data_sac_web_router
 from app.modules.nomina.router import router as nomina_router
 from app.modules.prestamos.router import router as prestamos_router
 from app.modules.seguridad.router import router as seguridad_router
@@ -108,6 +109,7 @@ add_gzip_middleware(app)
 app.include_router(health.router)
 app.include_router(auth_router)
 app.include_router(analytic_router)
+app.include_router(data_sac_web_router)
 app.include_router(nomina_router)
 app.include_router(prestamos_router)
 app.include_router(seguridad_router)
