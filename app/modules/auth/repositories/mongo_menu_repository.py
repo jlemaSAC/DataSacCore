@@ -135,6 +135,11 @@ class MongoMenuRepository:
         descendant_ids = {doc["_id"] for doc in descendants}
         if parent and parent["_id"] in descendant_ids:
             raise HTTPException(status_code=400, detail="Un menu no puede ser padre de si mismo ni de un descendiente.")
+        if document.get("tipo", "grupo") == "ruta" and len(descendants) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Un menu con hijos debe mantenerse como tipo grupo.",
+            )
 
         # El codigo, permiso y ruta de cada descendiente dependen de su padre;
         # por eso una edicion o movimiento de rama recalcula todo el subarbol.
@@ -189,10 +194,27 @@ class MongoMenuRepository:
         if not document:
             raise HTTPException(status_code=404, detail="Menu no encontrado.")
         roles = self._roles_by_permission()
-        return self._to_admin_child(self._serialize_document(document), roles, [])
+        has_children = any(
+            item.get("id_padre") == object_id
+            for item in self.menu_collection.find({})
+        )
+        return self._to_admin_child(
+            self._serialize_document(document),
+            roles,
+            [],
+            has_children=has_children,
+        )
 
     def get_complete_menu_tree(self, activo: bool | None = None) -> list[MenuAdminChild]:
         query: dict[str, Any] = {} if activo is None else {"activo": activo}
+        # Conservamos la estructura real aunque la vista este filtrada. Asi un
+        # grupo no convierte sus roles efectivos en directos solo porque sus
+        # hijos no aparecen con el filtro actual.
+        parent_ids = {
+            self._object_id_to_str(document.get("id_padre"))
+            for document in self.menu_collection.find({})
+            if document.get("id_padre") is not None
+        }
         documentos = [
             self._serialize_document(doc)
             for doc in self.menu_collection.find(query)
@@ -217,6 +239,7 @@ class MongoMenuRepository:
                 documento,
                 roles_por_permiso,
                 [build_node(child) for child in hijos_por_padre.get(str(documento["id"]), [])],
+                has_children=str(documento["id"]) in parent_ids,
             )
 
         raices.sort(key=self._sort_key)
@@ -285,8 +308,16 @@ class MongoMenuRepository:
         documento: Mapping[str, Any],
         roles_por_permiso: Mapping[str, set[str]],
         children: list[MenuAdminChild],
+        *,
+        has_children: bool,
     ) -> MenuAdminChild:
         permiso_requerido = str(documento.get("permiso_requerido") or "")
+        directos = documento.get("roles_directos_codigos")
+        if directos is None:
+            # Compatibilidad con menus previos a roles_directos_codigos. Una
+            # hoja conserva sus asignaciones existentes; un grupo se deriva de
+            # sus hijos y por tanto no debe persistirlas como propias.
+            directos = [] if has_children else roles_por_permiso.get(permiso_requerido, set())
         return MenuAdminChild(
             id=str(documento["id"]),
             codigo=str(documento.get("codigo") or ""),
@@ -298,6 +329,7 @@ class MongoMenuRepository:
             permiso_requerido=permiso_requerido,
             orden=int(documento.get("orden") or 0),
             activo=bool(documento.get("activo", False)),
+            roles_directos_codigos=sorted({str(role) for role in directos if str(role).strip()}),
             roles_permitidos_codigos=sorted(roles_por_permiso.get(permiso_requerido, set())),
             children=children,
         )

@@ -1,9 +1,11 @@
 from datetime import date
 
 from bson import ObjectId
+import pytest
+from fastapi import HTTPException
 
 from app.modules.auth.repositories.mongo_menu_repository import MongoMenuRepository
-from app.modules.auth.schemas import MenuDataSacWebCreateRequest
+from app.modules.auth.schemas import MenuDataSacWebCreateRequest, MenuDataSacWebUpdateRequest
 from app.modules.auth.security import JwtTokenService, PasswordHasher
 
 
@@ -228,9 +230,11 @@ def test_mongo_menu_repository_returns_the_complete_tree_for_administration() ->
 
     assert len(menu) == 1
     assert menu[0].codigo == "SEGURIDAD"
+    assert menu[0].roles_directos_codigos == []
     assert menu[0].roles_permitidos_codigos == ["001"]
     assert menu[0].children[0].codigo == "SEGURIDAD.PERMISOS"
     assert menu[0].children[0].activo is False
+    assert menu[0].children[0].roles_directos_codigos == ["011"]
     assert menu[0].children[0].roles_permitidos_codigos == ["011"]
 
 
@@ -325,5 +329,63 @@ def test_mongo_menu_repository_creates_hierarchical_code_permission_and_route() 
     assert leaf.codigo == "NEGOCIOS.COLOCACION.RESUMEN"
     assert leaf.permiso_requerido == "negocios.colocacion.resumen.ver"
     assert leaf.ruta == "/dashboard/negocios/colocacion/resumen"
+    assert root.roles_directos_codigos == ["001"]
     assert root.roles_permitidos_codigos == ["001"]
+    assert child.roles_directos_codigos == ["001"]
     assert child.roles_permitidos_codigos == ["001"]
+
+
+def test_mongo_menu_repository_keeps_inherited_roles_out_of_the_parent_direct_assignment() -> None:
+    repository = MongoMenuRepository(
+        FakeMongoDatabase(
+            {
+                "menu": FakeMongoCollection([]),
+                "permisos": FakeMongoCollection([]),
+                "rol_permisos": FakeMongoCollection([]),
+            }
+        )
+    )
+    root = repository.create_menu_node(
+        MenuDataSacWebCreateRequest(label="NEGOCIOS", roles_codigo=[])
+    )
+    child = repository.create_menu_node(
+        MenuDataSacWebCreateRequest(
+            label="Colocación",
+            id_padre=root.id,
+            roles_codigo=["002"],
+        )
+    )
+
+    tree = repository.get_complete_menu_tree()
+    assert tree[0].roles_directos_codigos == []
+    assert tree[0].roles_permitidos_codigos == ["002"]
+
+    # Simula abrir y guardar el padre: el formulario envia solo sus roles
+    # directos, no los heredados del hijo.
+    repository.update_menu_node(root.id, MenuDataSacWebUpdateRequest(roles_codigo=[]))
+    repository.update_menu_node(child.id, MenuDataSacWebUpdateRequest(roles_codigo=[]))
+
+    tree = repository.get_complete_menu_tree()
+    assert tree[0].roles_directos_codigos == []
+    assert tree[0].roles_permitidos_codigos == []
+
+
+def test_mongo_menu_repository_rejects_changing_a_parent_to_route() -> None:
+    repository = MongoMenuRepository(
+        FakeMongoDatabase(
+            {
+                "menu": FakeMongoCollection([]),
+                "permisos": FakeMongoCollection([]),
+                "rol_permisos": FakeMongoCollection([]),
+            }
+        )
+    )
+    parent = repository.create_menu_node(MenuDataSacWebCreateRequest(label="SEGURIDAD"))
+    repository.create_menu_node(
+        MenuDataSacWebCreateRequest(label="Permisos", id_padre=parent.id)
+    )
+
+    with pytest.raises(HTTPException, match="con hijos debe mantenerse como tipo grupo") as error:
+        repository.update_menu_node(parent.id, MenuDataSacWebUpdateRequest(tipo="ruta"))
+
+    assert error.value.status_code == 400

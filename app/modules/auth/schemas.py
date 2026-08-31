@@ -60,6 +60,9 @@ class MenuAdminChild(BaseModel):
     permiso_requerido: str
     orden: int
     activo: bool
+    # Roles asignados explicitamente al nodo. Son los unicos que el formulario
+    # puede editar; los roles efectivos se calculan a partir del subarbol.
+    roles_directos_codigos: list[str] = Field(default_factory=list)
     roles_permitidos_codigos: list[str] = Field(default_factory=list)
     children: list["MenuAdminChild"] = Field(default_factory=list)
 
