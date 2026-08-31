@@ -54,6 +54,7 @@ MONGO_ENV_VARS = (
     "MONGO_DATASAC_DB_NAME",
     "MONGO_MAYOR_AUXILIAR_DB_NAME",
     "MONGO_ANALYTIC_SAC_DB_NAME",
+    "MONGO_DATASAC_APP_WEB_MENU_DB_NAME",
 )
 
 
@@ -100,6 +101,12 @@ def test_auth_status_endpoint_is_not_registered() -> None:
 
 def test_auth_menu_endpoint_requires_bearer_token() -> None:
     response = client.get("/auth/menu/data-sac-web")
+
+    assert response.status_code == 401
+
+
+def test_auth_complete_menu_endpoint_requires_bearer_token() -> None:
+    response = client.get("/auth/menu/data-sac-web/completo")
 
     assert response.status_code == 401
 

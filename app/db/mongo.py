@@ -40,6 +40,10 @@ def get_mongo_analytic_sac_db_sync() -> Database:
     return get_mongo_client_sync()[get_mongo_settings().analytic_sac_db]
 
 
+def get_mongo_datasac_app_web_menu_db_sync() -> Database:
+    return get_mongo_client_sync()[get_mongo_settings().datasac_app_web_menu_db]
+
+
 def check_mongo_connection() -> int:
     result = get_mongo_client_sync().admin.command("ping")
     return int(result.get("ok", 0))

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.modules.auth.dependencies import get_auth_service, get_current_auth_context
-from app.modules.auth.schemas import AuthContext, LoginResponse, MenuResponse, UserLogin
+from app.modules.auth.schemas import AuthContext, LoginResponse, MenuCompleteResponse, MenuResponse, UserLogin
 from app.modules.auth.service import AuthService
 
 
@@ -22,3 +22,11 @@ def menu(
     auth_service: AuthService = Depends(get_auth_service),
 ) -> MenuResponse:
     return auth_service.build_menu_response(auth_context.usuario.sub)
+
+
+@router.get("/menu/data-sac-web/completo", response_model=MenuCompleteResponse)
+def menu_completo_data_sac_web(
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> MenuCompleteResponse:
+    return auth_service.build_complete_menu_response(auth_context.usuario.sub)

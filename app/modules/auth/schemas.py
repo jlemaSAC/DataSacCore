@@ -47,6 +47,25 @@ class MenuResponse(BaseModel):
     menu: list[MenuChild] = Field(default_factory=list)
 
 
+class MenuAdminChild(BaseModel):
+    id: str
+    codigo: str
+    label: str
+    icon: str | None = None
+    id_padre: str | None = None
+    tipo: str
+    ruta: str | None = None
+    permiso_requerido: str
+    orden: int
+    activo: bool
+    roles_permitidos_codigos: list[str] = Field(default_factory=list)
+    children: list["MenuAdminChild"] = Field(default_factory=list)
+
+
+class MenuCompleteResponse(BaseModel):
+    menu: list[MenuAdminChild] = Field(default_factory=list)
+
+
 class UsuarioTokenPayload(BaseModel):
     sub: str
     usuario: str
@@ -76,3 +95,6 @@ class AuthContext(BaseModel):
     @classmethod
     def from_token_payload(cls, token: str, payload: UsuarioTokenPayload) -> "AuthContext":
         return cls(usuario=payload, token=token)
+
+
+MenuAdminChild.model_rebuild()
