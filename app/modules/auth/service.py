@@ -12,6 +12,7 @@ from app.modules.auth.schemas import (
     MenuChild,
     MenuCompleteResponse,
     MenuDataSacWebCreateRequest,
+    MenuDataSacWebDeleteResponse,
     MenuDataSacWebUpdateRequest,
     MenuResponse,
     OficinaConsultaItem,
@@ -58,10 +59,14 @@ class AuthService:
         menu = self._get_menu_for_roles(roles_out)
         return MenuResponse(menu=menu)
 
-    def build_complete_menu_response(self, codigo_usuario: str) -> MenuCompleteResponse:
+    def build_complete_menu_response(
+        self,
+        codigo_usuario: str,
+        activo: bool | None = None,
+    ) -> MenuCompleteResponse:
         self._validate_menu_admin(codigo_usuario)
 
-        return MenuCompleteResponse(menu=self._get_menu_repository().get_complete_menu_tree())
+        return MenuCompleteResponse(menu=self._get_menu_repository().get_complete_menu_tree(activo=activo))
 
     def create_data_sac_web_menu_node(
         self,
@@ -83,6 +88,23 @@ class AuthService:
             roles = self._validate_target_roles(data.roles_codigo)
             data = data.model_copy(update={"roles_codigo": roles})
         return self._get_menu_repository().update_menu_node(id_menu, data)
+
+    def get_data_sac_web_menu_node(self, codigo_usuario: str, id_menu: str) -> MenuAdminChild:
+        self._validate_menu_admin(codigo_usuario)
+        return self._get_menu_repository().get_menu_node(id_menu)
+
+    def delete_data_sac_web_menu_node(
+        self,
+        codigo_usuario: str,
+        id_menu: str,
+    ) -> MenuDataSacWebDeleteResponse:
+        self._validate_menu_admin(codigo_usuario)
+        permission = self._get_menu_repository().delete_menu_node(id_menu)
+        return MenuDataSacWebDeleteResponse(
+            id=id_menu,
+            permiso_codigo=permission,
+            detail="Menu, permiso y asignaciones de rol eliminados correctamente.",
+        )
 
     def _authenticate_user(self, login_data: UserLogin) -> LoginResponse:
         usuario_data = self.sql_repository.get_usuario_login_data(login_data.codigo)

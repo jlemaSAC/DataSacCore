@@ -102,6 +102,7 @@ Auth:
 - `POST /data-sac-web/auth/login`: login exclusivo de DataSacWeb; valida credenciales contra SQL Server y emite JWT.
 - `GET /data-sac-web/auth/menu`: valida el token Bearer y devuelve el menu permitido para los roles del usuario.
 - `GET /data-sac-web/auth/menu/completo`: devuelve el arbol completo del menu DataSacWeb, incluidos los items inactivos y roles asignados; requiere el rol administrador `001`.
+- `GET /data-sac-web/auth/menu/{id_menu}`, `POST /data-sac-web/auth/menu`, `PATCH /data-sac-web/auth/menu/{id_menu}` y `DELETE /data-sac-web/auth/menu/{id_menu}`: administración de permisos de DataSacWeb; requieren el rol administrador `001`.
 
 La respuesta de `POST /data-sac-web/auth/login` no incluye el campo `menu`. El menu se obtiene por separado desde `GET /data-sac-web/auth/menu`, usando la base MongoDB `DataSacWebAppMenu`: primero cruza los roles SQL del usuario con `rol_permisos`, valida los permisos activos y finalmente construye el arbol desde `menu`.
 

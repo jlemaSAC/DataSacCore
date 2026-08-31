@@ -191,10 +191,11 @@ class MongoMenuRepository:
         roles = self._roles_by_permission()
         return self._to_admin_child(self._serialize_document(document), roles, [])
 
-    def get_complete_menu_tree(self) -> list[MenuAdminChild]:
+    def get_complete_menu_tree(self, activo: bool | None = None) -> list[MenuAdminChild]:
+        query: dict[str, Any] = {} if activo is None else {"activo": activo}
         documentos = [
             self._serialize_document(doc)
-            for doc in self.menu_collection.find({})
+            for doc in self.menu_collection.find(query)
         ]
         roles_por_permiso = self._roles_by_permission()
 
@@ -220,6 +221,21 @@ class MongoMenuRepository:
 
         raices.sort(key=self._sort_key)
         return [build_node(raiz) for raiz in raices]
+
+    def delete_menu_node(self, id_menu: str) -> str:
+        object_id = self._resolve_object_id(id_menu)
+        document = self.menu_collection.find_one({"_id": object_id})
+        if not document:
+            raise HTTPException(status_code=404, detail="Menu no encontrado.")
+        if self.menu_collection.find_one({"id_padre": object_id}, {"_id": 1}):
+            raise HTTPException(status_code=409, detail="No se puede eliminar un menu que tiene hijos.")
+
+        permission = str(document["permiso_requerido"])
+        self.menu_collection.delete_one({"_id": object_id})
+        self.rol_permisos_collection.delete_many({"permiso_codigo": permission})
+        self.permisos_collection.delete_many({"codigo": permission})
+        self._sync_effective_role_permissions()
+        return permission
 
     def _build_tree(self, documentos: list[dict[str, Any]]) -> list[MenuChild]:
         hijos_por_padre: dict[str, list[dict[str, Any]]] = defaultdict(list)
