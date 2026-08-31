@@ -111,6 +111,20 @@ def test_auth_complete_menu_endpoint_requires_bearer_token() -> None:
     assert response.status_code == 401
 
 
+def test_auth_menu_administration_endpoints_require_bearer_token() -> None:
+    create_response = client.post(
+        "/auth/menu/data-sac-web",
+        json={"label": "NEGOCIOS", "roles_codigo": ["001"]},
+    )
+    update_response = client.patch(
+        "/auth/menu/data-sac-web/507f1f77bcf86cd799439011",
+        json={"roles_codigo": ["001"]},
+    )
+
+    assert create_response.status_code == 401
+    assert update_response.status_code == 401
+
+
 def test_analytic_admin_endpoint_requires_bearer_token() -> None:
     response = client.get("/analytic/rutas")
 

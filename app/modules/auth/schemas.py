@@ -1,5 +1,7 @@
 from datetime import date, datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -64,6 +66,40 @@ class MenuAdminChild(BaseModel):
 
 class MenuCompleteResponse(BaseModel):
     menu: list[MenuAdminChild] = Field(default_factory=list)
+
+
+class MenuDataSacWebCreateRequest(BaseModel):
+    """Datos administrables de un nodo del menu DataSacWeb.
+
+    El codigo, permiso y ruta se calculan en el servidor a partir de la rama
+    elegida. Asi no se pueden crear permisos fuera de la jerarquia del menu.
+    """
+
+    label: str = Field(min_length=1, max_length=150)
+    icon: str | None = Field(default=None, max_length=100)
+    id_padre: str | None = None
+    tipo: Literal["grupo", "ruta"] = "grupo"
+    orden: int = Field(default=1, ge=1)
+    activo: bool = True
+    roles_codigo: list[str] = Field(default_factory=lambda: ["001"])
+
+
+class MenuDataSacWebUpdateRequest(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=150)
+    icon: str | None = Field(default=None, max_length=100)
+    id_padre: str | None = None
+    tipo: Literal["grupo", "ruta"] | None = None
+    orden: int | None = Field(default=None, ge=1)
+    activo: bool | None = None
+    # Una lista enviada (tambien vacia) reemplaza por completo la asignacion
+    # directa del nodo. Los permisos de sus ancestros se recalculan despues.
+    roles_codigo: list[str] | None = None
+
+
+class MenuDataSacWebDeleteResponse(BaseModel):
+    id: str
+    permiso_codigo: str
+    detail: str
 
 
 class UsuarioTokenPayload(BaseModel):

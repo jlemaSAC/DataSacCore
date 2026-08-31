@@ -8,8 +8,11 @@ from app.modules.auth.repositories.mongo_menu_repository import MongoMenuReposit
 from app.modules.auth.repositories.sql_auth_repository import SqlAuthRepository
 from app.modules.auth.schemas import (
     LoginResponse,
+    MenuAdminChild,
     MenuChild,
     MenuCompleteResponse,
+    MenuDataSacWebCreateRequest,
+    MenuDataSacWebUpdateRequest,
     MenuResponse,
     OficinaConsultaItem,
     RolOut,
@@ -56,12 +59,30 @@ class AuthService:
         return MenuResponse(menu=menu)
 
     def build_complete_menu_response(self, codigo_usuario: str) -> MenuCompleteResponse:
-        usuario = self._get_enabled_user(codigo_usuario)
-        roles_out = self._get_roles_out(usuario.usuario)
-        if not any(rol.codigo == self.admin_role_code for rol in roles_out):
-            raise HTTPException(status_code=403, detail="No tiene permisos para consultar el menu completo.")
+        self._validate_menu_admin(codigo_usuario)
 
         return MenuCompleteResponse(menu=self._get_menu_repository().get_complete_menu_tree())
+
+    def create_data_sac_web_menu_node(
+        self,
+        codigo_usuario: str,
+        data: MenuDataSacWebCreateRequest,
+    ) -> MenuAdminChild:
+        self._validate_menu_admin(codigo_usuario)
+        roles = self._validate_target_roles(data.roles_codigo)
+        return self._get_menu_repository().create_menu_node(data.model_copy(update={"roles_codigo": roles}))
+
+    def update_data_sac_web_menu_node(
+        self,
+        codigo_usuario: str,
+        id_menu: str,
+        data: MenuDataSacWebUpdateRequest,
+    ) -> MenuAdminChild:
+        self._validate_menu_admin(codigo_usuario)
+        if data.roles_codigo is not None:
+            roles = self._validate_target_roles(data.roles_codigo)
+            data = data.model_copy(update={"roles_codigo": roles})
+        return self._get_menu_repository().update_menu_node(id_menu, data)
 
     def _authenticate_user(self, login_data: UserLogin) -> LoginResponse:
         usuario_data = self.sql_repository.get_usuario_login_data(login_data.codigo)
@@ -135,6 +156,19 @@ class AuthService:
     def _get_menu_for_roles(self, roles: list[RolOut]) -> list[MenuChild]:
         role_codes = [rol.codigo for rol in roles]
         return self._get_menu_repository().get_menu_by_role_codes(role_codes)
+
+    def _validate_menu_admin(self, codigo_usuario: str) -> None:
+        usuario = self._get_enabled_user(codigo_usuario)
+        roles_out = self._get_roles_out(usuario.usuario)
+        if not any(rol.codigo == self.admin_role_code for rol in roles_out):
+            raise HTTPException(status_code=403, detail="No tiene permisos para administrar el menu DataSacWeb.")
+
+    def _validate_target_roles(self, roles_codigo: list[str]) -> list[str]:
+        roles = list(dict.fromkeys(rol.strip() for rol in roles_codigo if rol.strip()))
+        for codigo in roles:
+            if self.sql_repository.get_rol_activo(codigo) is None:
+                raise HTTPException(status_code=404, detail=f"Rol {codigo} no encontrado o inactivo.")
+        return roles
 
     def _get_menu_repository(self) -> MongoMenuRepository:
         if self.menu_repository is None:

@@ -3,6 +3,7 @@ from datetime import date
 from bson import ObjectId
 
 from app.modules.auth.repositories.mongo_menu_repository import MongoMenuRepository
+from app.modules.auth.schemas import MenuDataSacWebCreateRequest
 from app.modules.auth.security import JwtTokenService, PasswordHasher
 
 
@@ -16,13 +17,48 @@ class FakeMongoCollection:
         return [
             document
             for document in self.documents
-            if all(
-                document.get(field) is expected
-                if not isinstance(expected, dict)
-                else document.get(field) in expected.get("$in", [])
-                for field, expected in query.items()
-            )
+            if self._matches(document, query)
         ]
+
+    def find_one(self, query: dict) -> dict | None:
+        return next((document for document in self.documents if self._matches(document, query)), None)
+
+    def insert_one(self, document: dict):  # type: ignore[no-untyped-def]
+        document.setdefault("_id", ObjectId())
+        self.documents.append(document)
+
+        class Result:
+            inserted_id = document["_id"]
+
+        return Result()
+
+    def update_one(self, query: dict, update: dict, upsert: bool = False):  # type: ignore[no-untyped-def]
+        document = self.find_one(query)
+        if document is None and upsert:
+            document = {field: value for field, value in query.items() if not isinstance(value, dict)}
+            self.documents.append(document)
+        if document is not None:
+            document.update(update.get("$set", {}))
+            for field, value in update.get("$setOnInsert", {}).items():
+                document.setdefault(field, value)
+
+    def update_many(self, query: dict, update: dict):  # type: ignore[no-untyped-def]
+        for document in self.documents:
+            if self._matches(document, query):
+                document.update(update.get("$set", {}))
+
+    @staticmethod
+    def _matches(document: dict, query: dict) -> bool:
+        for field, expected in query.items():
+            actual = document.get(field)
+            if isinstance(expected, dict):
+                if "$in" in expected and actual not in expected["$in"]:
+                    return False
+                if "$nin" in expected and actual in expected["$nin"]:
+                    return False
+            elif actual != expected:
+                return False
+        return True
 
 
 class FakeMongoDatabase:
@@ -196,3 +232,98 @@ def test_mongo_menu_repository_returns_the_complete_tree_for_administration() ->
     assert menu[0].children[0].codigo == "SEGURIDAD.PERMISOS"
     assert menu[0].children[0].activo is False
     assert menu[0].children[0].roles_permitidos_codigos == ["011"]
+
+
+def test_mongo_menu_repository_propagates_and_synchronizes_roles_to_all_ancestors() -> None:
+    root_id = ObjectId()
+    group_id = ObjectId()
+    leaf_id = ObjectId()
+    role_permissions = FakeMongoCollection(
+        [
+            {"_id": ObjectId(), "rol_codigo": "999", "permiso_codigo": "negocios.ver", "activo": True},
+            {"_id": ObjectId(), "rol_codigo": "999", "permiso_codigo": "negocios.colocacion.ver", "activo": True},
+            {"_id": ObjectId(), "rol_codigo": "001", "permiso_codigo": "negocios.colocacion.resumen.ver", "activo": True},
+            {"_id": ObjectId(), "rol_codigo": "777", "permiso_codigo": "negocios.colocacion.resumen.ver", "activo": True},
+        ]
+    )
+    repository = MongoMenuRepository(
+        FakeMongoDatabase(
+            {
+                "menu": FakeMongoCollection(
+                    [
+                        {
+                            "_id": root_id,
+                            "codigo": "NEGOCIOS",
+                            "label": "NEGOCIOS",
+                            "id_padre": None,
+                            "permiso_requerido": "negocios.ver",
+                            "activo": True,
+                        },
+                        {
+                            "_id": group_id,
+                            "codigo": "NEGOCIOS.COLOCACION",
+                            "label": "Colocacion",
+                            "id_padre": root_id,
+                            "permiso_requerido": "negocios.colocacion.ver",
+                            "activo": True,
+                        },
+                        {
+                            "_id": leaf_id,
+                            "codigo": "NEGOCIOS.COLOCACION.RESUMEN",
+                            "label": "Resumen",
+                            "id_padre": group_id,
+                            "permiso_requerido": "negocios.colocacion.resumen.ver",
+                            "roles_directos_codigos": ["001", "002"],
+                            "activo": True,
+                        },
+                    ]
+                ),
+                "permisos": FakeMongoCollection([]),
+                "rol_permisos": role_permissions,
+            }
+        )
+    )
+
+    repository._sync_effective_role_permissions()
+
+    assert {
+        (item["permiso_codigo"], item["rol_codigo"])
+        for item in role_permissions.documents
+        if item["activo"]
+    } == {
+        ("negocios.ver", "001"),
+        ("negocios.ver", "002"),
+        ("negocios.colocacion.ver", "001"),
+        ("negocios.colocacion.ver", "002"),
+        ("negocios.colocacion.resumen.ver", "001"),
+        ("negocios.colocacion.resumen.ver", "002"),
+    }
+
+
+def test_mongo_menu_repository_creates_hierarchical_code_permission_and_route() -> None:
+    menu_collection = FakeMongoCollection([])
+    repository = MongoMenuRepository(
+        FakeMongoDatabase(
+            {
+                "menu": menu_collection,
+                "permisos": FakeMongoCollection([]),
+                "rol_permisos": FakeMongoCollection([]),
+            }
+        )
+    )
+
+    root = repository.create_menu_node(
+        MenuDataSacWebCreateRequest(label="NEGOCIOS", roles_codigo=["001"])
+    )
+    child = repository.create_menu_node(
+        MenuDataSacWebCreateRequest(label="Colocación", id_padre=root.id, roles_codigo=["001"])
+    )
+    leaf = repository.create_menu_node(
+        MenuDataSacWebCreateRequest(label="Resumen", id_padre=child.id, tipo="ruta", roles_codigo=["001"])
+    )
+
+    assert leaf.codigo == "NEGOCIOS.COLOCACION.RESUMEN"
+    assert leaf.permiso_requerido == "negocios.colocacion.resumen.ver"
+    assert leaf.ruta == "/dashboard/negocios/colocacion/resumen"
+    assert root.roles_permitidos_codigos == ["001"]
+    assert child.roles_permitidos_codigos == ["001"]
