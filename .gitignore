@@ -7,3 +7,5 @@ __pycache__/
 .env
 .DS_Store
 
+# Scripts locales de soporte e importación
+scripts/

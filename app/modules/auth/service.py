@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
