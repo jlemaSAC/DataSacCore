@@ -1,0 +1,207 @@
+{
+  "epic": {
+    "issue_key": "ANALISAC-92",
+    "title": "Análisis histórico de cartera de crédito",
+    "description": "Proveer consultas y tableros de morosidad, saldo de cartera, cartera improductiva y provisión requerida.",
+    "jira_description": "Esta épica habilitará el análisis histórico de la cartera de crédito en Analytic SAC, incluyendo morosidad, saldo de capital, cartera improductiva y provisión requerida. Permitirá consultar períodos mensuales, aplicar filtros y visualizar los resultados con información actualizada y eficiente.",
+    "labels": [
+      "cartera-credito",
+      "analitica"
+    ]
+  },
+  "stories": [
+    {
+      "issue_key": "ANALISAC-93",
+      "title": "Consultar morosidad histórica de cartera",
+      "description": "Obtener la morosidad mensual, el saldo de capital y sus dimensiones de análisis.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar la morosidad histórica de cartera para analizar su evolución mensual por las dimensiones disponibles.",
+      "labels": [
+        "cartera-credito",
+        "backend"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-94",
+          "title": "Implementar consulta histórica de morosidad",
+          "description": "Crear endpoint, servicio y repositorio para consultar cortes mensuales de cartera.",
+          "activity": {
+            "objective": "Exponer la morosidad histórica para su análisis.",
+            "summary": "Se implementó la consulta mensual de morosidad con datos históricos y el corte del mes actual.",
+            "implementation": {
+              "backend": [
+                "Se creó POST /analytic/cartera-de-credito/morosidad-historica.",
+                "Se consulta SituacionCrediticia para meses cerrados y SituacionCrediticiaActual para el mes vigente.",
+                "El servicio valida períodos futuros y limita el rango a 60 meses."
+              ]
+            },
+            "rules": [
+              "La morosidad se calcula desde cartera improductiva y saldo de capital."
+            ],
+            "verification": [
+              "Se actualizaron esquemas, documentación y pruebas."
+            ],
+            "period": "22 al 24 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore c317f64, d7e887e y 75c869b.",
+              "Integración: merge e4be56e en DataSacCore (rama CARTERA)."
+            ],
+            "worklog": {
+              "started": "2026-07-24T08:00:00.000-0500",
+              "time_spent": "3d"
+            }
+          },
+          "labels": [
+            "backend",
+            "morosidad"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-95",
+      "title": "Visualizar morosidad histórica por dimensiones",
+      "description": "Presentar gráficos, tablas y filtros de morosidad por dimensiones de cartera.",
+      "jira_description": "Como usuario de Analytic SAC, quiero explorar la morosidad histórica por dimensiones de cartera para identificar los segmentos que requieren atención.",
+      "labels": [
+        "cartera-credito",
+        "frontend"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-96",
+          "title": "Construir dashboard, gráficos y filtros de morosidad",
+          "description": "Crear cliente, control, gráficos, tablas y filtros encadenados de morosidad.",
+          "activity": {
+            "objective": "Visualizar y filtrar la morosidad histórica por dimensiones de negocio.",
+            "summary": "Se construyó el dashboard de morosidad con gráficos, tablas, filtros y comparativas de métricas.",
+            "implementation": {
+              "frontend": [
+                "Se crearon el cliente HTTP, control de consulta, modelos y configuraciones de dimensiones.",
+                "Se implementaron gráficos, tablas, selección de series y filtros por agencia, asesor, préstamo y dimensiones adicionales.",
+                "Se agregaron pruebas de gráficos y se mejoró la visualización de barras y filtros aplicados."
+              ]
+            },
+            "rules": [
+              "Las opciones se recalculan desde los datos filtrados y se limpian selecciones inválidas."
+            ],
+            "verification": [
+              "Se verificaron gráficos, filtros y selección de métricas."
+            ],
+            "period": "22 al 24 de julio de 2026",
+            "references": [
+              "Commits: analytic-sac 6bb0454, b420348, ac4a89d, cf1e9cd y 15cf60a.",
+              "Integración: merge 1ef9808 en analytic-sac (rama CARTERA)."
+            ],
+            "worklog": {
+              "started": "2026-07-24T08:00:00.000-0500",
+              "time_spent": "3d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "filtros",
+            "graficos"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-97",
+      "title": "Analizar saldo, cartera improductiva y provisión requerida",
+      "description": "Ofrecer indicadores históricos adicionales de cartera con el dashboard compartido.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar saldo de cartera, cartera improductiva y provisión requerida para complementar el análisis de morosidad.",
+      "labels": [
+        "cartera-credito",
+        "metricas"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-98",
+          "title": "Incorporar métricas y páginas históricas de cartera",
+          "description": "Agregar datos, rutas, páginas y gráficos para saldo, improductiva y provisión.",
+          "activity": {
+            "objective": "Ampliar el análisis de cartera con sus métricas financieras principales.",
+            "summary": "Se añadieron métricas, rutas y páginas de saldo, cartera improductiva y provisión requerida.",
+            "implementation": {
+              "backend": [
+                "Se agregaron cartera_improductiva, provision_requerida, cuota y operaciones a dominio, repositorio y esquemas."
+              ],
+              "frontend": [
+                "Se crearon las rutas y páginas históricas de las tres métricas.",
+                "Se incorporó un componente de barras y configuración de títulos, subtítulos y valores consolidados."
+              ]
+            },
+            "rules": [
+              "Las métricas reutilizan los filtros y períodos de morosidad."
+            ],
+            "verification": [
+              "Se verificó la presentación de operaciones y valores por período."
+            ],
+            "period": "22 al 24 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore d7e887e, 75c869b, 3e8bf60; analytic-sac 53174e1, 705b211, 91a353f.",
+              "Integraciones: merges e4be56e y 1ef9808."
+            ],
+            "worklog": {
+              "started": "2026-07-24T08:00:00.000-0500",
+              "time_spent": "3d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "backend",
+            "metricas"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-99",
+      "title": "Optimizar morosidad histórica con caché Redis",
+      "description": "Reutilizar meses cerrados de morosidad y administrar la limpieza controlada de la caché.",
+      "jira_description": "Como usuario de Analytic SAC, quiero que las consultas de morosidad histórica reutilicen datos de meses cerrados para obtener resultados de manera eficiente y consistente.",
+      "labels": [
+        "cartera-credito",
+        "redis"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-100",
+          "title": "Implementar caché Redis y limpieza administrativa",
+          "description": "Cachear resultados por mes cerrado y habilitar la limpieza autorizada.",
+          "activity": {
+            "objective": "Mejorar el tiempo de consulta de morosidad histórica sin afectar el corte vigente.",
+            "summary": "Se incorporó caché Redis por período, con recuperación de meses disponibles y limpieza administrativa protegida.",
+            "implementation": {
+              "backend": [
+                "Se creó RedisMorosidadHistoricaCache con claves por período y lectura múltiple mediante mget.",
+                "Los meses faltantes se calculan desde MongoDB y se guardan normalizados; el mes actual no se almacena.",
+                "Se creó DELETE /cartera-de-credito/morosidad-historica/cache y se valida el rol administrador 001."
+              ]
+            },
+            "rules": [
+              "La limpieza elimina solo claves de morosidad usando scan_iter y unlink.",
+              "Una falla de Redis no impide consultar el repositorio."
+            ],
+            "verification": [
+              "Se verificó la integración de caché en backend y frontend."
+            ],
+            "period": "24 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore 33eb3ff y analytic-sac 9738116.",
+              "Integraciones: merges e4be56e y 1ef9808."
+            ],
+            "worklog": {
+              "started": "2026-07-24T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "backend",
+            "redis"
+          ]
+        }
+      ]
+    }
+  ]
+}

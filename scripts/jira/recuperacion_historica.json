@@ -1,0 +1,422 @@
+{
+  "epic": {
+    "issue_key": "ANALISAC-79",
+    "title": "Análisis histórico de recuperación crediticia",
+    "description": "Proveer consultas y tableros para analizar recuperaciones históricas y diarias por préstamo, asesor y dimensiones de negocio.",
+    "jira_description": "Esta épica habilitará el análisis histórico de recuperación crediticia en Analytic SAC. Permitirá consultar cobranzas por rango de fechas, relacionarlas con la información del préstamo y explorarlas mediante filtros, tablas, gráficos e indicadores promedio.\n\nEl alcance incluye consultas históricas, diarias consolidadas, enriquecimiento de dimensiones crediticias y comerciales, filtros encadenados y cálculos de montos, plazos y tasas promedio.",
+    "historical_dates": {
+      "start": "2026-06-05",
+      "end": "2026-08-14"
+    },
+    "repositories": [
+      "analytic-sac",
+      "DataSacCore"
+    ],
+    "labels": [
+      "recuperacion",
+      "analitica"
+    ]
+  },
+  "stories": [
+    {
+      "issue_key": "ANALISAC-80",
+      "title": "Consultar recuperación histórica y enriquecer datos de préstamo",
+      "description": "Consultar cobranzas históricas por rango y asociarlas a la información del préstamo.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar la recuperación histórica por rango de fechas para analizar los cobros junto con la información comercial y crediticia de cada préstamo.\n\nLa solución deberá recuperar cobranzas históricas, relacionarlas con los préstamos disponibles y entregar datos de estado, calificación, ubicación y demás dimensiones requeridas por el dashboard.",
+      "historical_dates": {
+        "start": "2026-07-14",
+        "end": "2026-07-17"
+      },
+      "repositories": [
+        "analytic-sac",
+        "DataSacCore"
+      ],
+      "commits": [
+        "DataSacCore: d2841a7, bb9850f, ddb723c, e6f3150, 9ad3556, db38e12, 6a2a474, f29b47, 1b81ff3"
+      ],
+      "files": [
+        "DataSacCore/app/modules/analytic/recuperacion/recuperacion_historico/"
+      ],
+      "evidence": [
+        "La API expone consultas normal, compacta y agrupada desde MongoDB, con respaldo de información de préstamos."
+      ],
+      "labels": [
+        "recuperacion",
+        "backend"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-81",
+          "title": "Implementar consulta histórica de recuperación",
+          "description": "Crear endpoints, contratos y servicio para recuperar cobranzas históricas por rango.",
+          "activity": {
+            "objective": "Exponer las cobranzas históricas para su análisis en Analytic SAC.",
+            "summary": "Se implementó el módulo de recuperación histórica con consultas por rango, respuesta compacta y respuesta agrupada.",
+            "implementation": {
+              "backend": [
+                "Se crearon endpoints para recuperación histórica, compacta y agrupada.",
+                "Se validan fechas contra la fecha del sistema y se limita el rango a 60 meses.",
+                "Se incorporaron esquemas compactos para reducir el tamaño de la respuesta y middleware GZip para comprimirla."
+              ]
+            },
+            "rules": [
+              "La fecha final no puede superar la fecha del sistema.",
+              "El rango máximo permitido es de 60 meses."
+            ],
+            "verification": [
+              "Se actualizaron documentación y pruebas de la consulta histórica."
+            ],
+            "period": "14 al 17 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore d2841a7, db38e12 y 6a2a474.",
+              "Integración: merge f2ccb05 en DataSacCore (rama RECUPERACION)."
+            ],
+            "worklog": {
+              "started": "2026-07-17T08:00:00.000-0500",
+              "time_spent": "4d"
+            }
+          },
+          "labels": [
+            "backend",
+            "api"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-82",
+          "title": "Enriquecer recuperaciones con datos de préstamo",
+          "description": "Relacionar cobranzas con préstamo, estado, calificación y dimensiones de negocio.",
+          "activity": {
+            "objective": "Entregar una visión completa de cada recuperación mediante el contexto del préstamo asociado.",
+            "summary": "Se añadió el enriquecimiento de cobranzas con préstamos y dimensiones comerciales, geográficas y crediticias.",
+            "implementation": {
+              "backend": [
+                "Se consultan préstamos por número y se aplica respaldo para préstamos que no están disponibles en el origen principal.",
+                "Se incorporaron estado y calificación anterior/posterior, además de agencia, asesor, condición, producto, segmento, ubicación, edad, garantía, monto, tasas y plazo.",
+                "Se eliminaron campos obsoletos y se ajustaron los contratos y pruebas."
+              ]
+            },
+            "rules": [
+              "Las recuperaciones sin préstamo disponible reciben valores de respaldo para mantener la respuesta consistente."
+            ],
+            "verification": [
+              "Se verificaron préstamos faltantes, estados y calificaciones en la respuesta."
+            ],
+            "period": "15 al 17 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore bb9850f, ddb723c, e6f3150, 9ad3556 y 1b81ff3.",
+              "Integración: merge f2ccb05 en DataSacCore (rama RECUPERACION)."
+            ],
+            "worklog": {
+              "started": "2026-07-17T08:00:00.000-0500",
+              "time_spent": "3d"
+            }
+          },
+          "labels": [
+            "backend",
+            "prestamos"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-83",
+      "title": "Consultar recuperación diaria consolidada",
+      "description": "Analizar cobros consolidados por préstamo y día.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar la recuperación diaria consolidada para revisar el total recuperado por préstamo y día dentro de un rango de fechas.\n\nLa solución deberá agrupar los cobros que correspondan al mismo préstamo y día, conservando las dimensiones necesarias para el análisis posterior.",
+      "historical_dates": {
+        "start": "2026-07-21",
+        "end": "2026-07-21"
+      },
+      "repositories": [
+        "DataSacCore",
+        "analytic-sac"
+      ],
+      "commits": [
+        "DataSacCore: e92b34a, d1b56d",
+        "analytic-sac: 9ef35ba"
+      ],
+      "files": [
+        "DataSacCore/app/modules/analytic/recuperacion/recuperacion_historico/",
+        "analytic-sac/src/app/features/recuperacion/shared/services/"
+      ],
+      "evidence": [
+        "La API dispone del endpoint diario y el frontend muestra progreso durante consultas extensas."
+      ],
+      "labels": [
+        "recuperacion",
+        "diario"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-84",
+          "title": "Implementar endpoint de recuperación diaria consolidada",
+          "description": "Crear la consulta que consolida los cobros por préstamo y día.",
+          "activity": {
+            "objective": "Proveer una vista diaria consistente de los valores recuperados.",
+            "summary": "Se implementó la consulta diaria que devuelve una fila consolidada por préstamo y día.",
+            "implementation": {
+              "backend": [
+                "Se agregó POST /analytic/recuperacion/recuperacion-historico-diario.",
+                "El servicio consulta recuperaciones diarias en MongoDB, consolida cobros y conserva el enriquecimiento de préstamo.",
+                "Se ajustaron esquemas y servicios para la respuesta diaria."
+              ]
+            },
+            "rules": [
+              "Los cobros del mismo préstamo y fecha se consolidan antes de construir la respuesta."
+            ],
+            "verification": [
+              "Se verificó la respuesta diaria y sus dimensiones de préstamo."
+            ],
+            "period": "21 de julio de 2026",
+            "references": [
+              "Commit: DataSacCore e92b34a.",
+              "Integración: merge f2ccb05 en DataSacCore (rama RECUPERACION)."
+            ],
+            "worklog": {
+              "started": "2026-07-21T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "backend",
+            "diario"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-85",
+          "title": "Mostrar progreso de consulta de recuperación",
+          "description": "Incorporar indicador de carga y progreso para consultas históricas o diarias.",
+          "activity": {
+            "objective": "Informar al usuario que una consulta de recuperación se encuentra en proceso.",
+            "summary": "Se añadió un indicador de carga y progreso en el control de recuperación histórica.",
+            "implementation": {
+              "frontend": [
+                "El servicio controla loading, progresoCarga y errores mediante signals.",
+                "El progreso se inicia al consultar y se finaliza al completar o fallar la solicitud.",
+                "El mismo control selecciona la consulta histórica o diaria según la configuración de la vista."
+              ]
+            },
+            "rules": [
+              "El progreso se limpia al finalizar la solicitud para evitar estados visuales obsoletos."
+            ],
+            "verification": [
+              "Se verificaron estados de carga, éxito y error de consulta."
+            ],
+            "period": "21 de julio de 2026",
+            "references": [
+              "Commit: analytic-sac 9ef35ba.",
+              "Integración: merge 8851439 en analytic-sac (rama RECUPERACION)."
+            ],
+            "worklog": {
+              "started": "2026-07-21T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "usabilidad"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-86",
+      "title": "Explorar recuperación por préstamo, asesor y dimensiones",
+      "description": "Presentar filtros, tablas y gráficos para analizar la recuperación por dimensiones de negocio.",
+      "jira_description": "Como usuario de Analytic SAC, quiero explorar la recuperación mediante filtros y visualizaciones por préstamo, asesor y dimensiones de negocio para enfocar el análisis en los segmentos relevantes.\n\nLa solución deberá permitir filtros encadenados y mostrar tablas y gráficos por agencia, asesor, préstamo, cobranza, ubicación, producto, estado y calificación.",
+      "historical_dates": {
+        "start": "2026-07-15",
+        "end": "2026-07-21"
+      },
+      "repositories": [
+        "analytic-sac"
+      ],
+      "commits": [
+        "analytic-sac: 7ebfa78, e96e9e4, 3190940, 6af7a74, c166ae6, f470303, 69cc1ed, 0b0843e"
+      ],
+      "files": [
+        "analytic-sac/src/app/features/recuperacion/shared/components/",
+        "analytic-sac/src/app/features/recuperacion/shared/services/recuperacion-historica-control.service.ts"
+      ],
+      "evidence": [
+        "El frontend define filtros y dimensiones para agencia, asesor, préstamo, ubicación, cobranza, estados y calificaciones."
+      ],
+      "labels": [
+        "recuperacion",
+        "filtros",
+        "frontend"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-87",
+          "title": "Construir tablas y gráficos de recuperación",
+          "description": "Crear componentes reutilizables para presentar recuperaciones por dimensión.",
+          "activity": {
+            "objective": "Visualizar la recuperación por período y dimensión en tablas y gráficos reutilizables.",
+            "summary": "Se creó el componente de tabla/gráfico y se integró al dashboard de recuperación.",
+            "implementation": {
+              "frontend": [
+                "Se creó RecuperacionHistoricaTableChartComponent y sus pruebas unitarias.",
+                "Se generaron gráficos por dimensión a partir de movimientos y préstamos asociados.",
+                "Se optimizaron la selección de series, filas visibles y el grosor de barras."
+              ]
+            },
+            "rules": [
+              "Las visualizaciones se recalculan con la respuesta y filtros actualmente activos."
+            ],
+            "verification": [
+              "Se verificó la selección de series y la presentación de datos."
+            ],
+            "period": "15 al 21 de julio de 2026",
+            "references": [
+              "Commits: analytic-sac 7ebfa78, c166ae6 y 69cc1ed.",
+              "Integraciones: merges af4a3af, 823dfa1 y 8851439 en analytic-sac."
+            ],
+            "worklog": {
+              "started": "2026-07-21T08:00:00.000-0500",
+              "time_spent": "5d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "graficos"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-88",
+          "title": "Implementar filtros encadenados de recuperación",
+          "description": "Filtrar por agencia, asesor, tipo de préstamo y dimensiones adicionales.",
+          "activity": {
+            "objective": "Permitir enfocar la recuperación en las dimensiones comerciales y crediticias seleccionadas.",
+            "summary": "Se añadieron filtros encadenados y filtros adicionales, con limpieza de valores no disponibles y caché de gráficos.",
+            "implementation": {
+              "frontend": [
+                "Se implementó selección múltiple de agencias, asesores y tipos de préstamo.",
+                "Se agregaron filtros de condición, producto, segmento, ubicación, educación, edad, garantía, monto, tasas, plazo, cobranza, estados y calificaciones.",
+                "El control invalida la caché de gráficos y elimina selecciones inválidas al cambiar un filtro."
+              ]
+            },
+            "rules": [
+              "Las opciones disponibles se recalculan a partir de los movimientos ya filtrados."
+            ],
+            "verification": [
+              "Se verificó el filtrado encadenado y la actualización de gráficos."
+            ],
+            "period": "16 al 21 de julio de 2026",
+            "references": [
+              "Commits: analytic-sac e96e9e4, 6af7a74 y 0b0843e.",
+              "Integración: merge 8851439 en analytic-sac (rama RECUPERACION)."
+            ],
+            "worklog": {
+              "started": "2026-07-21T08:00:00.000-0500",
+              "time_spent": "4d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "filtros"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-89",
+      "title": "Analizar montos, plazos y tasas promedio de recuperación",
+      "description": "Calcular indicadores promedio sobre las recuperaciones filtradas.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar montos, plazos y tasas promedio de la recuperación para evaluar las condiciones asociadas a los cobros realizados.\n\nLa solución deberá incorporar las páginas y cálculos requeridos, reutilizando los filtros y las visualizaciones de recuperación para cada métrica.",
+      "historical_dates": {
+        "start": "2026-07-20",
+        "end": "2026-08-14"
+      },
+      "repositories": [
+        "analytic-sac"
+      ],
+      "commits": [
+        "analytic-sac: b4ae8be, ce5df4d"
+      ],
+      "files": [
+        "analytic-sac/src/app/features/recuperacion/pages/",
+        "analytic-sac/src/app/features/recuperacion/shared/recuperacion-calculo.config.ts"
+      ],
+      "evidence": [
+        "El control calcula valores promedio simples o ponderados por el valor recuperado."
+      ],
+      "labels": [
+        "recuperacion",
+        "metricas"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-90",
+          "title": "Crear páginas y controles de métricas promedio",
+          "description": "Incorporar páginas para montos, plazos y tasas promedio de recuperación.",
+          "activity": {
+            "objective": "Habilitar indicadores promedio de las recuperaciones seleccionadas.",
+            "summary": "Se crearon páginas, rutas y controles para montos, plazos y tasas promedio.",
+            "implementation": {
+              "frontend": [
+                "Se agregaron páginas y servicios de control para montos, plazos y tasas promedio.",
+                "Se definió RecuperacionCalculo para manejar total y promedio con seguridad de tipos.",
+                "El dashboard y la tabla/gráfico se adaptaron para los nuevos tipos de cálculo."
+              ]
+            },
+            "rules": [
+              "Las métricas utilizan los mismos filtros de recuperación activa."
+            ],
+            "verification": [
+              "Se verificaron rutas, controles y visualizaciones de métricas."
+            ],
+            "period": "20 de julio de 2026",
+            "references": [
+              "Commit: analytic-sac b4ae8be.",
+              "Integración: merge 8851439 en analytic-sac (rama RECUPERACION)."
+            ],
+            "worklog": {
+              "started": "2026-07-20T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "metricas"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-91",
+          "title": "Optimizar cálculos promedio en tablas y gráficos",
+          "description": "Ajustar la selección y visualización de cálculos promedio en componentes reutilizables.",
+          "activity": {
+            "objective": "Mostrar indicadores promedio coherentes por dimensión y período.",
+            "summary": "Se mejoró la lógica de selección y visualización para cálculos promedio en tablas y gráficos.",
+            "implementation": {
+              "frontend": [
+                "El control acumula sumas y pesos por dimensión y período.",
+                "Los promedios pueden ser simples o ponderados por el valor recuperado.",
+                "Se ajustaron las filas visibles y la selección de datos para las métricas."
+              ]
+            },
+            "rules": [
+              "Los movimientos sin valor aplicable no participan en el cálculo promedio."
+            ],
+            "verification": [
+              "Se actualizaron pruebas del componente de tabla/gráfico."
+            ],
+            "period": "14 de agosto de 2026",
+            "references": [
+              "Commit: analytic-sac ce5df4d.",
+              "Integración posterior: cambio aplicado al historial del módulo."
+            ],
+            "worklog": {
+              "started": "2026-08-14T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "promedios"
+          ]
+        }
+      ]
+    }
+  ]
+}

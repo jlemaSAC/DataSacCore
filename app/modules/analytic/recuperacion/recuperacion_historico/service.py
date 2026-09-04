@@ -326,9 +326,13 @@ class RecuperacionHistoricoService:
                 )
             )
 
+        cargos_asesor_cobro = _cargo_asesor_cobro_por_prestamo(recuperaciones)
         return RecuperacionHistoricoRangoResponse(
             prestamos_por_numero={
-                numero: PrestamoRecuperacionOut(**prestamo.__dict__)
+                numero: PrestamoRecuperacionOut(
+                    **prestamo.__dict__,
+                    cargo_asesor_cobro=cargos_asesor_cobro.get(numero, "SIN DATOS"),
+                )
                 for numero, prestamo in prestamos_por_numero.items()
             },
             recuperaciones=datos,
@@ -462,6 +466,17 @@ def _valor_contexto(
 
 def _texto_opcional(valor: str) -> str | None:
     return None if valor == "SIN DATOS" else valor
+
+
+def _cargo_asesor_cobro_por_prestamo(
+    recuperaciones: list[RecuperacionEtiquetada],
+) -> dict[str, str]:
+    """Conserva el último cargo disponible de cada préstamo dentro del rango."""
+    cargos: dict[str, str] = {}
+    for recuperacion in recuperaciones:
+        if recuperacion.cargo_asesor_cobro != "SIN DATOS":
+            cargos[recuperacion.numero_prestamo] = recuperacion.cargo_asesor_cobro
+    return cargos
 
 
 class _CatalogosCompactos:

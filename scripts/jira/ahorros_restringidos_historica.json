@@ -1,0 +1,221 @@
+{
+  "epic": {
+    "issue_key": "ANALISAC-72",
+    "title": "Análisis de ahorros restringidos",
+    "description": "Habilitar vistas históricas de montos y tasas para cuentas de ahorro restringidas.",
+    "jira_description": "Esta épica habilitará el análisis de ahorros restringidos en Analytic SAC mediante vistas de histórico de monto, monto promedio y tasas.\n\nLas páginas reutilizarán los componentes analíticos disponibles y consultarán la fuente configurada para cuentas programadas. La trazabilidad de la fuente y de la responsabilidad backend deberá confirmarse manualmente antes de atribuir una implementación independiente.",
+    "historical_dates": {
+      "start": "2026-08-24",
+      "end": "2026-08-25"
+    },
+    "repositories": [
+      "analytic-sac"
+    ],
+    "labels": [
+      "ahorros-restringidos",
+      "analitica",
+      "revisar-manualmente"
+    ]
+  },
+  "stories": [
+    {
+      "issue_key": "ANALISAC-73",
+      "title": "Consultar histórico y monto promedio de ahorros restringidos",
+      "description": "Permitir visualizar saldos históricos y montos promedio de las cuentas de ahorro restringidas.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar el histórico de montos y el monto promedio de los ahorros restringidos para analizar su comportamiento en el período seleccionado.\n\nLa solución deberá ofrecer las rutas, controles y vistas requeridas, reutilizando el dashboard analítico y configurando la consulta para cuentas programadas.",
+      "historical_dates": {
+        "start": "2026-08-24",
+        "end": "2026-08-24"
+      },
+      "repositories": [
+        "analytic-sac"
+      ],
+      "commits": [
+        "analytic-sac: a588018"
+      ],
+      "files": [
+        "analytic-sac/src/app/features/ahorros-restringidos/"
+      ],
+      "evidence": [
+        "Las páginas y controles de Ahorros restringidos heredan el control de Ahorros a la vista con esProgramado=true."
+      ],
+      "labels": [
+        "ahorros-restringidos",
+        "frontend"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-74",
+          "title": "Crear rutas y controles de ahorros restringidos",
+          "description": "Incorporar rutas protegidas, proveedores y servicios de control para el módulo.",
+          "activity": {
+            "objective": "Habilitar la navegación y el estado de consulta para Ahorros restringidos.",
+            "summary": "Se crearon las rutas protegidas, proveedores y clases de control específicas del módulo.",
+            "implementation": {
+              "frontend": [
+                "Se creó AHORROS_RESTRINGIDOS_ROUTES con rutas de histórico, montos promedio y tasas.",
+                "Se registraron proveedores para los controles de histórico, monto y tasas.",
+                "AhorrosRestringidosControlBaseService hereda el control de Ahorros a la vista y configura esProgramado=true."
+              ]
+            },
+            "rules": [
+              "Las rutas requieren autorización mediante menuRouteGuard.",
+              "Las consultas se configuran para cuentas programadas."
+            ],
+            "verification": [
+              "Se verificó la disponibilidad de rutas y proveedores del módulo."
+            ],
+            "period": "24 de agosto de 2026",
+            "references": [
+              "Commit: analytic-sac a588018.",
+              "Integración: merge 4b5f32e en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-24T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "rutas"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-75",
+          "title": "Crear vistas de histórico y monto promedio restringido",
+          "description": "Implementar las páginas que reutilizan el dashboard para histórico de monto y monto promedio.",
+          "activity": {
+            "objective": "Permitir analizar saldos históricos y montos promedio de cuentas restringidas.",
+            "summary": "Se agregaron las páginas de histórico de monto y monto promedio para Ahorros restringidos.",
+            "implementation": {
+              "frontend": [
+                "Se creó HistoricoMontoAhorroRestringidoPage usando AhorrosVistasDashboardComponent.",
+                "Se creó MontosPromedioAhorroRestringidoPage con calculo promedio-monto.",
+                "Ambas páginas utilizan controles específicos y muestran Ahorro Restringido como nombre de producto."
+              ]
+            },
+            "rules": [
+              "Las vistas reutilizan las filas y filtros del dashboard común con la configuración de cuentas programadas."
+            ],
+            "verification": [
+              "Se verificó la carga de las páginas y la configuración del cálculo de monto."
+            ],
+            "period": "24 de agosto de 2026",
+            "references": [
+              "Commit: analytic-sac a588018.",
+              "Integración: merge 4b5f32e en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-24T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "monto"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-76",
+      "title": "Consultar tasas de ahorros restringidos",
+      "description": "Permitir visualizar las tasas de cuentas restringidas mediante una ruta y componentes unificados.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar las tasas de ahorros restringidos para analizar sus condiciones financieras en el período seleccionado.\n\nLa solución deberá reutilizar el dashboard común, habilitar los controles necesarios y unificar la navegación de las vistas de tasa.",
+      "historical_dates": {
+        "start": "2026-08-24",
+        "end": "2026-08-25"
+      },
+      "repositories": [
+        "analytic-sac"
+      ],
+      "commits": [
+        "analytic-sac: a588018, 9663358"
+      ],
+      "files": [
+        "analytic-sac/src/app/features/ahorros-restringidos/pages/tasa-promedio-normal/",
+        "analytic-sac/src/app/features/ahorros-restringidos/pages/tasa-promedio-decimal/"
+      ],
+      "evidence": [
+        "Las dos páginas usan el dashboard de Ahorros a la vista con calculo promedio-tasa."
+      ],
+      "labels": [
+        "ahorros-restringidos",
+        "tasas",
+        "frontend"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-77",
+          "title": "Crear páginas y controles de tasa restringida",
+          "description": "Incorporar las páginas de tasa normal y decimal con sus servicios de control.",
+          "activity": {
+            "objective": "Mostrar el análisis de tasas para las cuentas de ahorro restringidas.",
+            "summary": "Se crearon las páginas y servicios de control de tasa normal y decimal para Ahorros restringidos.",
+            "implementation": {
+              "frontend": [
+                "Se creó TasaPromedioNormalAhorroRestringidoPage y su control asociado.",
+                "Se creó TasaPromedioDecimalAhorroRestringidoPage y su control asociado.",
+                "Las páginas reutilizan AhorrosVistasDashboardComponent con calculo promedio-tasa y nombre de producto restringido."
+              ]
+            },
+            "rules": [
+              "Las tasas se consultan bajo la configuración de cuentas programadas del control base."
+            ],
+            "verification": [
+              "Se verificó la carga de ambas vistas de tasa."
+            ],
+            "period": "24 de agosto de 2026",
+            "references": [
+              "Commit: analytic-sac a588018.",
+              "Integración: merge 4b5f32e en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-24T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "tasas"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-78",
+          "skip_transition": true,
+          "title": "REVISAR MANUALMENTE: confirmar fuente y responsabilidad backend",
+          "description": "Confirmar que la fuente configurada para cuentas programadas corresponde funcionalmente a Ahorros restringidos y determinar la responsabilidad backend asociada.",
+          "activity": {
+            "objective": "Documentar la incertidumbre sobre la implementación backend de Ahorros restringidos.",
+            "summary": "El código frontend reutiliza el módulo de Ahorros a la vista con esProgramado=true, pero no se encontró un módulo API ni commits backend dedicados a Ahorros restringidos.",
+            "implementation": {
+              "frontend": [
+                "AhorrosRestringidosControlBaseService extiende AhorrosVistasControlBaseService y fuerza esProgramado=true.",
+                "La consulta se reutiliza desde el cliente HTTP de Ahorros a la vista."
+              ]
+            },
+            "rules": [
+              "No se atribuye una implementación backend independiente sin evidencia adicional."
+            ],
+            "verification": [
+              "Pendiente de confirmación funcional y técnica por el equipo responsable."
+            ],
+            "period": "25 de agosto de 2026",
+            "references": [
+              "Commit relacionado: analytic-sac 9663358.",
+              "No se encontraron commits backend dedicados en DataSacCore."
+            ],
+            "worklog": {
+              "started": "2026-08-25T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "revisar-manualmente",
+            "frontend"
+          ]
+        }
+      ]
+    }
+  ]
+}
