@@ -1,0 +1,557 @@
+{
+  "epic": {
+    "issue_key": "ANALISAC-1",
+    "title": "Acceso, menú y administración analítica",
+    "description": "Habilitar el acceso seguro a Analytic SAC, la navegación autorizada por roles y la administración del menú analítico.",
+    "jira_description": "Esta épica habilitará una experiencia de acceso segura y controlada para Analytic SAC, de modo que cada usuario pueda ingresar al sistema, consultar únicamente la información autorizada y navegar por las secciones disponibles para su rol.\n\nEl alcance incluye la autenticación de usuarios, la gestión de sesión, la protección de rutas, la carga dinámica del menú, la administración de grupos y rutas del menú y la asignación de permisos a roles.\n\nAl finalizar, el sistema contará con una base de seguridad y navegación administrable que permitirá incorporar y controlar los módulos analíticos de forma consistente.",
+    "historical_dates": {
+      "start": "2026-05-29",
+      "end": "2026-07-13"
+    },
+    "repositories": [
+      "analytic-sac",
+      "DataSacCore"
+    ],
+    "labels": [
+      "seguridad",
+      "menu"
+    ]
+  },
+  "stories": [
+    {
+      "issue_key": "ANALISAC-2",
+      "title": "Iniciar sesión y establecer una sesión segura de Analytic SAC",
+      "description": "Permitir que un usuario ingrese con sus credenciales, reciba un JWT y conserve una sesión válida para las funcionalidades autorizadas.",
+      "jira_description": "Como usuario de Analytic SAC, quiero iniciar sesión con mis credenciales y mantener una sesión segura para acceder a las funcionalidades que me corresponden.\n\nLa solución deberá validar las credenciales, identificar los roles y oficinas de consulta del usuario, emitir un token de acceso y proteger la navegación y las solicitudes al backend durante la sesión.",
+      "historical_dates": {
+        "start": "2026-05-29",
+        "end": "2026-06-16"
+      },
+      "repositories": [
+        "analytic-sac",
+        "DataSacCore"
+      ],
+      "commits": [
+        "analytic-sac: 0006097, 814386c",
+        "DataSacCore: 3c7b68b, 22bdc7e"
+      ],
+      "files": [
+        "analytic-sac/src/app/core/auth/",
+        "analytic-sac/src/app/features/auth/login.page.ts",
+        "DataSacCore/app/modules/auth/",
+        "DataSacCore/tests/test_auth.py"
+      ],
+      "evidence": [
+        "El frontend consume POST /auth/login, persiste la sesión y adjunta el Bearer token.",
+        "El backend valida el usuario y emite el JWT consumido por Analytic SAC."
+      ],
+      "labels": [
+        "frontend",
+        "backend",
+        "autenticacion"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-3",
+          "title": "Implementar login y persistencia de sesión en frontend",
+          "description": "Crear la página de acceso, cliente de autenticación y almacenamiento de la sesión.",
+          "activity": {
+            "objective": "Habilitar el ingreso de usuarios y conservar su sesión para mantener el acceso a Analytic SAC.",
+            "summary": "Se implementó el flujo de inicio de sesión y la persistencia de la sesión del usuario en el navegador.",
+            "implementation": {
+              "frontend": [
+                "Se creó la pantalla de login con formulario reactivo, validaciones de credenciales, mensajes de error y estado de carga.",
+                "Se implementó AuthService para invocar POST /auth/login y transformar la respuesta en datos de sesión.",
+                "Se incorporó AuthStore para mantener token y datos del usuario durante la navegación.",
+                "La sesión se guarda en localStorage, se restaura al iniciar la aplicación y se limpia al cerrar sesión."
+              ]
+            },
+            "rules": [
+              "No se permite continuar si la respuesta indica que el usuario no está habilitado.",
+              "La sesión solo se conserva cuando el servicio devuelve un token válido."
+            ],
+            "verification": [
+              "Se verificó el flujo de ingreso, persistencia de datos y limpieza de sesión al salir."
+            ],
+            "period": "29 de mayo al 5 de junio de 2026",
+            "references": [
+              "Commits: analytic-sac 0006097 y 814386c.",
+              "Integración posterior: merge 16c4d60 en analytic-sac (rama MENU)."
+            ],
+            "worklog": { "started": "2026-06-05T08:00:00.000-0500", "time_spent": "6d" }
+          },
+          "labels": [
+            "frontend"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-4",
+          "title": "Implementar JWT, interceptor y guards de sesión",
+          "description": "Proteger rutas autenticadas, gestionar usuarios invitados y adjuntar el token a las solicitudes HTTP.",
+          "activity": {
+            "objective": "Restringir la navegación y las consultas del sistema a sesiones autenticadas y vigentes.",
+            "summary": "Se agregó el control de acceso de la aplicación, el envío automático del token y el cierre de sesiones inválidas o inactivas.",
+            "implementation": {
+              "frontend": [
+                "Se implementó un interceptor HTTP para adjuntar el token Bearer en las solicitudes dirigidas a la API.",
+                "Se crearon authGuard y guestGuard para controlar el acceso a rutas privadas y públicas, incluyendo retorno a la ruta solicitada después del login.",
+                "Se incorporó la lectura del JWT para validar su fecha de expiración antes de restaurar una sesión.",
+                "Se agregó el servicio de inactividad para cerrar la sesión y redirigir al login cuando corresponde."
+              ]
+            },
+            "rules": [
+              "Las rutas del dashboard requieren una sesión autenticada.",
+              "Una sesión vencida, incompleta o inactiva se elimina antes de permitir la navegación."
+            ],
+            "verification": [
+              "Se verificó la redirección al login, el bloqueo de rutas privadas y el envío de la credencial en solicitudes de API."
+            ],
+            "period": "29 de mayo al 5 de junio de 2026",
+            "references": [
+              "Commits: analytic-sac 0006097 y 814386c.",
+              "Integración posterior: merge 16c4d60 en analytic-sac (rama MENU)."
+            ],
+            "worklog": { "started": "2026-06-05T08:00:00.000-0500", "time_spent": "6d" }
+          },
+          "labels": [
+            "frontend",
+            "seguridad"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-5",
+          "title": "Implementar autenticación FastAPI y validaciones SQL",
+          "description": "Validar credenciales, estado de usuario, roles y oficinas de consulta; emitir el JWT.",
+          "activity": {
+            "objective": "Validar de forma segura el acceso de usuarios y entregar el contexto necesario para los módulos analíticos.",
+            "summary": "Se habilitó el endpoint de autenticación con validación de credenciales, estado del usuario, roles, oficinas de consulta y emisión de token.",
+            "implementation": {
+              "backend": [
+                "Se creó POST /auth/login con esquemas de entrada y respuesta para el contrato de inicio de sesión.",
+                "Se implementó SqlAuthRepository para consultar usuario, estado, roles y oficinas de consulta desde SQL Server.",
+                "Se comparan las credenciales con el mecanismo de hash configurado y se validan usuarios activos y habilitados para ingresar.",
+                "Se incorporó JwtTokenService para emitir el token y get_current_auth_context para proteger endpoints con autenticación Bearer.",
+                "La respuesta incluye identidad del usuario, agencia, roles, oficinas autorizadas, fecha del sistema y token de sesión."
+              ]
+            },
+            "rules": [
+              "Usuarios inexistentes o con contraseña incorrecta reciben una respuesta de acceso no autorizado.",
+              "Usuarios inactivos o sin habilitación de ingreso no pueden iniciar sesión."
+            ],
+            "verification": [
+              "Se validó la respuesta de autenticación y la disponibilidad del contexto Bearer para endpoints protegidos."
+            ],
+            "period": "16 de junio de 2026",
+            "references": [
+              "Commits: DataSacCore 3c7b68b y 22bdc7e.",
+              "Integración posterior: merge 2107fd0 en DataSacCore (rama MENU)."
+            ],
+            "worklog": { "started": "2026-06-16T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": [
+            "backend",
+            "seguridad"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-6",
+          "title": "Agregar pruebas de autenticación",
+          "description": "Cubrir los escenarios de acceso, usuario inactivo, credenciales inválidas y respuesta autenticada.",
+          "activity": {
+            "objective": "Comprobar que las reglas de autenticación funcionen de forma consistente antes de utilizarlas en los módulos analíticos.",
+            "summary": "Se agregaron pruebas para los escenarios principales de ingreso y para la información entregada durante la sesión.",
+            "implementation": {
+              "backend": [
+                "Se crearon pruebas unitarias y de endpoint para el servicio de autenticación.",
+                "Se utilizaron repositorios simulados para verificar usuario válido, usuario inexistente, usuario inactivo, usuario inhabilitado y contraseña incorrecta.",
+                "Se verificó que la respuesta incluya token, roles y oficinas de consulta en los casos autorizados."
+              ]
+            },
+            "rules": [
+              "Los errores de autenticación no deben generar sesiones ni entregar tokens.",
+              "Los datos de roles y oficinas solo se devuelven después de una validación exitosa."
+            ],
+            "verification": [
+              "Se ejecutaron pruebas de servicio y de la ruta de login con dependencias reemplazadas."
+            ],
+            "period": "16 de junio de 2026",
+            "references": [
+              "Commit: DataSacCore 22bdc7e.",
+              "Integración posterior: merge 2107fd0 en DataSacCore (rama MENU)."
+            ],
+            "worklog": { "started": "2026-06-16T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": [
+            "backend",
+            "pruebas"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-7",
+      "title": "Mostrar y proteger la navegación analítica según permisos",
+      "description": "Mostrar solo las opciones autorizadas por rol y bloquear la navegación directa hacia rutas no permitidas.",
+      "jira_description": "Como usuario autenticado, quiero ver únicamente las opciones de menú y rutas analíticas para las que tengo permiso, para navegar el sistema de forma clara y segura.\n\nLa solución deberá cargar el menú autorizado para el usuario, mostrar su estructura de forma dinámica y bloquear el acceso directo a rutas que no estén habilitadas por sus permisos.",
+      "historical_dates": {
+        "start": "2026-05-29",
+        "end": "2026-07-13"
+      },
+      "repositories": [
+        "analytic-sac",
+        "DataSacCore"
+      ],
+      "commits": [
+        "analytic-sac: 0006097, a71a7e6, 1cf5e1b, 6f6e974, 2e23356",
+        "DataSacCore: c74fc21, 6e59efe"
+      ],
+      "files": [
+        "analytic-sac/src/app/core/access/",
+        "analytic-sac/src/app/layout/components/app.menu.ts",
+        "DataSacCore/app/modules/analytic/menu/"
+      ],
+      "evidence": [
+        "El frontend consume GET /analytic/menu y aplica menuRouteGuard y permissionGuard.",
+        "El backend construye el árbol autorizado con roles SQL y permisos/menú de MongoDB."
+      ],
+      "labels": [
+        "frontend",
+        "backend",
+        "permisos"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-8",
+          "title": "Consumir y renderizar el menú autorizado",
+          "description": "Cargar, ordenar y limpiar el árbol de menú asociado a la sesión del usuario.",
+          "activity": {
+            "objective": "Mostrar a cada usuario un menú construido a partir de los permisos asignados a su perfil.",
+            "summary": "Se implementó la carga dinámica del menú autorizado y su representación en la navegación lateral de Analytic SAC.",
+            "implementation": {
+              "frontend": [
+                "Se creó MenuAnalyticApi para consumir GET /analytic/menu.",
+                "Se implementó MenuAnalyticStore con signals para controlar carga, error, menú disponible y permisos efectivos.",
+                "El store ordena el árbol por orden configurado, evita solicitudes duplicadas y limpia su estado al cerrar sesión.",
+                "Se actualizó el componente de menú lateral para renderizar grupos y rutas recibidos desde la API."
+              ],
+              "backend": [
+                "Se expuso el menú autorizado a partir del contexto autenticado del usuario."
+              ]
+            },
+            "rules": [
+              "Solo se presentan nodos activos cuyo permiso esté asignado a alguno de los roles del usuario.",
+              "Si no se puede cargar el menú, se elimina el estado anterior para evitar mostrar permisos desactualizados."
+            ],
+            "verification": [
+              "Se verificó la carga, ordenamiento y limpieza del menú durante el ciclo de sesión."
+            ],
+            "period": "29 de mayo al 16 de junio de 2026",
+            "references": [
+              "Commits: analytic-sac 0006097, a71a7e6, 1cf5e1b y 6f6e974; DataSacCore c74fc21.",
+              "Integración: merges 16c4d60 en analytic-sac y 2107fd0 en DataSacCore (rama MENU)."
+            ],
+            "worklog": { "started": "2026-06-16T08:00:00.000-0500", "time_spent": "13d" }
+          },
+          "labels": [
+            "frontend"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-9",
+          "title": "Implementar guards de rutas y permisos",
+          "description": "Restringir el acceso a rutas según el menú y permisos efectivos del usuario.",
+          "activity": {
+            "objective": "Evitar el acceso directo a rutas analíticas que no han sido autorizadas para el usuario.",
+            "summary": "Se añadieron controles de navegación que validan menú, permisos y rutas antes de cargar cada sección del dashboard.",
+            "implementation": {
+              "frontend": [
+                "Se implementó menuRouteGuard para cargar el menú antes de resolver una ruta y validar el acceso a la opción solicitada.",
+                "Se implementó permissionGuard para comprobar permisos declarados en las rutas.",
+                "Se agregó normalización de rutas, incluyendo eliminación de barras finales y resolución de rutas iniciales de grupos.",
+                "Las rutas principales y las rutas cargadas de forma diferida se integraron con los guards de acceso."
+              ],
+              "backend": [
+                "La respuesta de menú entrega ruta y permiso requerido para que el frontend pueda aplicar la autorización."
+              ]
+            },
+            "rules": [
+              "Una ruta que no pertenezca al menú autorizado se redirige a la página 403.",
+              "El permiso comodín y los permisos específicos se consideran al validar una ruta."
+            ],
+            "verification": [
+              "Se validó el acceso a rutas permitidas, el bloqueo de rutas no autorizadas y el comportamiento de grupos de menú."
+            ],
+            "period": "5 de junio al 13 de julio de 2026",
+            "references": [
+              "Commits: analytic-sac 2e23356 y DataSacCore 6e59efe.",
+              "Integración: merges 16c4d60 en analytic-sac y 2107fd0 en DataSacCore (rama MENU)."
+            ],
+            "worklog": { "started": "2026-07-13T08:00:00.000-0500", "time_spent": "27d" }
+          },
+          "labels": [
+            "frontend",
+            "seguridad"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-10",
+          "title": "Construir menú y permisos desde MongoDB",
+          "description": "Resolver permisos por rol y devolver el árbol de navegación autorizado desde la API.",
+          "activity": {
+            "objective": "Centralizar la definición del menú y resolver las opciones visibles para cada rol de usuario.",
+            "summary": "Se desarrolló la API de menú analítico con persistencia de grupos, rutas, permisos y asignaciones de roles.",
+            "implementation": {
+              "backend": [
+                "Se creó el módulo app.modules.analytic.menu con router, dependencias, servicio, esquemas y repositorio MongoDB.",
+                "Se consultan los roles del usuario autenticado desde SQL Server antes de resolver sus permisos efectivos.",
+                "El repositorio consulta las colecciones menu, permisos y rol_permisos, filtra nodos activos y construye el árbol autorizado.",
+                "Se agregaron endpoints para consultar menú, árbol administrativo, rutas individuales, permisos y asignaciones rol-permiso."
+              ],
+              "frontend": [
+                "Se integró el endpoint de menú dentro del estado de acceso y la navegación lateral."
+              ]
+            },
+            "rules": [
+              "Un usuario sin permisos asignados no recibe opciones de navegación.",
+              "Solo se consideran relaciones de rol y permisos activos al construir el menú."
+            ],
+            "verification": [
+              "Se verificó la construcción del árbol de menú según roles y permisos activos."
+            ],
+            "period": "16 de junio al 13 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore c74fc21 y 6e59efe; analytic-sac 6f6e974.",
+              "Integración: merges 2107fd0 en DataSacCore y 16c4d60 en analytic-sac (rama MENU)."
+            ],
+            "worklog": { "started": "2026-07-13T08:00:00.000-0500", "time_spent": "20d" }
+          },
+          "labels": [
+            "backend",
+            "mongodb"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-11",
+          "title": "Validar grupos y normalización de rutas",
+          "description": "Permitir grupos sin ruta directa y normalizar las rutas de acceso para la navegación autorizada.",
+          "activity": {
+            "objective": "Permitir una estructura de navegación jerárquica sin exigir que todos los grupos tengan una pantalla propia.",
+            "summary": "Se ajustaron las reglas de menú para soportar grupos sin ruta y se normalizó la resolución de rutas en la interfaz.",
+            "implementation": {
+              "frontend": [
+                "Se creó una utilidad para resolver la ruta de entrada de un grupo a partir de sus opciones hijas.",
+                "Se actualizó el store y el menú lateral para comparar rutas normalizadas durante la navegación."
+              ],
+              "backend": [
+                "Se modificaron las validaciones del servicio y repositorio para aceptar ruta opcional en elementos de tipo grupo.",
+                "Se actualizaron las pruebas del repositorio para cubrir la nueva regla."
+              ]
+            },
+            "rules": [
+              "Los grupos pueden organizar opciones hijas sin requerir una ruta propia.",
+              "Las rutas se comparan en un formato único para evitar errores por barras o variaciones de formato."
+            ],
+            "verification": [
+              "Se verificaron grupos con y sin ruta, así como la navegación hacia sus opciones disponibles."
+            ],
+            "period": "13 de julio de 2026",
+            "references": [
+              "Commits: analytic-sac 2e23356 y DataSacCore 6e59efe.",
+              "Integración: merges 16c4d60 en analytic-sac y 2107fd0 en DataSacCore (rama MENU)."
+            ],
+            "worklog": { "started": "2026-07-13T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": [
+            "frontend",
+            "backend",
+            "validacion"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-12",
+      "title": "Administrar rutas y asignaciones de roles del menú analítico",
+      "description": "Permitir a administradores crear, consultar, editar y eliminar grupos o rutas del menú, asociándolos a roles válidos.",
+      "jira_description": "Como administrador de Analytic SAC, quiero gestionar los grupos, rutas y asignaciones de roles del menú para mantener actualizada la navegación disponible para cada tipo de usuario.\n\nLa solución deberá permitir consultar el árbol actual, crear, editar y eliminar rutas o grupos, asignar roles válidos y proteger estas operaciones para que solo puedan ser realizadas por administradores autorizados.",
+      "historical_dates": {
+        "start": "2026-06-16",
+        "end": "2026-07-13"
+      },
+      "repositories": [
+        "analytic-sac",
+        "DataSacCore"
+      ],
+      "commits": [
+        "analytic-sac: 5c8a708, 5187155, 2e23356",
+        "DataSacCore: c74fc21, 6e59efe"
+      ],
+      "files": [
+        "analytic-sac/src/app/features/administracion/",
+        "analytic-sac/src/app/core/access/guards/admin-role.guard.ts",
+        "DataSacCore/app/modules/analytic/menu/router.py",
+        "DataSacCore/app/modules/analytic/menu/service.py",
+        "DataSacCore/app/modules/analytic/menu/repositories/mongo_menu_repository.py"
+      ],
+      "evidence": [
+        "La pantalla Angular consume /analytic/rutas, /analytic/rutas/arbol y /seguridad/roles.",
+        "La API valida el rol administrador y mantiene menu, permisos y relaciones rol-permiso."
+      ],
+      "labels": [
+        "frontend",
+        "backend",
+        "administracion"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-13",
+          "title": "Crear pantalla administrativa de rutas",
+          "description": "Incorporar el módulo restringido a administradores, árbol de menú y selección de roles.",
+          "activity": {
+            "objective": "Proveer una interfaz para que administradores mantengan la estructura del menú analítico sin intervenir directamente en datos técnicos.",
+            "summary": "Se creó la pantalla de administración de rutas, grupos y roles con acceso restringido a administradores.",
+            "implementation": {
+              "frontend": [
+                "Se creó el módulo de Administración y su ruta cargada de forma diferida dentro del dashboard.",
+                "Se implementó adminRoleGuard para restringir el módulo al rol administrador 001.",
+                "Se desarrolló GestionRutasPage con árbol de menú, filtro de estado, formularios reactivos y selección de roles.",
+                "MenuAdminStore carga en paralelo el árbol de menú y los roles disponibles, administrando estados de carga, guardado y errores."
+              ],
+              "backend": [
+                "Se habilitaron los endpoints de árbol de menú y roles activos consumidos por la pantalla administrativa."
+              ]
+            },
+            "rules": [
+              "La administración solo puede abrirse para usuarios que posean el rol administrador activo.",
+              "La pantalla conserva la jerarquía de grupos y rutas al presentar el árbol."
+            ],
+            "verification": [
+              "Se verificó la carga conjunta de árbol y roles, además de la restricción de acceso al módulo."
+            ],
+            "period": "11 de julio de 2026",
+            "references": [
+              "Commit: analytic-sac 5c8a708.",
+              "Integración: merge 16c4d60 en analytic-sac (rama MENU)."
+            ],
+            "worklog": { "started": "2026-07-11T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": [
+            "frontend",
+            "administracion"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-14",
+          "title": "Implementar CRUD de rutas analíticas",
+          "description": "Crear los contratos y operaciones para consultar, crear, editar y eliminar rutas o grupos.",
+          "activity": {
+            "objective": "Permitir el mantenimiento completo de grupos y rutas del menú desde la administración de Analytic SAC.",
+            "summary": "Se habilitaron operaciones de consulta, creación, edición y eliminación de elementos de menú desde la interfaz y la API.",
+            "implementation": {
+              "frontend": [
+                "Se creó AnalyticAdminApi para consumir árbol, detalle y operaciones de creación, edición y eliminación de rutas.",
+                "La pantalla usa formularios reactivos para generar código, ruta y permiso a partir del nombre y del elemento padre.",
+                "Después de guardar o eliminar, se recargan el árbol administrativo y el menú autorizado de la aplicación."
+              ],
+              "backend": [
+                "Se implementaron GET, POST, PATCH y DELETE para /analytic/rutas y GET para /analytic/rutas/arbol.",
+                "El repositorio MongoDB crea, actualiza y serializa nodos de menú con su jerarquía, orden y estado.",
+                "La eliminación también retira el permiso y sus relaciones de rol cuando la ruta puede eliminarse de forma segura."
+              ]
+            },
+            "rules": [
+              "No se permite eliminar un grupo que todavía contiene rutas hijas.",
+              "Los códigos de menú deben ser únicos y las rutas deben mantener una estructura válida."
+            ],
+            "verification": [
+              "Se validaron operaciones de creación, edición, consulta y eliminación, junto con la actualización posterior del menú."
+            ],
+            "period": "16 de junio al 11 de julio de 2026",
+            "references": [
+              "Commits: analytic-sac 5c8a708 y DataSacCore c74fc21.",
+              "Integración: merges 16c4d60 en analytic-sac y 2107fd0 en DataSacCore (rama MENU)."
+            ],
+            "worklog": { "started": "2026-07-11T08:00:00.000-0500", "time_spent": "19d" }
+          },
+          "labels": [
+            "frontend",
+            "backend"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-15",
+          "title": "Gestionar roles y permisos de rutas",
+          "description": "Validar roles activos y crear o reactivar permisos y asignaciones rol-permiso.",
+          "activity": {
+            "objective": "Asignar de forma controlada qué roles pueden visualizar y utilizar cada ruta del menú analítico.",
+            "summary": "Se incorporó la selección de roles por ruta y la validación de permisos antes de guardar cambios administrativos.",
+            "implementation": {
+              "frontend": [
+                "Se agregó selección múltiple de roles al formulario administrativo y carga de los roles activos desde la API de seguridad.",
+                "Se implementó el control de acceso administrativo mediante adminRoleGuard y la actualización del menú después de cada cambio."
+              ],
+              "backend": [
+                "El servicio valida que el usuario que administra tenga el rol 001 y que los roles destino existan y estén activos.",
+                "Al crear o editar una ruta se crean o reactivan permisos y relaciones en rol_permisos.",
+                "Se habilitaron contratos para crear permisos y asociarlos a roles desde la API administrativa."
+              ]
+            },
+            "rules": [
+              "Solo administradores autorizados pueden modificar la asignación de roles.",
+              "No se asignan rutas a roles inexistentes o inactivos."
+            ],
+            "verification": [
+              "Se verificó la carga de roles, la persistencia de asignaciones y el rechazo de usuarios sin rol administrador."
+            ],
+            "period": "16 de junio al 11 de julio de 2026",
+            "references": [
+              "Commits: analytic-sac 5187155 y DataSacCore c74fc21.",
+              "Integración: merges 16c4d60 en analytic-sac y 2107fd0 en DataSacCore (rama MENU)."
+            ],
+            "worklog": { "started": "2026-07-11T08:00:00.000-0500", "time_spent": "19d" }
+          },
+          "labels": [
+            "backend",
+            "permisos"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-16",
+          "title": "Agregar validaciones y pruebas del repositorio de menú",
+          "description": "Evitar eliminaciones de nodos padre, validar rutas y cubrir las reglas del repositorio.",
+          "activity": {
+            "objective": "Asegurar que la administración del menú mantenga datos válidos y una jerarquía de navegación consistente.",
+            "summary": "Se reforzaron las validaciones de formularios, rutas, roles y relaciones de menú, y se agregaron pruebas para las reglas del repositorio.",
+            "implementation": {
+              "frontend": [
+                "El formulario administrativo valida nombre, orden, tipo de elemento, ruta y permiso requerido antes de enviar cambios.",
+                "Se incorporó generación controlada de código, permiso y ruta según el nombre y la jerarquía seleccionada."
+              ],
+              "backend": [
+                "El repositorio valida identificadores, códigos duplicados, nodos padre y consistencia de los datos antes de persistirlos.",
+                "Se agregaron pruebas para la validación de grupos sin ruta, permisos, asignaciones de roles y eliminación segura de nodos."
+              ]
+            },
+            "rules": [
+              "Los campos requeridos deben estar completos antes de guardar.",
+              "No se permite eliminar un nodo padre ni dejar permisos o asignaciones inconsistentes."
+            ],
+            "verification": [
+              "Se ejecutaron pruebas del repositorio y se verificaron validaciones de la pantalla administrativa."
+            ],
+            "period": "16 de junio al 13 de julio de 2026",
+            "references": [
+              "Commits: analytic-sac 2e23356 y DataSacCore 6e59efe.",
+              "Integración: merges 16c4d60 en analytic-sac y 2107fd0 en DataSacCore (rama MENU)."
+            ],
+            "worklog": { "started": "2026-07-13T08:00:00.000-0500", "time_spent": "20d" }
+          },
+          "labels": [
+            "backend",
+            "pruebas"
+          ]
+        }
+      ]
+    }
+  ]
+}

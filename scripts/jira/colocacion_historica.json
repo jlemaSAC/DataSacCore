@@ -1,0 +1,357 @@
+{
+  "epic": {
+    "issue_key": "ANALISAC-17",
+    "title": "Análisis histórico de colocación",
+    "description": "Proveer consultas y tableros para analizar la colocación de créditos por período, dimensión de negocio y métricas promedio.",
+    "jira_description": "Esta épica habilitará el análisis histórico de la colocación de créditos en Analytic SAC. Los usuarios podrán consultar un rango de fechas y explorar los resultados por agencia, asesor, producto, tipo de préstamo, ubicación y otros atributos relevantes de la cartera colocada.\n\nEl alcance incluye la integración de fuentes históricas y operativas, la presentación de tablas y gráficos, los filtros de exploración y el cálculo de montos, tasas y plazos promedio.\n\nAl finalizar, el módulo permitirá interpretar la evolución y composición de la colocación con información consistente, navegable y protegida por los permisos del sistema.",
+    "historical_dates": { "start": "2026-06-05", "end": "2026-08-14" },
+    "repositories": ["analytic-sac", "DataSacCore"],
+    "labels": ["colocacion", "analitica"]
+  },
+  "stories": [
+    {
+      "issue_key": "ANALISAC-18",
+      "title": "Consultar colocación histórica por rango de fechas",
+      "description": "Permitir la consulta de colocaciones históricas dentro de un rango de fechas y devolver los resultados consolidados por período.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar la colocación de créditos dentro de un rango de fechas para conocer su evolución histórica y utilizar la información en los tableros analíticos.\n\nLa solución deberá validar el rango solicitado, generar los períodos de consulta, integrar la información histórica y la información operativa del día cuando corresponda, y entregar resúmenes y agrupaciones reutilizables por las visualizaciones del módulo.",
+      "historical_dates": { "start": "2026-06-05", "end": "2026-07-08" },
+      "repositories": ["analytic-sac", "DataSacCore"],
+      "commits": ["analytic-sac: 814386c", "DataSacCore: 0b2186e, 9c31064"],
+      "files": ["analytic-sac/src/app/features/colocacion/", "DataSacCore/app/modules/analytic/colocacion/colocacion_historico/", "DataSacCore/tests/test_colocacion_historico.py"],
+      "evidence": ["La API expone la consulta por rango y devuelve resumen mensual más agrupaciones dimensionales.", "Las pruebas cubren rangos parciales, límite de meses y consolidación de fuentes."],
+      "labels": ["colocacion", "historico", "backend", "frontend"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-19",
+          "title": "Crear estructura y rutas del módulo de colocación",
+          "description": "Incorporar el módulo de colocación, sus rutas protegidas y los proveedores necesarios para sus páginas analíticas.",
+          "activity": {
+            "objective": "Incorporar Colocación como un módulo navegable dentro de Analytic SAC.",
+            "summary": "Se creó la estructura inicial del módulo, sus rutas y la página base desde la que se habilitaron las consultas históricas.",
+            "implementation": {
+              "frontend": ["Se agregó el módulo src/app/features/colocacion con rutas cargadas de forma diferida.", "Se registró la ruta de colocación histórica con menuRouteGuard para respetar los permisos de navegación.", "Se configuraron los proveedores de control para que cada página del módulo mantenga su propio estado de consulta."]
+            },
+            "rules": ["Las páginas de Colocación solo se cargan si la ruta está autorizada por el menú analítico."],
+            "verification": ["Se verificó la disponibilidad de la ruta de Colocación dentro del dashboard."],
+            "period": "5 de junio al 8 de julio de 2026",
+            "references": ["Commit: analytic-sac 814386c.", "Integración: merge 3cf99da en analytic-sac (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-08T08:00:00.000-0500", "time_spent": "24d" }
+          },
+          "labels": ["frontend", "rutas"]
+        },
+        {
+          "issue_key": "ANALISAC-20",
+          "title": "Implementar consulta histórica por rango en la API",
+          "description": "Crear el endpoint, contratos y servicio que segmenta el rango solicitado en períodos mensuales.",
+          "activity": {
+            "objective": "Exponer una consulta confiable de colocación para intervalos de fechas definidos por el usuario.",
+            "summary": "Se implementó el endpoint de rango, sus esquemas de entrada y salida, y el servicio que divide la consulta en segmentos mensuales.",
+            "implementation": {
+              "backend": ["Se creó POST /analytic/colocacion/colocacion-historico/rango con contratos Pydantic para fechas, resumen mensual y agrupaciones.", "El servicio genera segmentos por mes, mantiene los límites parciales del primer y último período y consolida los resultados.", "Se registró el router dentro del dominio analítico y se inyectaron los repositorios requeridos."]
+            },
+            "rules": ["La fecha final no puede ser anterior a la fecha inicial ni posterior a la fecha del sistema.", "El rango consultado se limita a 60 meses."],
+            "verification": ["Se cubrieron respuestas por período y validaciones del endpoint mediante pruebas automatizadas."],
+            "period": "3 al 8 de julio de 2026",
+            "references": ["Commit: DataSacCore 9c31064.", "Integración: merge 963f7bd en DataSacCore (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-08T08:00:00.000-0500", "time_spent": "4d" }
+          },
+          "labels": ["backend", "api"]
+        },
+        {
+          "issue_key": "ANALISAC-21",
+          "title": "Integrar fuentes históricas y operativas de colocación",
+          "description": "Obtener datos históricos desde MongoDB y complementar el día actual con SQL Server.",
+          "activity": {
+            "objective": "Entregar datos actualizados sin perder el histórico consolidado de colocación.",
+            "summary": "Se integraron repositorios de MongoDB y SQL Server para recuperar, agrupar y consolidar la colocación según el período consultado.",
+            "implementation": {
+              "backend": ["Se implementó el repositorio MongoDB para consultar cortes históricos y agrupar dimensiones en una sola operación.", "Se implementó el repositorio SQLAlchemy para obtener colocaciones operativas, clientes, garantías y datos comerciales del día.", "El servicio utiliza MongoDB hasta el día anterior y SQL Server para el día actual antes de consolidar operaciones y saldos."]
+            },
+            "rules": ["Para el mes actual, el histórico se corta en el día anterior para evitar duplicar datos con la fuente operativa.", "Las agrupaciones se consolidan por todas sus dimensiones antes de generar la respuesta."],
+            "verification": ["Se probaron rangos históricos, cortes parciales y la combinación de MongoDB con SQL Server."],
+            "period": "3 al 8 de julio de 2026",
+            "references": ["Commits: DataSacCore 0b2186e y 9c31064.", "Integración: merge 963f7bd en DataSacCore (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-08T08:00:00.000-0500", "time_spent": "4d" }
+          },
+          "labels": ["backend", "mongodb", "sqlserver"]
+        },
+        {
+          "issue_key": "ANALISAC-22",
+          "title": "Crear formulario y cliente de consulta histórica",
+          "description": "Permitir seleccionar fechas, solicitar la consulta y mostrar estados de carga, validación o error.",
+          "activity": {
+            "objective": "Permitir que el usuario inicie la consulta histórica de forma clara y controlada.",
+            "summary": "Se implementó el cliente HTTP y el control de pantalla para enviar fechas a la API y gestionar la respuesta del dashboard.",
+            "implementation": {
+              "frontend": ["Se creó ColocacionHttpService para consumir el endpoint de rango de colocación.", "Se implementó un servicio de control con signals para respuesta, carga, validación y errores.", "La pantalla incorporó selectores de Fecha Inicio y Fecha Fin, mensajes de validación y estados visuales de espera."]
+            },
+            "rules": ["No se envía la consulta si las fechas son inválidas, exceden el día actual o superan el límite de 60 meses.", "Ante un error se limpia la respuesta anterior para evitar mostrar información desactualizada."],
+            "verification": ["Se verificaron solicitudes válidas, validaciones de fechas y manejo visual de errores."],
+            "period": "4 al 8 de julio de 2026",
+            "references": ["Commits: analytic-sac d306ce8 y 7313813.", "Integración: merge 3cf99da en analytic-sac (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-08T08:00:00.000-0500", "time_spent": "3d" }
+          },
+          "labels": ["frontend", "consulta"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-23",
+      "title": "Visualizar colocación por dimensiones de negocio",
+      "description": "Presentar la colocación histórica mediante tablas y gráficos por agencia, asesor, producto, ubicación y otras dimensiones.",
+      "jira_description": "Como usuario de Analytic SAC, quiero visualizar la colocación por dimensiones de negocio para identificar cómo se distribuyen las operaciones y los montos dentro del período consultado.\n\nEl dashboard deberá reutilizar la respuesta histórica para presentar tablas y gráficos por agencia, asesor, tipo de préstamo, atributos comerciales, ubicación geográfica, características del cliente y garantías.",
+      "historical_dates": { "start": "2026-07-04", "end": "2026-07-08" },
+      "repositories": ["analytic-sac", "DataSacCore"],
+      "commits": ["analytic-sac: d306ce8, 7313813, 28e4e8a, 972fd6b, a22c6bc, 3f2a121, ab62d41, d698d95"],
+      "files": ["analytic-sac/src/app/features/colocacion/shared/components/", "analytic-sac/src/app/features/colocacion/shared/utils/colocacion-historica.utils.ts"],
+      "evidence": ["El dashboard incluye componentes especializados y un componente genérico de tabla/gráfico para reducir duplicación.", "Las dimensiones proceden de la respuesta agrupada de la API de colocación."],
+      "labels": ["colocacion", "dashboard", "frontend"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-24",
+          "title": "Construir dashboard reutilizable de tablas y gráficos",
+          "description": "Crear la estructura común para presentar indicadores, tablas, gráficos y diálogos de detalle.",
+          "activity": {
+            "objective": "Ofrecer una base visual uniforme para explorar los resultados de colocación.",
+            "summary": "Se construyó un dashboard reutilizable y un componente genérico para mostrar tablas y gráficos sin duplicar la lógica de presentación.",
+            "implementation": {
+              "frontend": ["Se creó ColocacionDashboardComponent para coordinar filtros, indicadores, tablas y gráficos.", "Se implementó el componente genérico de tabla/gráfico con selección de series, búsqueda y apertura de diálogo de detalle.", "Se centralizaron utilidades para formateo, colores y construcción de opciones de gráficos."]
+            },
+            "rules": ["Las visualizaciones se actualizan únicamente con las agrupaciones devueltas por la consulta vigente."],
+            "verification": ["Se agregaron pruebas para el componente genérico y se verificó la interacción entre tabla, gráfico y diálogo."],
+            "period": "4 al 8 de julio de 2026",
+            "references": ["Commits: analytic-sac d306ce8, 3f2a121 y d698d95.", "Integración: merge 3cf99da en analytic-sac (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-08T08:00:00.000-0500", "time_spent": "3d" }
+          },
+          "labels": ["frontend", "dashboard"]
+        },
+        {
+          "issue_key": "ANALISAC-25",
+          "title": "Visualizar colocación por agencia, asesor y tipo de préstamo",
+          "description": "Incorporar vistas de evolución mensual y distribución comercial de las colocaciones.",
+          "activity": {
+            "objective": "Analizar la contribución de las agencias, asesores y productos crediticios en la colocación.",
+            "summary": "Se incorporaron gráficos y tablas para comparar agencias por mes, asesores y tipos de préstamo.",
+            "implementation": {
+              "frontend": ["Se crearon componentes de agencia por mes y asesor por mes con visualización tabular y gráfica.", "Se agregó la vista de tipo de préstamo con búsqueda y actualización dinámica de sus series.", "Se ajustó la selección de agencias para admitir múltiples valores en las visualizaciones comerciales."]
+            },
+            "rules": ["Las series y resultados visibles se recalculan con las agencias seleccionadas."],
+            "verification": ["Se verificó la búsqueda, la selección de series y la actualización de datos por agencia."],
+            "period": "4 al 8 de julio de 2026",
+            "references": ["Commits: analytic-sac 7313813, 28e4e8a, 972fd6b y a22c6bc.", "Integración: merge 3cf99da en analytic-sac (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-08T08:00:00.000-0500", "time_spent": "3d" }
+          },
+          "labels": ["frontend", "comercial"]
+        },
+        {
+          "issue_key": "ANALISAC-26",
+          "title": "Visualizar dimensiones geográficas y de perfil del cliente",
+          "description": "Presentar resultados por provincia, cantón, parroquia, educación, edad y garantía.",
+          "activity": {
+            "objective": "Permitir identificar la composición territorial y el perfil asociado a la colocación de créditos.",
+            "summary": "Se agregaron componentes de consulta para ubicación geográfica, educación, edad y garantías de los préstamos.",
+            "implementation": {
+              "frontend": ["Se implementaron componentes para provincia, cantón y parroquia.", "Se incorporaron vistas por educación, edad y garantía usando el componente común de tabla y gráfico.", "Las dimensiones se presentan con las mismas capacidades de búsqueda y selección de series del dashboard."]
+            },
+            "rules": ["Las dimensiones sin datos válidos se normalizan para no interrumpir la presentación del resultado."],
+            "verification": ["Se verificó la visualización de cada dimensión geográfica y de perfil."],
+            "period": "7 y 8 de julio de 2026",
+            "references": ["Commit: analytic-sac ab62d41.", "Integración: merge 3cf99da en analytic-sac (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-08T08:00:00.000-0500", "time_spent": "2d" }
+          },
+          "labels": ["frontend", "geografico"]
+        },
+        {
+          "issue_key": "ANALISAC-27",
+          "title": "Incorporar dimensiones comerciales adicionales",
+          "description": "Mostrar la colocación por condición, producto y segmento con tablas y gráficos reutilizables.",
+          "activity": {
+            "objective": "Ampliar el análisis comercial más allá de agencia y tipo de préstamo.",
+            "summary": "Se añadieron vistas de condición, producto y segmento para comparar el comportamiento de la colocación.",
+            "implementation": {
+              "frontend": ["Se crearon componentes para condición, producto y segmento.", "Se reemplazaron implementaciones repetidas por el componente genérico de tabla/gráfico.", "Se integraron opciones de búsqueda y actualización de datos para las nuevas dimensiones."]
+            },
+            "rules": ["La presentación conserva el formato común de valores, ordenamiento y selección de series."],
+            "verification": ["Se verificó la carga de condición, producto y segmento con el resultado histórico."],
+            "period": "7 y 8 de julio de 2026",
+            "references": ["Commits: analytic-sac 972fd6b, 3f2a121 y ab62d41.", "Integración: merge 3cf99da en analytic-sac (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-08T08:00:00.000-0500", "time_spent": "2d" }
+          },
+          "labels": ["frontend", "producto"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-28",
+      "title": "Analizar montos, tasas y plazos promedio de colocación",
+      "description": "Calcular y visualizar los montos, tasas nominales, tasas reales y plazos promedio de las colocaciones.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar los montos, tasas y plazos promedio de colocación para evaluar las condiciones financieras de los créditos emitidos.\n\nLa solución deberá incluir los valores numéricos necesarios en las fuentes de datos y presentar páginas específicas que reutilicen el dashboard y los filtros del módulo para cada tipo de cálculo.",
+      "historical_dates": { "start": "2026-07-08", "end": "2026-07-10" },
+      "repositories": ["analytic-sac", "DataSacCore"],
+      "commits": ["analytic-sac: 761e0b3, 0270da6, ad86b9c, 2593afc, b2f5848", "DataSacCore: b8313af, a356be6, e6ebce0"],
+      "files": ["DataSacCore/app/modules/analytic/colocacion/colocacion_historico/", "analytic-sac/src/app/features/colocacion/pages/", "analytic-sac/src/app/features/colocacion/shared/colocacion-calculo.config.ts"],
+      "evidence": ["Los contratos y pruebas incluyen monto, valores de tasa nominal y real, y plazo en días.", "El frontend expone páginas independientes para monto, tasas y plazo promedio."],
+      "labels": ["colocacion", "metricas", "backend", "frontend"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-29",
+          "title": "Ampliar datos de colocación para métricas financieras",
+          "description": "Incorporar monto, tasas nominales y reales, y plazo numérico en el dominio, repositorios y respuestas de la API.",
+          "activity": {
+            "objective": "Proveer los valores numéricos requeridos para calcular indicadores promedio de colocación.",
+            "summary": "Se ampliaron las dimensiones de colocación con monto, tasa nominal, tasa real y plazo original en días.",
+            "implementation": {
+              "backend": ["Se agregaron monto, tasa, tasa_valor, tasa_real, tasa_real_valor, plazo y plazo_valor al dominio y esquemas de respuesta.", "Los repositorios MongoDB y SQL Server obtienen, convierten y normalizan los valores para su agrupación.", "Se actualizaron las pruebas del repositorio y del endpoint para verificar los nuevos campos."]
+            },
+            "rules": ["Los valores no disponibles se controlan sin interrumpir la agrupación de datos.", "El plazo se calcula en días a partir de las fechas del préstamo."],
+            "verification": ["Se validaron los campos de tasa y plazo en las respuestas y pruebas de la API."],
+            "period": "8 al 10 de julio de 2026",
+            "references": ["Commits: DataSacCore b8313af, a356be6 y e6ebce0.", "Integración: merge 11d43d6 en DataSacCore (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-10T08:00:00.000-0500", "time_spent": "3d" }
+          },
+          "labels": ["backend", "metricas"]
+        },
+        {
+          "issue_key": "ANALISAC-30",
+          "title": "Crear análisis de montos promedio de colocación",
+          "description": "Incorporar la página y cálculo para analizar el monto promedio según las dimensiones seleccionadas.",
+          "activity": {
+            "objective": "Facilitar la comparación de montos promedio de los créditos colocados.",
+            "summary": "Se habilitó la pantalla de montos promedio reutilizando el dashboard y el control de consulta del módulo.",
+            "implementation": {
+              "frontend": ["Se creó MontosPromediosDeColocacionPage y su servicio de control específico.", "Se añadió el modo de cálculo promedio en la configuración compartida.", "Las tablas y gráficos reutilizan las agrupaciones para obtener el promedio por cada dimensión."]
+            },
+            "rules": ["El cálculo promedio se aplica sobre las operaciones incluidas luego de los filtros activos."],
+            "verification": ["Se verificó la disponibilidad de la ruta y la presentación de montos promedio."],
+            "period": "8 al 10 de julio de 2026",
+            "references": ["Commits: analytic-sac 761e0b3 y 2593afc.", "Integración: merge 5f1caea en analytic-sac (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-10T08:00:00.000-0500", "time_spent": "3d" }
+          },
+          "labels": ["frontend", "monto"]
+        },
+        {
+          "issue_key": "ANALISAC-31",
+          "title": "Crear análisis de tasas promedio nominal y real",
+          "description": "Permitir consultar tasas promedio y seleccionar el tipo de tasa aplicable al análisis.",
+          "activity": {
+            "objective": "Comparar las condiciones de tasa de los créditos colocados.",
+            "summary": "Se agregaron las visualizaciones de tasa nominal y tasa real, junto con el selector de tipo de tasa en el dashboard.",
+            "implementation": {
+              "frontend": ["Se creó la página de tasas promedio y sus componentes para tasa nominal y real.", "Se agregó el cálculo promedio de tasa y promedio de tasa real a la configuración del módulo.", "El dashboard muestra el selector de tipo de tasa y actualiza las visualizaciones según la opción elegida."]
+            },
+            "rules": ["Solo se consideran valores numéricos disponibles al calcular promedios de tasa."],
+            "verification": ["Se verificó el cambio entre tasa nominal y real en las tablas y gráficos."],
+            "period": "9 y 10 de julio de 2026",
+            "references": ["Commits: analytic-sac 761e0b3, 0270da6 y ad86b9c.", "Integración: merge 5f1caea en analytic-sac (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-10T08:00:00.000-0500", "time_spent": "2d" }
+          },
+          "labels": ["frontend", "tasas"]
+        },
+        {
+          "issue_key": "ANALISAC-32",
+          "title": "Crear análisis de plazo promedio de colocación",
+          "description": "Incorporar la visualización y cálculo del plazo promedio de los créditos.",
+          "activity": {
+            "objective": "Analizar el plazo promedio de los créditos colocados por las dimensiones disponibles.",
+            "summary": "Se creó la página de plazo promedio y se ajustó el cálculo para representar el plazo usando días y meses de forma consistente.",
+            "implementation": {
+              "frontend": ["Se creó PlazoPromedioDeColocacionPage y su control asociado.", "Se añadió el modo promedio-plazo al dashboard compartido.", "Se ajustó la representación del plazo para incluir la conversión de días por mes en los gráficos."]
+            },
+            "rules": ["El plazo se calcula con los valores originales en días provistos por la consulta."],
+            "verification": ["Se verificó el cálculo y la presentación de plazo promedio en los gráficos."],
+            "period": "9 y 10 de julio de 2026",
+            "references": ["Commits: analytic-sac 2593afc y b2f5848.", "Integración: merge 5f1caea en analytic-sac (rama COLOCACION)."],
+            "worklog": { "started": "2026-07-10T08:00:00.000-0500", "time_spent": "2d" }
+          },
+          "labels": ["frontend", "plazo"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-33",
+      "title": "Filtrar y mejorar la exploración del dashboard de colocación",
+      "description": "Permitir filtros encadenados y mejorar la interacción visual de las consultas de colocación.",
+      "jira_description": "Como usuario de Analytic SAC, quiero refinar los resultados del dashboard de colocación mediante filtros relacionados para enfocar el análisis en las agencias, asesores, tipos de préstamo y atributos que necesito revisar.\n\nLa solución deberá actualizar las opciones disponibles según las selecciones previas, limpiar valores que ya no sean válidos y mantener una presentación clara de la participación y los detalles de las visualizaciones.",
+      "historical_dates": { "start": "2026-07-20", "end": "2026-08-14" },
+      "repositories": ["analytic-sac"],
+      "commits": ["analytic-sac: bdceb57, 2bf85a4, 8c313b2, 7cd1921, 9630902"],
+      "files": ["analytic-sac/src/app/features/colocacion/shared/services/colocacion-control-base.service.ts", "analytic-sac/src/app/features/colocacion/shared/colocacion-filtros-adicionales.config.ts", "analytic-sac/src/app/features/colocacion/shared/components/colocacion-dashboard.component.ts"],
+      "evidence": ["El servicio mantiene filtros dependientes mediante signals y recalcula opciones desde las agrupaciones consultadas.", "Los commits posteriores amplían filtros, tooltips y actualización de la interfaz."],
+      "labels": ["colocacion", "filtros", "frontend"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-34",
+          "title": "Implementar filtros encadenados de agencia, asesor y tipo de préstamo",
+          "description": "Permitir seleccionar múltiples agencias, asesores y tipos de préstamo con opciones dependientes.",
+          "activity": {
+            "objective": "Reducir el conjunto de datos de colocación según la estructura comercial seleccionada por el usuario.",
+            "summary": "Se implementaron filtros en cascada para agencia, asesor y tipo de préstamo dentro del control compartido del dashboard.",
+            "implementation": {
+              "frontend": ["Se incorporó selección múltiple de agencias y actualización de asesores disponibles.", "El control recalcula tipos de préstamo a partir de las agencias y asesores elegidos.", "Se limpiaron automáticamente las selecciones que dejan de estar disponibles al cambiar un filtro superior."]
+            },
+            "rules": ["El modo consolidado ignora el filtro de agencias.", "No se conservan asesores ni tipos de préstamo que ya no pertenecen al resultado filtrado."],
+            "verification": ["Se verificó la actualización encadenada de agencias, asesores y tipos de préstamo."],
+            "period": "20 y 21 de julio de 2026",
+            "references": ["Commit: analytic-sac 7cd1921.", "Integración posterior: cambios aplicados directamente al historial del módulo."],
+            "worklog": { "started": "2026-07-21T08:00:00.000-0500", "time_spent": "2d" }
+          },
+          "labels": ["frontend", "filtros"]
+        },
+        {
+          "issue_key": "ANALISAC-35",
+          "title": "Incorporar filtros adicionales de colocación",
+          "description": "Permitir filtrar por condición, producto, segmento, ubicación, educación, edad y garantía.",
+          "activity": {
+            "objective": "Ofrecer una exploración más precisa de la colocación según atributos comerciales, geográficos y de perfil.",
+            "summary": "Se agregaron filtros adicionales configurables y se mejoró la lógica para actualizar sus opciones y selecciones.",
+            "implementation": {
+              "frontend": ["Se definió una configuración tipada para condición, producto, segmento, provincia, cantón, parroquia, educación, edad y garantía.", "El control genera las opciones desde el resultado vigente y aplica todos los filtros seleccionados a las agrupaciones.", "Se agregó limpieza de valores no disponibles y actualización de la interfaz después de modificar filtros adicionales."]
+            },
+            "rules": ["Cada filtro adicional solo conserva valores existentes dentro del resultado filtrado previamente.", "Los filtros vacíos no excluyen datos de la consulta."],
+            "verification": ["Se verificó la combinación de filtros adicionales y la actualización posterior del dashboard."],
+            "period": "21 de julio al 14 de agosto de 2026",
+            "references": ["Commits: analytic-sac 7cd1921 y 9630902.", "Integración: cambios aplicados directamente al historial del módulo."],
+            "worklog": { "started": "2026-08-14T08:00:00.000-0500", "time_spent": "19d" }
+          },
+          "labels": ["frontend", "filtros", "usabilidad"]
+        },
+        {
+          "issue_key": "ANALISAC-36",
+          "title": "Mejorar participación y detalle de gráficos de colocación",
+          "description": "Mostrar participación total, tooltips informativos y una visualización más clara de los resultados.",
+          "activity": {
+            "objective": "Hacer más comprensible la comparación de los resultados de colocación en gráficos y tablas.",
+            "summary": "Se mejoraron la interfaz de usuario, los tooltips y la visualización de participación en los gráficos del dashboard.",
+            "implementation": {
+              "frontend": ["Se ajustaron las opciones de gráfico para mostrar participación total y detalles contextuales en tooltips.", "Se revisó la presentación de filas visibles y la interacción de tabla/gráfico.", "Se aplicaron mejoras de estructura visual para facilitar la lectura de los resultados."]
+            },
+            "rules": ["La participación se calcula respecto al conjunto que permanece luego de aplicar los filtros activos."],
+            "verification": ["Se verificó la presentación de porcentajes, tooltips y actualización visual de los gráficos."],
+            "period": "20 y 21 de julio de 2026",
+            "references": ["Commits: analytic-sac bdceb57, 2bf85a4 y 8c313b2.", "Integración: cambios aplicados directamente al historial del módulo."],
+            "worklog": { "started": "2026-07-21T08:00:00.000-0500", "time_spent": "2d" }
+          },
+          "labels": ["frontend", "graficos"]
+        },
+        {
+          "issue_key": "ANALISAC-37",
+          "title": "Optimizar actualización de filtros adicionales",
+          "description": "Ajustar la lógica de selección y refresco para mantener consistente el dashboard después de filtrar.",
+          "activity": {
+            "objective": "Mantener la coherencia de las opciones y resultados cuando el usuario modifica filtros adicionales.",
+            "summary": "Se ajustó la lógica de actualización de filtros adicionales para evitar selecciones obsoletas y refrescar la información visible.",
+            "implementation": {
+              "frontend": ["Se refinó la actualización del estado de filtros mediante signals.", "Se validan los valores seleccionados contra las opciones disponibles antes de conservarlos.", "El dashboard vuelve a calcular sus agrupaciones filtradas y componentes al cambiar la selección."]
+            },
+            "rules": ["No se mantienen filtros que no correspondan al resultado actual de la consulta."],
+            "verification": ["Se verificó el cambio de filtros sucesivos y la estabilidad de la actualización visual."],
+            "period": "14 de agosto de 2026",
+            "references": ["Commit: analytic-sac 9630902.", "Integración: cambio aplicado directamente al historial del módulo."],
+            "worklog": { "started": "2026-08-14T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["frontend", "filtros", "mantenimiento"]
+        }
+      ]
+    }
+  ]
+}

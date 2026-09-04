@@ -93,6 +93,7 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
             "fecha_corte": "20260601",
             "numero_prestamo": "2020112000639",
             "agencia": "MATRIZ",
+            "cargo_asesor_cobro": "GESTOR DE COBRANZAS",
             "tipo_transaccion": "ABONO PRESTAMO AUTOMATICO",
             "tipo_cobro": "COBRANZA",
             "valor_recuperado": 0.01,
@@ -111,6 +112,7 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
     assert resultado[0].tipo_transaccion == "ABONO PRESTAMO AUTOMATICO"
     assert resultado[0].valor_recuperado == 0.01
     assert resultado[0].agencia == "MATRIZ"
+    assert resultado[0].cargo_asesor_cobro == "GESTOR DE COBRANZAS"
     assert collection.pipeline[0] == {
         "$match": {"fecha_corte": {"$gte": "20260601", "$lte": "20260601"}}
     }
@@ -121,6 +123,7 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
     assert cobros[0]["valor"] == {
         "$convert": {"input": "$CAPITAL", "to": "double", "onError": 0, "onNull": 0}
     }
+    assert collection.pipeline[1]["$project"]["cargo_asesor_cobro"] == "$CARGO_ASESOR_COBRO"
     proyeccion_final = next(
         etapa["$project"]
         for etapa in collection.pipeline
@@ -375,6 +378,7 @@ def test_respuesta_indexa_el_prestamo_y_las_recuperaciones_lo_referencian() -> N
                 tipo_cobro="CAPITAL",
                 tipo_transaccion="ABONO",
                 valor_recuperado=120.5,
+                cargo_asesor_cobro="GESTOR DE COBRANZAS",
             )
         ],
         {numero_prestamo: prestamo},
@@ -385,6 +389,7 @@ def test_respuesta_indexa_el_prestamo_y_las_recuperaciones_lo_referencian() -> N
     assert set(respuesta_serializada["p"][numero_prestamo]) == {
         "co",
         "tp",
+        "cac",
         "pr",
         "sg",
         "pv",
@@ -401,6 +406,7 @@ def test_respuesta_indexa_el_prestamo_y_las_recuperaciones_lo_referencian() -> N
     assert set(respuesta_serializada["r"][0]) == {
         "an",
         "me",
+        "di",
         "np",
         "tc",
         "tx",
@@ -415,6 +421,10 @@ def test_respuesta_indexa_el_prestamo_y_las_recuperaciones_lo_referencian() -> N
     assert respuesta.prestamos_por_numero[numero_prestamo].tipo_prestamo == "MICROCREDITO"
     assert respuesta.prestamos_por_numero[numero_prestamo].condicion == "NUEVO"
     assert respuesta.prestamos_por_numero[numero_prestamo].monto == 12000.0
+    assert (
+        respuesta.prestamos_por_numero[numero_prestamo].cargo_asesor_cobro
+        == "GESTOR DE COBRANZAS"
+    )
     assert respuesta.recuperaciones[0].numero_prestamo == numero_prestamo
     assert respuesta.recuperaciones[0].valor == 120.5
     assert respuesta.recuperaciones[0].transaccion == "ABONO"

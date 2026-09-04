@@ -1,0 +1,591 @@
+{
+  "epic": {
+    "issue_key": "ANALISAC-55",
+    "title": "Análisis histórico de ahorros a la vista",
+    "description": "Proveer consultas y tableros para analizar saldos, cuentas, transacciones, montos, tasas y periodicidad de ahorros a la vista.",
+    "jira_description": "Esta épica habilitará el análisis histórico de ahorros a la vista en Analytic SAC. Los usuarios podrán consultar saldos y actividad de cuentas por período, explorar sus dimensiones comerciales y geográficas, y analizar montos, tasas y periodicidad.\n\nEl alcance incluye la integración de cortes históricos y operativos, filtros de exploración, visualizaciones reutilizables y mecanismos de caché que mejoran la consulta de períodos ya cerrados.\n\nAl finalizar, el módulo permitirá comprender la composición y actividad de los ahorros a la vista con información consistente y actualizada.",
+    "historical_dates": {
+      "start": "2026-06-05",
+      "end": "2026-08-25"
+    },
+    "repositories": [
+      "analytic-sac",
+      "DataSacCore"
+    ],
+    "labels": [
+      "ahorros-vista",
+      "analitica"
+    ]
+  },
+  "stories": [
+    {
+      "issue_key": "ANALISAC-56",
+      "title": "Consultar histórico de saldos y cuentas de ahorro a la vista",
+      "description": "Permitir consultar saldos, cuentas y transacciones por rango de meses, integrando cortes históricos y operativos.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar saldos y cuentas de ahorro a la vista por rango de meses para conocer su comportamiento histórico.\n\nLa solución deberá recuperar los cortes históricos disponibles, solicitar al ETL la carga de meses cerrados faltantes y consultar el mes actual desde la fuente operativa, entregando saldos, cuentas, transacciones y el detalle necesario para el dashboard.",
+      "historical_dates": {
+        "start": "2026-06-05",
+        "end": "2026-08-19"
+      },
+      "repositories": [
+        "analytic-sac",
+        "DataSacCore"
+      ],
+      "commits": [
+        "analytic-sac: 814386c",
+        "DataSacCore: 4692bb6, 2844157, 3bb1976"
+      ],
+      "files": [
+        "analytic-sac/src/app/features/ahorros-vistas/",
+        "DataSacCore/app/modules/analytic/ahorro_vista/"
+      ],
+      "evidence": [
+        "La API consulta MongoDB para meses cerrados, ETL para períodos faltantes y SQL Server para el mes actual.",
+        "La respuesta entrega cortes, saldos, transacciones y filas detalladas."
+      ],
+      "labels": [
+        "ahorros-vista",
+        "historico",
+        "backend",
+        "frontend"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-57",
+          "title": "Crear estructura y rutas del módulo de ahorros a la vista",
+          "description": "Incorporar el módulo, sus rutas protegidas y proveedores para sus páginas analíticas.",
+          "activity": {
+            "objective": "Incorporar el análisis de ahorros a la vista como módulo navegable de Analytic SAC.",
+            "summary": "Se creó la estructura inicial del módulo, sus rutas protegidas y los proveedores de estado requeridos por sus páginas.",
+            "implementation": {
+              "frontend": [
+                "Se agregó src/app/features/ahorros-vistas y su ruta base dentro del dashboard.",
+                "Se registraron rutas protegidas para histórico de monto, montos promedio y tasas.",
+                "Se configuraron proveedores para aislar el estado de control de cada página."
+              ]
+            },
+            "rules": [
+              "Las páginas se cargan únicamente si la ruta está autorizada por el menú analítico."
+            ],
+            "verification": [
+              "Se verificó el acceso del módulo desde la navegación autorizada."
+            ],
+            "period": "5 de junio al 19 de agosto de 2026",
+            "references": [
+              "Commit: analytic-sac 814386c.",
+              "Integraciones: merges 6c9ce49 y 4b5f32e en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-19T08:00:00.000-0500",
+              "time_spent": "54d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "rutas"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-58",
+          "title": "Implementar consulta histórica de ahorros a la vista",
+          "description": "Crear el endpoint, contratos y servicio para consultar saldos por rango de meses.",
+          "activity": {
+            "objective": "Exponer saldos y actividad histórica de ahorro a la vista para las visualizaciones analíticas.",
+            "summary": "Se implementó la consulta por rango y los contratos de respuesta para cortes, transacciones, saldos y filas detalladas.",
+            "implementation": {
+              "backend": [
+                "Se creó GET /analytic/ahorros-vista-historico con fechas de inicio y fin, y el filtro opcional es_programado.",
+                "Se definieron esquemas para filas, cortes mensuales, totales de transacciones y saldo.",
+                "El servicio genera los meses incluidos, agrupa las filas por período y ordena la respuesta por corte, agencia y asesor."
+              ]
+            },
+            "rules": [
+              "La fecha final no puede ser anterior a la inicial ni posterior a la fecha del sistema."
+            ],
+            "verification": [
+              "Se actualizaron pruebas y scripts de verificación para comprobar saldos de cuentas."
+            ],
+            "period": "18 y 19 de agosto de 2026",
+            "references": [
+              "Commits: DataSacCore 4692bb6, 2844157 y 3bb1976.",
+              "Integración: merge 3598635 en DataSacCore (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-19T08:00:00.000-0500",
+              "time_spent": "2d"
+            }
+          },
+          "labels": [
+            "backend",
+            "api"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-59",
+          "title": "Integrar cortes de MongoDB, ETL y SQL Server",
+          "description": "Obtener meses cerrados desde MongoDB, materializar períodos faltantes y consultar el mes actual desde SQL Server.",
+          "activity": {
+            "objective": "Mantener disponible el histórico de ahorro a la vista y complementarlo con la operación vigente.",
+            "summary": "Se integraron MongoDB, ETL y SQL Server para resolver los cortes mensuales y el corte del mes actual.",
+            "implementation": {
+              "backend": [
+                "Se implementó el repositorio MongoDB para verificar y obtener cortes mensuales, incluso por tipo programado.",
+                "EtlReporteAhorroVistaClient solicita al ETL la carga de meses cerrados faltantes con su inicio y fin de mes.",
+                "El repositorio SQL ejecuta el procedimiento de ahorro a la vista para consultar el día actual.",
+                "El servicio utiliza SQL Server para el mes actual y MongoDB para los meses cerrados."
+              ]
+            },
+            "rules": [
+              "La carga ETL se solicita solo cuando un corte cerrado no existe.",
+              "El filtro es_programado se propaga a las tres fuentes."
+            ],
+            "verification": [
+              "Se verificó la recuperación de cortes históricos, faltantes y vigentes."
+            ],
+            "period": "19 de agosto de 2026",
+            "references": [
+              "Commit: DataSacCore 3bb1976.",
+              "Integración: merge 3598635 en DataSacCore (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-19T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "backend",
+            "mongodb",
+            "etl",
+            "sqlserver"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-60",
+      "title": "Visualizar montos y tasas de ahorro a la vista",
+      "description": "Presentar históricos de saldo, montos promedio y tasas mediante páginas, tablas y gráficos reutilizables.",
+      "jira_description": "Como usuario de Analytic SAC, quiero visualizar los saldos, montos promedio y tasas de ahorro a la vista para interpretar su comportamiento en el período seleccionado.\n\nLa solución deberá reutilizar un dashboard común, presentar tablas y gráficos, y habilitar las páginas de histórico de monto, monto promedio y tasa bajo una navegación unificada.",
+      "historical_dates": {
+        "start": "2026-08-19",
+        "end": "2026-08-25"
+      },
+      "repositories": [
+        "analytic-sac",
+        "DataSacCore"
+      ],
+      "commits": [
+        "analytic-sac: a25699c, a588018, 9663358, 171d9db",
+        "DataSacCore: c74f58a"
+      ],
+      "files": [
+        "analytic-sac/src/app/features/ahorros-vistas/pages/",
+        "analytic-sac/src/app/features/ahorros-vistas/shared/components/",
+        "DataSacCore/app/modules/analytic/ahorro_vista/schemas.py"
+      ],
+      "evidence": [
+        "El frontend tiene páginas de histórico, montos promedio y tasas con componentes compartidos.",
+        "El backend incluye tasas programadas y de itemsaldo."
+      ],
+      "labels": [
+        "ahorros-vista",
+        "dashboard",
+        "metricas"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-61",
+          "title": "Construir dashboard y controles de ahorros a la vista",
+          "description": "Crear el modelo, cliente HTTP, control base, dashboard y componentes de tabla y gráfico.",
+          "activity": {
+            "objective": "Ofrecer una base visual y de estado reutilizable para analizar ahorros a la vista.",
+            "summary": "Se construyeron el dashboard, los servicios de control, el modelo de respuesta y el componente de tabla/gráfico del módulo.",
+            "implementation": {
+              "frontend": [
+                "Se creó AhorrosVistasControlBaseService con signals para respuesta, carga, errores y filtros.",
+                "Se implementó AhorrosVistasHttpService para consultar la API y preparar las respuestas históricas.",
+                "Se creó AhorrosVistasDashboardComponent y AhorrosVistasTableChartComponent para las visualizaciones.",
+                "Se agregó un pipe para formatear moneda, números y días, junto con utilidades de color."
+              ]
+            },
+            "rules": [
+              "Las páginas reutilizan el mismo control base y aplican el cálculo definido por cada vista."
+            ],
+            "verification": [
+              "Se verificó la carga de la consulta y la presentación de tablas y gráficos."
+            ],
+            "period": "19 de agosto de 2026",
+            "references": [
+              "Commit: analytic-sac a25699c.",
+              "Integración: merge 6c9ce49 en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-19T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "dashboard"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-62",
+          "title": "Crear vistas de histórico y monto promedio",
+          "description": "Incorporar las páginas y cálculos para visualizar saldo histórico y monto promedio.",
+          "activity": {
+            "objective": "Permitir comparar el saldo histórico y el monto promedio de las cuentas de ahorro a la vista.",
+            "summary": "Se habilitaron las páginas de histórico de monto y monto promedio, reutilizando el dashboard y sus controles.",
+            "implementation": {
+              "frontend": [
+                "Se creó HistoricoMontoAhorroVistaPage con el cálculo de histórico de saldo.",
+                "Se agregó MontosPromedioAhorroVistaPage y su servicio de control especializado.",
+                "Se definió la configuración de cálculos total y promedio-monto para ajustar títulos, métricas y formatos."
+              ]
+            },
+            "rules": [
+              "Cada página utiliza las mismas filas filtradas, pero aplica su cálculo de saldo correspondiente."
+            ],
+            "verification": [
+              "Se verificó la disponibilidad de las rutas y las métricas de monto."
+            ],
+            "period": "19 al 24 de agosto de 2026",
+            "references": [
+              "Commits: analytic-sac a25699c y a588018.",
+              "Integraciones: merges 6c9ce49 y 4b5f32e en analytic-sac."
+            ],
+            "worklog": {
+              "started": "2026-08-24T08:00:00.000-0500",
+              "time_spent": "4d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "monto"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-63",
+          "title": "Unificar análisis de tasas y ampliar datos de tasa",
+          "description": "Crear una ruta unificada de tasas y exponer las variantes de tasa requeridas por el análisis.",
+          "activity": {
+            "objective": "Facilitar la consulta de tasas de ahorro a la vista en una experiencia de navegación consistente.",
+            "summary": "Se unificó la navegación de tasas y se ampliaron los datos de tasa disponibles para las visualizaciones.",
+            "implementation": {
+              "frontend": [
+                "Se consolidaron las rutas de tasa normal y decimal en la ruta tasa.",
+                "Se ajustaron componentes y controladores para unificar el manejo de tasas.",
+                "Las filas se preparan antes de alimentar gráficos y tablas."
+              ],
+              "backend": [
+                "Se agregaron tasa_programada y tasa_itemsaldo en el reporte, su normalización y sus pruebas."
+              ]
+            },
+            "rules": [
+              "Las variantes de tasa no disponibles se manejan como valores opcionales sin impedir la consulta."
+            ],
+            "verification": [
+              "Se verificó la ruta unificada y la presencia de tasas programadas e itemsaldo."
+            ],
+            "period": "25 de agosto de 2026",
+            "references": [
+              "Commits: analytic-sac 9663358 y 171d9db; DataSacCore c74f58a.",
+              "Integraciones: merges 4b5f32e en analytic-sac y eb2e196 en DataSacCore."
+            ],
+            "worklog": {
+              "started": "2026-08-25T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "backend",
+            "tasas"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-64",
+      "title": "Analizar periodicidad e inactividad de cuentas",
+      "description": "Clasificar las cuentas según la última transacción normal y la última transacción por usuario.",
+      "jira_description": "Como usuario de Analytic SAC, quiero analizar la periodicidad de las transacciones de las cuentas de ahorro a la vista para identificar niveles de inactividad.\n\nLa solución deberá diferenciar la última transacción general de la transacción realizada por un usuario, clasificar los días en rangos comprensibles y permitir emplear esas categorías en los filtros y visualizaciones.",
+      "historical_dates": {
+        "start": "2026-08-20",
+        "end": "2026-08-24"
+      },
+      "repositories": [
+        "analytic-sac",
+        "DataSacCore"
+      ],
+      "commits": [
+        "analytic-sac: 330da6f, ad87150, 6318d73",
+        "DataSacCore: 92adf79"
+      ],
+      "files": [
+        "DataSacCore/app/modules/analytic/ahorro_vista/schemas.py",
+        "analytic-sac/src/app/features/ahorros-vistas/shared/ahorros-vistas-periodicidad.config.ts"
+      ],
+      "evidence": [
+        "La API devuelve periodicidad normal, por usuario y número de cuentas.",
+        "El frontend agrupa los días desde 0 hasta más de 360 y distingue la ausencia de transacción de usuario."
+      ],
+      "labels": [
+        "ahorros-vista",
+        "periodicidad",
+        "filtros"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-65",
+          "title": "Incorporar periodicidad y número de cuentas en la respuesta histórica",
+          "description": "Ampliar el reporte con periodicidad normal, periodicidad por usuario y número de cuentas.",
+          "activity": {
+            "objective": "Proveer las medidas necesarias para analizar la actividad e inactividad de las cuentas.",
+            "summary": "Se añadieron campos de periodicidad y número de cuentas a los contratos, repositorios y pruebas del reporte histórico.",
+            "implementation": {
+              "backend": [
+                "Se incorporaron periodicidad, periodicidad_normal y periodicidad_usuario en las filas de ahorro a la vista.",
+                "Se agregó numero_cuentas para representar la cantidad de cuentas agrupadas.",
+                "Se mantuvo compatibilidad normalizando periodicidad_normal desde el campo histórico cuando corresponde."
+              ]
+            },
+            "rules": [
+              "Los campos de periodicidad pueden no estar disponibles y se manejan como valores opcionales."
+            ],
+            "verification": [
+              "Se actualizaron pruebas para validar los nuevos campos del reporte."
+            ],
+            "period": "21 de agosto de 2026",
+            "references": [
+              "Commit: DataSacCore 92adf79.",
+              "Integración: merge eb2e196 en DataSacCore (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-21T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "backend",
+            "periodicidad"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-66",
+          "title": "Clasificar rangos de periodicidad normal y por usuario",
+          "description": "Transformar días de periodicidad en rangos de inactividad utilizables por filtros y gráficos.",
+          "activity": {
+            "objective": "Traducir la periodicidad técnica de las cuentas en categorías comprensibles para el análisis.",
+            "summary": "Se definieron rangos de periodicidad y se agregó una clasificación distinta para la actividad general y por usuario.",
+            "implementation": {
+              "frontend": [
+                "Se crearon rangos desde 0 días hasta más de 360 días.",
+                "Se implementó categoriaPeriodicidad para periodicidad normal y categoriaPeriodicidadUsuario para actividad por usuario.",
+                "Se agregó la categoría SIN TRANSACCIÓN DE USUARIO cuando no existe actividad atribuible a un usuario."
+              ]
+            },
+            "rules": [
+              "Los datos faltantes se muestran como SIN DATOS o SIN TRANSACCIÓN DE USUARIO según la dimensión."
+            ],
+            "verification": [
+              "Se verificó la asignación de rangos para distintos valores de días."
+            ],
+            "period": "20 y 21 de agosto de 2026",
+            "references": [
+              "Commits: analytic-sac 330da6f y ad87150.",
+              "Integración: merge 6c9ce49 en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-21T08:00:00.000-0500",
+              "time_spent": "2d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "periodicidad"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-67",
+          "title": "Ajustar etiquetas y filtros de inactividad",
+          "description": "Actualizar las opciones de periodicidad y retirar filtros que ya no correspondían al modelo vigente.",
+          "activity": {
+            "objective": "Mantener los filtros de periodicidad alineados con el modelo final de la consulta.",
+            "summary": "Se ajustaron etiquetas de periodicidad y se eliminaron filtros de inactividad que fueron sustituidos por las nuevas dimensiones.",
+            "implementation": {
+              "frontend": [
+                "Se actualizaron las etiquetas visibles de periodicidad.",
+                "Se retiraron los filtros de inactividad que no correspondían al modelo final.",
+                "El control base genera y ordena las opciones de periodicidad con los rangos realmente disponibles."
+              ]
+            },
+            "rules": [
+              "Los filtros solo muestran categorías presentes en las filas preparadas."
+            ],
+            "verification": [
+              "Se verificó la actualización de etiquetas y opciones de filtro."
+            ],
+            "period": "24 de agosto de 2026",
+            "references": [
+              "Commit: analytic-sac 6318d73.",
+              "Integración: merge 4b5f32e en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-24T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "filtros"
+          ]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-68",
+      "title": "Filtrar y optimizar consultas históricas de ahorro a la vista",
+      "description": "Permitir filtros dependientes y reutilizar datos históricos por usuario mediante caché persistente.",
+      "jira_description": "Como usuario de Analytic SAC, quiero refinar los resultados de ahorro a la vista con filtros relacionados y reutilizar datos históricos cuando sea seguro para consultar el dashboard de forma eficiente.\n\nLa solución deberá recalcular las opciones disponibles según los filtros aplicados, dividir las consultas por meses y mantener una caché por usuario que no comprometa los datos del período actual.",
+      "historical_dates": {
+        "start": "2026-08-19",
+        "end": "2026-08-25"
+      },
+      "repositories": [
+        "analytic-sac"
+      ],
+      "commits": [
+        "analytic-sac: a25699c, 8bbdf27, 171d9db"
+      ],
+      "files": [
+        "analytic-sac/src/app/features/ahorros-vistas/shared/services/ahorros-vistas-control-base.service.ts",
+        "analytic-sac/src/app/features/ahorros-vistas/shared/services/ahorros-vistas-http.service.ts",
+        "analytic-sac/src/app/features/ahorros-vistas/shared/services/ahorros-vistas-historico-cache.service.ts"
+      ],
+      "evidence": [
+        "Las opciones se recalculan desde las filas filtradas y se eliminan selecciones inválidas.",
+        "IndexedDB almacena meses históricos por usuario y no bloquea la consulta si no está disponible."
+      ],
+      "labels": [
+        "ahorros-vista",
+        "filtros",
+        "rendimiento"
+      ],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-69",
+          "title": "Implementar filtros dependientes de ahorros a la vista",
+          "description": "Permitir filtrar por agencia, asesor, periodicidad, tasa, estado, ubicación, préstamos y productos.",
+          "activity": {
+            "objective": "Enfocar el análisis de ahorro a la vista en las cuentas y atributos seleccionados por el usuario.",
+            "summary": "Se implementaron filtros encadenados de agencia y asesor, junto con filtros adicionales para periodicidad, tasas, ubicación y relación crediticia.",
+            "implementation": {
+              "frontend": [
+                "Se agregaron filtros por agencia y asesor con opciones dependientes.",
+                "Se configuraron filtros para periodicidad, tasa, estado, provincia, cantón, parroquia, préstamo y productos.",
+                "Las filas se preparan con etiquetas normalizadas antes de calcular filtros y dimensiones.",
+                "Se eliminan selecciones que dejan de estar disponibles tras un cambio de filtro."
+              ]
+            },
+            "rules": [
+              "El modo consolidado no limita resultados por agencia.",
+              "Los filtros vacíos no excluyen filas de la consulta."
+            ],
+            "verification": [
+              "Se verificó la combinación de filtros y la limpieza de selecciones inválidas."
+            ],
+            "period": "19 al 25 de agosto de 2026",
+            "references": [
+              "Commits: analytic-sac a25699c y 171d9db.",
+              "Integración: merge 4b5f32e en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-25T08:00:00.000-0500",
+              "time_spent": "5d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "filtros"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-70",
+          "title": "Implementar caché histórico persistente por usuario",
+          "description": "Guardar períodos históricos en IndexedDB con vencimiento y limpieza al cambiar de usuario.",
+          "activity": {
+            "objective": "Mejorar la respuesta de consultas históricas sin exponer datos entre usuarios.",
+            "summary": "Se implementó una caché persistente de períodos históricos basada en IndexedDB y asociada al usuario autenticado.",
+            "implementation": {
+              "frontend": [
+                "Se creó AhorrosVistasHistoricoCacheService con almacén IndexedDB para respuestas históricas.",
+                "Los registros incluyen clave, respuesta y fecha de vencimiento de una hora.",
+                "Al cambiar de usuario se eliminan sus registros anteriores.",
+                "La consulta continúa normalmente si IndexedDB no está disponible."
+              ]
+            },
+            "rules": [
+              "La caché se identifica por usuario, período y tipo programado.",
+              "Las entradas vencidas se eliminan antes de devolver resultados."
+            ],
+            "verification": [
+              "Se verificó el almacenamiento, vencimiento y limpieza por cambio de usuario."
+            ],
+            "period": "24 de agosto de 2026",
+            "references": [
+              "Commit: analytic-sac 8bbdf27.",
+              "Integración: merge 4b5f32e en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-24T08:00:00.000-0500",
+              "time_spent": "1d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "cache"
+          ]
+        },
+        {
+          "issue_key": "ANALISAC-71",
+          "title": "Optimizar consulta mensual y actualización de gráficos",
+          "description": "Dividir consultas por meses, evitar solicitudes duplicadas y preparar filas para gráficos y tablas.",
+          "activity": {
+            "objective": "Mantener ágil y consistente la consulta histórica cuando el usuario analiza varios meses.",
+            "summary": "Se optimizó el cliente para resolver períodos mensuales, reutilizar solicitudes en curso y preparar las filas antes de actualizar visualizaciones.",
+            "implementation": {
+              "frontend": [
+                "El cliente divide el rango solicitado en meses y agrupa períodos faltantes consecutivos antes de llamar a la API.",
+                "Se reutilizan solicitudes en curso mediante shareReplay para evitar peticiones duplicadas.",
+                "El mes actual se consulta siempre nuevamente y no se toma del caché histórico.",
+                "Se refactorizó la preparación de filas para mejorar el manejo de datos de tablas y gráficos."
+              ]
+            },
+            "rules": [
+              "El mes actual no se obtiene de la caché.",
+              "Las respuestas mensuales se combinan conservando sus cortes y totales."
+            ],
+            "verification": [
+              "Se verificó la combinación de respuestas y la actualización de las visualizaciones."
+            ],
+            "period": "24 y 25 de agosto de 2026",
+            "references": [
+              "Commits: analytic-sac 8bbdf27 y 171d9db.",
+              "Integración: merge 4b5f32e en analytic-sac (rama AHORRO-VISTA)."
+            ],
+            "worklog": {
+              "started": "2026-08-25T08:00:00.000-0500",
+              "time_spent": "2d"
+            }
+          },
+          "labels": [
+            "frontend",
+            "rendimiento",
+            "graficos"
+          ]
+        }
+      ]
+    }
+  ]
+}
