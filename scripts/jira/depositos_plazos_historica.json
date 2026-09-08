@@ -1,0 +1,261 @@
+{
+  "epic": {
+    "issue_key": "ANALISAC-38",
+    "title": "Análisis histórico de depósitos a plazo",
+    "description": "Proveer consultas y tableros para analizar depósitos a plazo, sus montos, tasas, operaciones y plazos por período.",
+    "jira_description": "Esta épica habilitará el análisis histórico de depósitos a plazo en Analytic SAC. Los usuarios podrán consultar períodos mensuales y explorar los resultados por agencia, asesor, condiciones de pago, ubicación, relación crediticia y atributos financieros.\n\nEl alcance incluye la integración de cortes históricos y operativos, la carga de períodos faltantes, las tablas y gráficos de detalle, los filtros de exploración y el análisis de montos, tasas y plazos promedio.\n\nAl finalizar, el módulo permitirá comprender la evolución y composición de los depósitos a plazo con información actualizada, trazable y consistente.",
+    "historical_dates": { "start": "2026-06-05", "end": "2026-08-14" },
+    "repositories": ["analytic-sac", "DataSacCore"],
+    "labels": ["depositos-plazo", "analitica"]
+  },
+  "stories": [
+    {
+      "issue_key": "ANALISAC-39",
+      "title": "Consultar depósitos a plazo históricos por período",
+      "description": "Permitir la consulta de depósitos a plazo por períodos mensuales, combinando cortes históricos y el corte operativo vigente.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar depósitos a plazo dentro de un rango de meses para conocer sus operaciones y saldos históricos.\n\nLa solución deberá recuperar cortes mensuales disponibles, solicitar la carga de períodos cerrados faltantes y complementar la información con el corte operativo del mes actual cuando aplique.",
+      "historical_dates": { "start": "2026-06-05", "end": "2026-08-12" },
+      "repositories": ["analytic-sac", "DataSacCore"],
+      "commits": ["analytic-sac: 814386c", "DataSacCore: 639ee60, 2d87ee6"],
+      "files": ["analytic-sac/src/app/features/depositos-plazos/", "DataSacCore/app/modules/analytic/inversiones/", "DataSacCore/procedures/reporte_inversiones.sql"],
+      "evidence": ["La API entrega cortes, operaciones, saldo y filas detalladas por rango.", "El servicio identifica si los datos provienen de MongoDB, ETL bajo demanda, SQL en línea o no existe corte."],
+      "labels": ["depositos-plazo", "historico", "backend", "frontend"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-40",
+          "title": "Crear estructura y rutas del módulo de depósitos a plazo",
+          "description": "Incorporar el módulo, sus rutas protegidas y los proveedores de estado para las páginas analíticas.",
+          "activity": {
+            "objective": "Incorporar el análisis de depósitos a plazo como módulo navegable de Analytic SAC.",
+            "summary": "Se creó la estructura inicial del módulo, sus rutas y los proveedores requeridos por las consultas y páginas de análisis.",
+            "implementation": { "frontend": ["Se agregó src/app/features/depositos-plazos y su ruta base dentro del dashboard.", "Se registraron rutas protegidas para histórico, montos promedio, tasas promedio y plazo promedio.", "Se configuraron proveedores para aislar el estado de control de cada página del módulo."] },
+            "rules": ["Las páginas solo se cargan si la ruta está autorizada por el menú analítico."],
+            "verification": ["Se verificó el acceso del módulo y sus rutas desde la navegación autorizada."],
+            "period": "5 de junio al 12 de agosto de 2026",
+            "references": ["Commit: analytic-sac 814386c.", "Integración: merge 61087d4 en analytic-sac (rama DEPOSITO-PLAZO-FIJO)."],
+            "worklog": { "started": "2026-08-12T08:00:00.000-0500", "time_spent": "49d" }
+          },
+          "labels": ["frontend", "rutas"]
+        },
+        {
+          "issue_key": "ANALISAC-41",
+          "title": "Implementar consulta histórica de depósitos en la API",
+          "description": "Crear el endpoint, contratos y servicio para consultar depósitos a plazo por rango de fechas.",
+          "activity": {
+            "objective": "Exponer la información histórica de depósitos a plazo para los tableros analíticos.",
+            "summary": "Se implementó el endpoint de consulta, sus contratos de respuesta y el servicio que resuelve los meses del rango solicitado.",
+            "implementation": { "backend": ["Se creó GET /analytic/depositos-a-plazos-historico con parámetros fecha_desde y fecha_hasta.", "Se definieron esquemas para las filas de depósitos, los cortes mensuales y los totales consolidados.", "El servicio genera los meses incluidos en el rango y construye la respuesta ordenada por corte, agencia y asesor."] },
+            "rules": ["La fecha final no puede ser anterior a la inicial ni posterior a la fecha del sistema.", "El rango se procesa por meses, aunque el usuario ingrese fechas específicas."],
+            "verification": ["Se agregaron pruebas unitarias para la consulta y su respuesta consolidada."],
+            "period": "12 de agosto de 2026",
+            "references": ["Commits: DataSacCore 639ee60 y 2d87ee6.", "Integración: merge 5c58ecc en DataSacCore (rama DEPOSITOS-PLAZO)."],
+            "worklog": { "started": "2026-08-12T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["backend", "api"]
+        },
+        {
+          "issue_key": "ANALISAC-42",
+          "title": "Integrar cortes de MongoDB, ETL y SQL Server",
+          "description": "Obtener períodos cerrados desde MongoDB, materializar períodos faltantes y consultar el corte actual desde SQL Server.",
+          "activity": {
+            "objective": "Mantener disponible el histórico de depósitos y complementar el resultado con información operativa vigente.",
+            "summary": "Se implementó la integración entre MongoDB, el ETL y SQL Server para resolver los cortes mensuales de depósitos a plazo.",
+            "implementation": { "backend": ["El repositorio MongoDB asegura el índice de período y fecha de corte, identifica períodos cargados y recupera sus filas.", "EtlReporteInversionesClient solicita al ETL la materialización de un mes cerrado que no esté disponible.", "El repositorio SQL ejecuta el procedimiento REPORTE_ANALITICO_INVERSIONES para obtener el corte del día actual.", "El servicio informa el origen de cada período y no guarda el corte operativo actual como cierre mensual."] },
+            "rules": ["Los meses cerrados faltantes se solicitan al ETL una única vez por consulta.", "Cuando el rango incluye el día actual, el corte se obtiene desde SQL Server."],
+            "verification": ["Se verificó la asignación de origen por período y la recuperación de datos por cada fuente."],
+            "period": "12 de agosto de 2026",
+            "references": ["Commit: DataSacCore 639ee60.", "Integración: merge 5c58ecc en DataSacCore (rama DEPOSITOS-PLAZO)."],
+            "worklog": { "started": "2026-08-12T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["backend", "mongodb", "etl", "sqlserver"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-43",
+      "title": "Visualizar histórico y detalle de depósitos a plazo",
+      "description": "Presentar tablas y gráficos de los depósitos a plazo según dimensiones comerciales, geográficas y crediticias.",
+      "jira_description": "Como usuario de Analytic SAC, quiero visualizar los depósitos a plazo en tablas y gráficos para analizar su distribución dentro del período seleccionado.\n\nEl dashboard deberá permitir explorar los resultados por agencia, asesor, forma de pago, condición, plazo, estado, ubicación y relación del depositante con créditos, incluyendo búsqueda y detalle de los valores mostrados.",
+      "historical_dates": { "start": "2026-08-11", "end": "2026-08-14" },
+      "repositories": ["analytic-sac"],
+      "commits": ["analytic-sac: 5d738ae, de1813d, 153e6e4"],
+      "files": ["analytic-sac/src/app/features/depositos-plazos/shared/components/", "analytic-sac/src/app/features/depositos-plazos/shared/models/depositos-plazos-historico.model.ts"],
+      "evidence": ["El dashboard reutiliza un componente genérico para tablas, gráficos y diálogo de detalle.", "Existen pruebas unitarias para el componente genérico."],
+      "labels": ["depositos-plazo", "dashboard", "frontend"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-44",
+          "title": "Construir dashboard reutilizable de depósitos a plazo",
+          "description": "Crear la estructura común para las páginas de histórico y métricas del módulo.",
+          "activity": {
+            "objective": "Presentar la información de depósitos a plazo con una experiencia visual uniforme.",
+            "summary": "Se construyó un dashboard compartido para coordinar consulta, filtros, indicadores, tablas y gráficos de depósitos a plazo.",
+            "implementation": { "frontend": ["Se creó DepositosPlazosDashboardComponent como contenedor de las páginas de análisis.", "El componente recibe el control de consulta y el tipo de cálculo para reutilizar la misma interfaz.", "Se integraron estados de carga, ausencia de datos y errores de consulta."] },
+            "rules": ["Las visualizaciones se muestran solo después de recibir una respuesta válida de la consulta."],
+            "verification": ["Se verificó la carga del dashboard en las páginas del módulo."],
+            "period": "11 de agosto de 2026",
+            "references": ["Commit: analytic-sac 5d738ae.", "Integración: merge 61087d4 en analytic-sac (rama DEPOSITO-PLAZO-FIJO)."],
+            "worklog": { "started": "2026-08-11T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["frontend", "dashboard"]
+        },
+        {
+          "issue_key": "ANALISAC-45",
+          "title": "Implementar tablas, gráficos y detalle por período",
+          "description": "Crear el componente genérico con búsqueda, selección de datos y diálogo de detalle.",
+          "activity": {
+            "objective": "Permitir explorar los depósitos a plazo desde gráficos y tablas con detalle de los períodos seleccionados.",
+            "summary": "Se implementó el componente genérico de tabla y gráfico, junto con búsqueda, selección de series y diálogo de detalle.",
+            "implementation": { "frontend": ["Se creó DepositosPlazosGenericTableChartComponent para reutilizar la lógica de tablas y gráficos.", "Se agregó búsqueda para tablas y gráficos, además de selección de datos visibles.", "Se incorporó un diálogo con el detalle del período seleccionado y se ajustaron las opciones de gráfico.", "Se creó un pipe de valores con formato numérico de Ecuador."] },
+            "rules": ["La tabla y el gráfico se actualizan sobre el mismo conjunto de filas filtradas."],
+            "verification": ["Se agregaron pruebas unitarias y se verificó la interacción de búsqueda, series y diálogo."],
+            "period": "11 de agosto de 2026",
+            "references": ["Commits: analytic-sac de1813d y 153e6e4.", "Integración: merge 61087d4 en analytic-sac (rama DEPOSITO-PLAZO-FIJO)."],
+            "worklog": { "started": "2026-08-11T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["frontend", "graficos", "tablas"]
+        },
+        {
+          "issue_key": "ANALISAC-46",
+          "title": "Incorporar dimensiones de análisis de depósitos",
+          "description": "Presentar dimensiones de agencia, asesor, pago, ubicación y relación crediticia del depositante.",
+          "activity": {
+            "objective": "Analizar la composición de los depósitos a plazo desde perspectivas comerciales y de perfil.",
+            "summary": "Se incorporaron al modelo y dashboard las dimensiones necesarias para segmentar los depósitos y sus clientes.",
+            "implementation": { "frontend": ["Se incorporaron agencia, asesor, periodicidad y tipo de pago, condición, período de plazo y estado.", "Se añadieron provincia, cantón y parroquia para el análisis geográfico.", "Se integraron tiene préstamo, cantidad de préstamos, tipo de préstamo y producto como dimensiones de relación crediticia.", "Se preparó el componente genérico para mostrar operaciones además del saldo."] },
+            "rules": ["Los datos faltantes se muestran con valores controlados para no interrumpir los filtros o gráficos."],
+            "verification": ["Se verificó la disponibilidad de las dimensiones en modelos, filtros y visualizaciones."],
+            "period": "11 al 14 de agosto de 2026",
+            "references": ["Commits: analytic-sac 5d738ae, 7679bce y 153e6e4.", "Integración: merge 61087d4 en analytic-sac (rama DEPOSITO-PLAZO-FIJO)."],
+            "worklog": { "started": "2026-08-14T08:00:00.000-0500", "time_spent": "4d" }
+          },
+          "labels": ["frontend", "dimensiones"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-47",
+      "title": "Analizar montos, tasas y plazos promedio de depósitos",
+      "description": "Ofrecer indicadores y visualizaciones de saldo, tasas y plazos promedio de los depósitos a plazo.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar montos, tasas y plazos promedio de los depósitos a plazo para evaluar sus condiciones financieras por las dimensiones disponibles.\n\nLa solución deberá reutilizar el dashboard y filtros del módulo, habilitar las páginas de cálculo correspondientes y exponer las categorías de tasas y plazos requeridas para cada visualización.",
+      "historical_dates": { "start": "2026-08-11", "end": "2026-08-14" },
+      "repositories": ["analytic-sac", "DataSacCore"],
+      "commits": ["analytic-sac: 5d738ae, 7679bce, 94a007c, d626f22", "DataSacCore: bbccf28"],
+      "files": ["analytic-sac/src/app/features/depositos-plazos/pages/", "analytic-sac/src/app/features/depositos-plazos/shared/depositos-plazos-calculo.config.ts", "DataSacCore/app/modules/analytic/inversiones/schemas.py"],
+      "evidence": ["El modelo expone tasa efectiva, componentes entero/decimal, plazo en días, saldo y operaciones.", "El frontend habilita páginas específicas de montos, tasas y plazos promedio."],
+      "labels": ["depositos-plazo", "metricas", "frontend", "backend"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-48",
+          "title": "Crear páginas de métricas promedio de depósitos",
+          "description": "Incorporar las páginas y controles de monto, tasa y plazo promedio reutilizando el dashboard.",
+          "activity": {
+            "objective": "Permitir que el usuario analice las condiciones financieras promedio de los depósitos a plazo.",
+            "summary": "Se habilitaron páginas específicas para montos, tasas y plazos promedio usando el dashboard compartido.",
+            "implementation": { "frontend": ["Se crearon las páginas de montos promedio, tasas promedio y plazo promedio.", "Se agregaron servicios de control para aislar el estado de cada cálculo.", "Se configuraron títulos, formatos y modos de cálculo reutilizables para las visualizaciones."] },
+            "rules": ["Cada página utiliza el mismo rango y filtros, pero aplica su propio cálculo y formato de valor."],
+            "verification": ["Se verificó la carga de las tres rutas de métricas y su integración con el dashboard."],
+            "period": "11 de agosto de 2026",
+            "references": ["Commit: analytic-sac 5d738ae.", "Integración: merge 61087d4 en analytic-sac (rama DEPOSITO-PLAZO-FIJO)."],
+            "worklog": { "started": "2026-08-11T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["frontend", "metricas"]
+        },
+        {
+          "issue_key": "ANALISAC-49",
+          "title": "Incorporar tasas, plazos y operaciones en el modelo de análisis",
+          "description": "Ampliar los contratos y visualizaciones con las medidas necesarias para cálculos financieros.",
+          "activity": {
+            "objective": "Proveer datos suficientes para calcular y comparar indicadores de depósitos a plazo.",
+            "summary": "Se ampliaron los contratos de inversiones y los modelos del frontend con tasas, plazos, saldo y operaciones.",
+            "implementation": { "backend": ["Se actualizaron los esquemas y la normalización de datos de inversiones para incluir los campos requeridos por los reportes."], "frontend": ["Se agregaron plazo_dias, tasa_efectiva, tasa_entera, tasa_decimal, operaciones y saldo al modelo de depósitos.", "Se definieron categorías para tasas enteras y decimales que permiten agrupar las visualizaciones."] },
+            "rules": ["Los valores de tasa se clasifican en categorías consistentes antes de mostrarse en filtros o gráficos."],
+            "verification": ["Se verificó la presencia de los nuevos campos en el modelo y las opciones de tasa."],
+            "period": "14 de agosto de 2026",
+            "references": ["Commits: analytic-sac 7679bce y DataSacCore bbccf28.", "Integración: merges 61087d4 en analytic-sac y 5c58ecc en DataSacCore."],
+            "worklog": { "started": "2026-08-14T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["frontend", "backend", "tasas"]
+        },
+        {
+          "issue_key": "ANALISAC-50",
+          "title": "Mostrar operaciones junto con métricas de depósitos",
+          "description": "Incorporar la métrica de operaciones en tablas y gráficos junto con saldo y cálculos promedio.",
+          "activity": {
+            "objective": "Complementar el análisis financiero con la cantidad de operaciones que representa cada resultado.",
+            "summary": "Se ajustaron las filas y el componente genérico para visualizar operaciones junto con los valores financieros.",
+            "implementation": { "frontend": ["Se agregó totalValorBase y operaciones a las filas utilizadas por gráficos y tablas.", "Se eliminó la implementación separada de operaciones para integrarla al componente genérico.", "Se actualizaron las pruebas del componente para cubrir la selección de métricas."] },
+            "rules": ["La métrica de operaciones se mantiene asociada al mismo filtro y período que el valor financiero presentado."],
+            "verification": ["Se verificó la visualización de operaciones en tablas y gráficos."],
+            "period": "14 de agosto de 2026",
+            "references": ["Commits: analytic-sac 94a007c, d626f22 y 153e6e4.", "Integración: merge 61087d4 en analytic-sac (rama DEPOSITO-PLAZO-FIJO)."],
+            "worklog": { "started": "2026-08-14T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["frontend", "operaciones"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-51",
+      "title": "Filtrar y optimizar consultas de depósitos a plazo",
+      "description": "Permitir filtros dependientes y optimizar las consultas históricas mediante normalización de fechas y caché.",
+      "jira_description": "Como usuario de Analytic SAC, quiero refinar los depósitos a plazo mediante filtros relacionados y obtener consultas históricas de forma eficiente para enfocar el análisis en la información relevante.\n\nLa solución deberá actualizar las opciones disponibles según los filtros anteriores, manejar fechas mensuales de forma consistente y reutilizar respuestas históricas cuando sea seguro hacerlo.",
+      "historical_dates": { "start": "2026-08-12", "end": "2026-08-14" },
+      "repositories": ["analytic-sac"],
+      "commits": ["analytic-sac: 00e0881, bdeab19, 7679bce, 153e6e4"],
+      "files": ["analytic-sac/src/app/features/depositos-plazos/shared/services/depositos-plazos-control-base.service.ts", "analytic-sac/src/app/features/depositos-plazos/shared/services/depositos-plazos-http.service.ts", "analytic-sac/src/app/features/depositos-plazos/shared/depositos-plazos-filtros.config.ts"],
+      "evidence": ["Las opciones de filtro se recalculan desde las filas ya filtradas.", "El servicio HTTP conserva en caché por una hora las consultas históricas que no incluyen el día actual."],
+      "labels": ["depositos-plazo", "filtros", "frontend"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-52",
+          "title": "Implementar filtros dependientes de depósitos a plazo",
+          "description": "Permitir filtrar por agencia, asesor, forma de pago, condición, plazo, ubicación y relación crediticia.",
+          "activity": {
+            "objective": "Reducir el resultado de depósitos a plazo según los atributos que necesita analizar el usuario.",
+            "summary": "Se implementaron filtros encadenados de agencia y asesor, junto con filtros adicionales para las dimensiones del depósito y del cliente.",
+            "implementation": { "frontend": ["Se agregó selección múltiple de agencias y asesores con opciones dependientes.", "Se definió la configuración de filtros para pago, condición, período de plazo, tasas, estado, ubicación y relación crediticia.", "Los campos tipo_prestamo y producto se manejan como listas para admitir múltiples valores por depósito.", "Se eliminan selecciones que dejan de estar disponibles después de cambiar un filtro superior."] },
+            "rules": ["El modo consolidado no limita el resultado por agencia.", "Los filtros vacíos no excluyen filas de la consulta."],
+            "verification": ["Se verificó el recalculo de opciones y la combinación de filtros adicionales."],
+            "period": "12 al 14 de agosto de 2026",
+            "references": ["Commits: analytic-sac 7679bce y 153e6e4.", "Integración: merge 61087d4 en analytic-sac (rama DEPOSITO-PLAZO-FIJO)."],
+            "worklog": { "started": "2026-08-14T08:00:00.000-0500", "time_spent": "3d" }
+          },
+          "labels": ["frontend", "filtros"]
+        },
+        {
+          "issue_key": "ANALISAC-53",
+          "title": "Normalizar fechas mensuales de consulta",
+          "description": "Ajustar la selección de fechas para consultar el último día de los meses cerrados y el día actual cuando corresponda.",
+          "activity": {
+            "objective": "Asegurar que las consultas mensuales usen el corte correcto de cada período.",
+            "summary": "Se ajustó el formato de fechas y la preparación de la fecha final enviada a la consulta histórica.",
+            "implementation": { "frontend": ["Los selectores de fecha se configuraron en vista mensual y formato año-mes.", "La fecha final de un mes cerrado se transforma al último día calendario del mes.", "Cuando el rango incluye el mes actual se mantiene el día actual para que la API consulte el corte operativo."] },
+            "rules": ["La fecha final no puede ser anterior a la inicial ni posterior al día actual."],
+            "verification": ["Se verificaron consultas de meses cerrados y del mes actual."],
+            "period": "12 de agosto de 2026",
+            "references": ["Commits: analytic-sac 00e0881 y bdeab19.", "Integración: merge 61087d4 en analytic-sac (rama DEPOSITO-PLAZO-FIJO)."],
+            "worklog": { "started": "2026-08-12T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["frontend", "fechas"]
+        },
+        {
+          "issue_key": "ANALISAC-54",
+          "title": "Implementar caché de consultas históricas",
+          "description": "Reutilizar temporalmente respuestas de períodos históricos y evitar almacenar consultas que incluyen el día actual.",
+          "activity": {
+            "objective": "Mejorar el tiempo de respuesta del dashboard sin comprometer la actualidad de la información operativa.",
+            "summary": "Se incorporó caché en el cliente HTTP para consultas históricas y se excluyeron los rangos con la fecha actual.",
+            "implementation": { "frontend": ["DepositosPlazosHttpService conserva respuestas por rango durante una hora mediante shareReplay.", "La caché se invalida al forzar actualización, ante errores o cuando se solicita un rango que incluye el día actual.", "Se agregó una operación para invalidar una consulta específica o todas las entradas de caché."] },
+            "rules": ["Los datos que incluyen el día actual siempre se solicitan nuevamente a la API.", "Las respuestas erróneas no permanecen en caché."],
+            "verification": ["Se verificó la reutilización de consultas históricas y la invalidación de rangos actuales."],
+            "period": "12 de agosto de 2026",
+            "references": ["Commit: analytic-sac bdeab19.", "Integración: merge 61087d4 en analytic-sac (rama DEPOSITO-PLAZO-FIJO)."],
+            "worklog": { "started": "2026-08-12T08:00:00.000-0500", "time_spent": "1d" }
+          },
+          "labels": ["frontend", "rendimiento"]
+        }
+      ]
+    }
+  ]
+}

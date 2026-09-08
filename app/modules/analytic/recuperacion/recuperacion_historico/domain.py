@@ -11,6 +11,7 @@ class RecuperacionEtiquetada:
     valor_recuperado: float
     agencia: str = "SIN DATOS"
     asesor: str = "SIN DATOS"
+    cargo_asesor_cobro: str = "SIN DATOS"
     abogado_externo: str = "SIN DATOS"
     nombre_cobranza_apoyo: str = "SIN DATOS"
     estado_prestamo_anterior_cobro: str = "SIN DATOS"

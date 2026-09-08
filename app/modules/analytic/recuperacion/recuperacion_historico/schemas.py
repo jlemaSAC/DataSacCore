@@ -68,6 +68,7 @@ class RecuperacionEtiquetadaOut(BaseModel):
 class PrestamoRecuperacionOut(BaseModel):
     condicion: str = Field(serialization_alias="co")
     tipo_prestamo: str = Field(serialization_alias="tp")
+    cargo_asesor_cobro: str = Field(serialization_alias="cac")
     producto: str = Field(serialization_alias="pr")
     segmento: str = Field(serialization_alias="sg")
     provincia: str = Field(serialization_alias="pv")

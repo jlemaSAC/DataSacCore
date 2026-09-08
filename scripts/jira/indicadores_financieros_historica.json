@@ -1,0 +1,307 @@
+{
+  "epic": {
+    "issue_key": "ANALISAC-101",
+    "title": "Análisis de indicadores financieros",
+    "description": "Proveer indicadores financieros de liquidez, solvencia, calidad de activos, rentabilidad y eficiencia.",
+    "jira_description": "Esta épica habilitará el análisis de indicadores financieros en Analytic SAC. Permitirá consultar resultados a una fecha de corte y su evolución histórica mensual o diaria, con visualizaciones, niveles de riesgo y exportación de resultados cuando corresponda.",
+    "labels": ["indicadores-financieros", "analitica"]
+  },
+  "stories": [
+    {
+      "issue_key": "ANALISAC-102",
+      "title": "Acceder a los indicadores financieros desde el menú analítico",
+      "description": "Incorporar las rutas y pantallas de los indicadores financieros dentro de Analytic SAC.",
+      "jira_description": "Como usuario autorizado de Analytic SAC, quiero acceder a las secciones de indicadores financieros desde el menú analítico para consultar cada grupo de indicadores disponible.",
+      "labels": ["indicadores-financieros", "frontend", "navegacion"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-103",
+          "title": "Configurar estructura, rutas y conexión del módulo",
+          "description": "Crear la estructura de páginas, rutas protegidas y la conexión con la API analítica.",
+          "activity": {
+            "objective": "Incorporar el módulo de indicadores financieros en la navegación de Analytic SAC.",
+            "summary": "Se creó la estructura inicial del módulo, se integraron sus rutas al menú analítico y se ajustó la configuración de conexión con DataSacCore.",
+            "implementation": {
+              "frontend": [
+                "Se creó el módulo indicadores-financieros, sus proveedores y rutas cargadas bajo demanda para liquidez, solvencia, calidad de activos, rentabilidad y eficiencia.",
+                "Las rutas se protegieron con menuRouteGuard para respetar los permisos de navegación asignados.",
+                "Se actualizaron la configuración de entornos, el cliente de menú analítico y la definición final de rutas."
+              ],
+              "backend": [
+                "Se registraron los routers de los indicadores en el agrupador analítico para exponerlos desde DataSacCore."
+              ]
+            },
+            "rules": [
+              "El acceso a cada pantalla depende de la ruta de menú habilitada para el usuario.",
+              "La carga de cada página se realiza bajo demanda al abrir su ruta."
+            ],
+            "verification": [
+              "Se verificó la navegación entre las cinco secciones y la comunicación con la API."
+            ],
+            "period": "5 de junio al 11 de agosto de 2026",
+            "references": [
+              "Commits: analytic-sac 814386c, 6f6e974 y 682bfa8.",
+              "Referencia de integración: DataSacCore c3e0ef2."
+            ],
+            "worklog": {"started": "2026-08-11T08:00:00.000-0500", "time_spent": "2d"}
+          },
+          "labels": ["frontend", "rutas"]
+        },
+        {
+          "issue_key": "ANALISAC-104",
+          "title": "BUG: Corregir encabezado redundante del menú de indicadores",
+          "description": "Eliminar la etiqueta duplicada presentada en el encabezado del menú del módulo.",
+          "activity": {
+            "objective": "Corregir la presentación del encabezado de indicadores financieros.",
+            "summary": "Se eliminó una etiqueta redundante en el encabezado del menú para mostrar una navegación consistente.",
+            "implementation": {"frontend": ["Se ajustó el encabezado de la sección de menú analítico asociado a indicadores financieros."]},
+            "verification": ["Se comprobó que el encabezado ya no muestra la etiqueta repetida."],
+            "period": "8 de junio de 2026",
+            "references": ["Commit: analytic-sac b292ae5 (incluye la corrección del encabezado)."],
+            "worklog": {"started": "2026-06-08T08:00:00.000-0500", "time_spent": "1d"}
+          },
+          "labels": ["bug", "frontend", "menu"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-105",
+      "title": "Consultar indicadores de liquidez",
+      "description": "Calcular y visualizar indicadores de liquidez a fecha de corte y en series históricas.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar indicadores de liquidez por agencia y período para analizar la disponibilidad de recursos y el cumplimiento de obligaciones de corto plazo.",
+      "labels": ["indicadores-financieros", "liquidez"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-106",
+          "title": "Implementar consulta y visualización histórica de liquidez",
+          "description": "Crear endpoints, cálculos, filtros, tablas, gráficos y niveles de riesgo para liquidez.",
+          "activity": {
+            "objective": "Ofrecer indicadores de liquidez a fecha de corte e históricos mensuales y diarios.",
+            "summary": "Se implementó el cálculo de liquidez basado en saldos contables y su presentación mediante pestañas de consulta, gráficos, tablas y alertas de riesgo.",
+            "implementation": {
+              "backend": [
+                "Se crearon los endpoints de fecha de corte, histórico mensual e histórico diario bajo /indicadores-financieros/indicadores-de-liquidez.",
+                "El servicio consulta saldos contables neteados y calcula ocho indicadores, incluidos liquidez de primera y segunda línea.",
+                "Se incorporaron esquemas, documentación y pruebas para las consultas históricas."
+              ],
+              "frontend": [
+                "Se desarrollaron las pestañas de fecha de corte, histórico mensual e histórico diario con sus controles de filtros y resultados.",
+                "Se agregaron configuración de indicadores, tablas, gráficos y badge de riesgo para interpretar los resultados."
+              ]
+            },
+            "rules": [
+              "La agencia debe ser válida; las consultas históricas no aceptan rangos invertidos ni períodos futuros.",
+              "Los cortes mensuales usan el último día del mes y el período vigente usa la fecha actual."
+            ],
+            "verification": ["Se cubrieron los históricos de liquidez con pruebas de backend y se verificó la visualización de tabs y gráficos."],
+            "period": "18 de junio al 2 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore 13672b6, 6ea227c y b2afe5a; analytic-sac 36ea5e9, 827c3c8, 4c5a180 y 646f3a5.",
+              "Integraciones: merges ce77a8e y 3d833af (INDICADORES-FINANCIEROS)."
+            ],
+            "worklog": {"started": "2026-07-02T08:00:00.000-0500", "time_spent": "3d"}
+          },
+          "labels": ["backend", "frontend", "liquidez", "historico"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-107",
+      "title": "Consultar indicadores de solvencia",
+      "description": "Calcular y visualizar solvencia, patrimonio técnico y activos ponderados por riesgo.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar los indicadores de solvencia por agencia y período para evaluar la suficiencia patrimonial y la exposición al riesgo.",
+      "labels": ["indicadores-financieros", "solvencia"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-108",
+          "title": "Implementar consulta y visualización histórica de solvencia",
+          "description": "Crear cálculos, fuentes de datos, endpoints y paneles históricos de solvencia.",
+          "activity": {
+            "objective": "Disponibilizar la solvencia y sus componentes a una fecha de corte y en series históricas.",
+            "summary": "Se implementó el cálculo de solvencia con patrimonio técnico, provisiones, deficiencia y activos ponderados por riesgo; se añadió su exploración histórica.",
+            "implementation": {
+              "backend": [
+                "Se habilitaron endpoints de corte, histórico mensual y diario bajo /indicadores-financieros/solvencia.",
+                "El servicio integra saldos contables con repositorios SQL y MongoDB para obtener información complementaria de solvencia.",
+                "Se incorporó la utilidad compartida para construir fechas históricas y pruebas de los endpoints."
+              ],
+              "frontend": [
+                "Se crearon las pestañas de corte e históricos, controles de período, tablas, gráficos y configuración de indicadores.",
+                "Se añadieron badges de riesgo y el componente de gráfica tipo gauge para representar los niveles de solvencia."
+              ]
+            },
+            "rules": [
+              "No se permiten fechas de corte futuras ni períodos históricos posteriores al mes vigente.",
+              "La deficiencia se normaliza como valor no negativo antes del cálculo."
+            ],
+            "verification": ["Se añadieron pruebas de históricos de solvencia y se verificaron filtros, tablas y niveles de riesgo en frontend."],
+            "period": "8 de junio al 2 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore c3e0ef2; analytic-sac 1cf5e1b, b292ae5 y 715ab1c.",
+              "Integraciones: merges ce77a8e y 3d833af (INDICADORES-FINANCIEROS)."
+            ],
+            "worklog": {"started": "2026-07-02T08:00:00.000-0500", "time_spent": "3d"}
+          },
+          "labels": ["backend", "frontend", "solvencia", "historico"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-109",
+      "title": "Consultar indicadores de calidad de activos",
+      "description": "Calcular y visualizar morosidad, cobertura y composición de cartera.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar los indicadores de calidad de activos por agencia y período para evaluar morosidad, cobertura y exposición de la cartera.",
+      "labels": ["indicadores-financieros", "calidad-activos"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-110",
+          "title": "Implementar consulta y visualización histórica de calidad de activos",
+          "description": "Crear endpoints, cálculos, filtros, tablas, gráficos y riesgos de calidad de activos.",
+          "activity": {
+            "objective": "Permitir analizar la calidad de activos mediante indicadores de cartera y cobertura.",
+            "summary": "Se implementaron indicadores de morosidad, activos improductivos, cartera refinanciada, cartera bruta y cobertura, junto con su navegación histórica.",
+            "implementation": {
+              "backend": [
+                "Se crearon los endpoints de corte, histórico mensual y diario bajo /indicadores-financieros/calidad-de-activos.",
+                "El servicio calcula morosidad ampliada por segmento, cobertura de cartera en riesgo y otros ratios desde saldos contables neteados.",
+                "Se agregaron esquemas, documentación y pruebas para consultas históricas."
+              ],
+              "frontend": [
+                "Se construyeron la página, cliente HTTP, interfaces, controles de filtros y resumen de calidad de activos.",
+                "Se agregaron tabs históricos, tablas, gráficos, configuración de indicadores y presentación de riesgo."
+              ]
+            },
+            "rules": [
+              "Los períodos sin saldo se devuelven identificados para evitar interpretar datos inexistentes como cero.",
+              "Las divisiones de ratios manejan denominadores nulos o cero."
+            ],
+            "verification": ["Se verificaron los históricos mediante pruebas y la presentación de gráficos, tablas y riesgo."],
+            "period": "17 de junio al 2 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore dea18b0 y 91fe97b; analytic-sac 3531b3c, 9eb2f3d y e55d3e2.",
+              "Integraciones: merges ce77a8e y 3d833af (INDICADORES-FINANCIEROS)."
+            ],
+            "worklog": {"started": "2026-07-02T08:00:00.000-0500", "time_spent": "3d"}
+          },
+          "labels": ["backend", "frontend", "calidad-activos", "historico"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-111",
+      "title": "Consultar indicadores de rentabilidad",
+      "description": "Calcular y visualizar rentabilidad, ROA, ROE, gastos y costo de fondeo.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar indicadores de rentabilidad por agencia y período para analizar el desempeño financiero y la evolución de los costos y retornos.",
+      "labels": ["indicadores-financieros", "rentabilidad"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-112",
+          "title": "Implementar consulta y visualización histórica de rentabilidad",
+          "description": "Crear cálculos con saldos promedio, endpoints y paneles históricos de rentabilidad.",
+          "activity": {
+            "objective": "Disponibilizar métricas de rentabilidad a una fecha y para series mensuales o diarias.",
+            "summary": "Se implementaron ROA, ROE, gasto operacional, gasto sobre cartera y costo promedio de fondeo, incluyendo cálculos con saldos promedio anuales.",
+            "implementation": {
+              "backend": [
+                "Se expusieron endpoints de corte, histórico mensual y diario bajo /indicadores-financieros/rentabilidad.",
+                "El servicio obtiene saldos contables, calcula los promedios necesarios por año y retorna períodos sin datos cuando corresponde.",
+                "Se añadieron documentación y pruebas para los históricos de rentabilidad."
+              ],
+              "frontend": [
+                "Se crearon la página, cliente HTTP, interfaces y pestañas de fecha de corte, histórico mensual e histórico diario.",
+                "Se incorporaron gráficos, tablas, configuración de métricas y badges de riesgo para los indicadores de rentabilidad."
+              ]
+            },
+            "rules": [
+              "Los saldos promedio se calculan dentro del año de cada fecha de corte.",
+              "Los rangos históricos se validan antes de ejecutar la consulta."
+            ],
+            "verification": ["Se cubrieron los históricos con pruebas y se verificó el dashboard de rentabilidad."],
+            "period": "18 de junio al 2 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore 9375046 y 18d2e01; analytic-sac 8e3d2bc y 687aa04.",
+              "Integraciones: merges ce77a8e y 3d833af (INDICADORES-FINANCIEROS)."
+            ],
+            "worklog": {"started": "2026-07-02T08:00:00.000-0500", "time_spent": "3d"}
+          },
+          "labels": ["backend", "frontend", "rentabilidad", "historico"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-113",
+      "title": "Consultar indicadores de eficiencia",
+      "description": "Calcular y visualizar gastos y márgenes de eficiencia financiera.",
+      "jira_description": "Como usuario de Analytic SAC, quiero consultar indicadores de eficiencia por agencia y período para evaluar el uso de activos, patrimonio, gastos y márgenes.",
+      "labels": ["indicadores-financieros", "eficiencia"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-114",
+          "title": "Implementar consulta y visualización histórica de eficiencia",
+          "description": "Crear cálculos, endpoints y paneles históricos de indicadores de eficiencia.",
+          "activity": {
+            "objective": "Permitir el análisis histórico de eficiencia mediante gastos, márgenes y saldos promedio.",
+            "summary": "Se implementaron los indicadores de gasto operativo, gasto de personal y margen de intermediación sobre activos y patrimonio promedio.",
+            "implementation": {
+              "backend": [
+                "Se crearon los endpoints de corte, histórico mensual y diario bajo /indicadores-financieros/indicadores-de-eficiencia.",
+                "El servicio calcula indicadores a partir de saldos contables y promedios requeridos para cada fecha de corte.",
+                "Se actualizaron esquemas, documentación y pruebas de históricos."
+              ],
+              "frontend": [
+                "Se construyeron la página, servicios HTTP, controles y tabs para corte e históricos mensual y diario.",
+                "Se añadieron tablas, gráficos, configuración de indicadores y niveles de riesgo para eficiencia."
+              ]
+            },
+            "rules": [
+              "La normalización de porcentajes se aplica antes de clasificar el nivel de riesgo.",
+              "Las consultas respetan la validación central de períodos mensuales y diarios."
+            ],
+            "verification": ["Se verificaron los endpoints históricos y la presentación de resultados, gráficos y riesgos."],
+            "period": "18 de junio al 2 de julio de 2026",
+            "references": [
+              "Commits: DataSacCore 0d62161 y 71dd208; analytic-sac 8e3d2bc y 687aa04.",
+              "Integraciones: merges ce77a8e y 3d833af (INDICADORES-FINANCIEROS)."
+            ],
+            "worklog": {"started": "2026-07-02T08:00:00.000-0500", "time_spent": "3d"}
+          },
+          "labels": ["backend", "frontend", "eficiencia", "historico"]
+        }
+      ]
+    },
+    {
+      "issue_key": "ANALISAC-115",
+      "title": "Exportar resultados históricos de indicadores financieros",
+      "description": "Generar archivos Excel con los resultados y riesgos de los indicadores históricos.",
+      "jira_description": "Como usuario de Analytic SAC, quiero exportar los resultados históricos de los indicadores financieros para compartirlos y analizarlos fuera de la aplicación.",
+      "labels": ["indicadores-financieros", "exportacion", "excel"],
+      "tasks": [
+        {
+          "issue_key": "ANALISAC-116",
+          "title": "Implementar exportación Excel para consultas históricas",
+          "description": "Crear servicios de exportación y acciones en las vistas históricas de indicadores.",
+          "activity": {
+            "objective": "Permitir descargar las consultas históricas de indicadores financieros en formato Excel.",
+            "summary": "Se añadieron exportadores reutilizables para incluir resultados históricos, encabezados y presentación de riesgo en archivos Excel.",
+            "implementation": {
+              "frontend": [
+                "Se implementaron servicios de exportación con ExcelJS para liquidez, solvencia, calidad de activos, rentabilidad y eficiencia.",
+                "Se conectaron las acciones de exportación en los resultados de histórico mensual y diario.",
+                "Se incorporó la dependencia requerida y se ajustó la estructura de componentes para reutilizar la funcionalidad."
+              ]
+            },
+            "rules": ["La exportación usa los datos y la clasificación de riesgo que se muestran en la consulta vigente."],
+            "verification": ["Se revisó la generación de archivos desde las vistas históricas de los cinco grupos de indicadores."],
+            "period": "2 de julio de 2026",
+            "references": [
+              "Commit: analytic-sac 7c5b4a8.",
+              "Optimización posterior de gráficos: analytic-sac 88c02f4."
+            ],
+            "worklog": {"started": "2026-07-02T08:00:00.000-0500", "time_spent": "2d"}
+          },
+          "labels": ["frontend", "excel", "exportacion"]
+        }
+      ]
+    }
+  ]
+}
