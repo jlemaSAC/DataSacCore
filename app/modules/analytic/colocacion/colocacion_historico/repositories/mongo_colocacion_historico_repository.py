@@ -277,6 +277,8 @@ class MongoColocacionHistoricoRepository:
         dimension: DimensionFiltroColocacion,
         valor_dimension: str,
         asesores: list[str] | None = None,
+        tasa_desde: float | None = None,
+        tasa_hasta_exclusiva: float | None = None,
     ) -> list[DetalleColocacion]:
         """Devuelve operaciones históricas con el mismo corte del resumen de Negocios."""
         if not cortes:
@@ -303,10 +305,21 @@ class MongoColocacionHistoricoRepository:
             "tasa_real": _numero_valido("TasaAnual"),
         }
         valor_dimension_normalizado: str | float | None = valor_dimension.strip().upper()
-        if dimension in {"tasa_normal", "tasa_real"}:
+        usa_rango_tasa_real = (
+            dimension == "tasa_real" and tasa_desde is not None and tasa_hasta_exclusiva is not None
+        )
+        if dimension in {"tasa_normal", "tasa_real"} and not usa_rango_tasa_real:
             valor_dimension_normalizado = (
                 None if valor_dimension.strip().upper() == "SIN DATOS" else float(valor_dimension)
             )
+        filtro_dimension: dict[str, Any] = {"$eq": [dimensiones[dimension], valor_dimension_normalizado]}
+        if usa_rango_tasa_real:
+            filtro_dimension = {
+                "$and": [
+                    {"$gte": [dimensiones["tasa_real"], tasa_desde]},
+                    {"$lt": [dimensiones["tasa_real"], tasa_hasta_exclusiva]},
+                ]
+            }
         condiciones = [
             {
                 "$in": [
@@ -314,7 +327,7 @@ class MongoColocacionHistoricoRepository:
                     [agencia.strip().upper() for agencia in agencias],
                 ]
             },
-            {"$eq": [dimensiones[dimension], valor_dimension_normalizado]},
+            filtro_dimension,
         ]
         if asesores:
             condiciones.append(

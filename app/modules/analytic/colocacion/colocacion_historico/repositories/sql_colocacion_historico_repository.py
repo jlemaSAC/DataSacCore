@@ -197,6 +197,8 @@ class SqlColocacionHistoricoRepository:
         dimension: DimensionFiltroColocacion,
         valor_dimension: str,
         asesores: list[str] | None = None,
+        tasa_desde: float | None = None,
+        tasa_hasta_exclusiva: float | None = None,
     ) -> list[DetalleColocacion]:
         """Obtiene el detalle SQL del día actual, con la misma semántica del resumen."""
         agencia = _texto_sql(Agencia.nombre)
@@ -218,12 +220,17 @@ class SqlColocacionHistoricoRepository:
         }
 
         valor_dimension_normalizado: str | float | None = valor_dimension.strip().upper()
-        if dimension in {"tasa_normal", "tasa_real"}:
+        usa_rango_tasa_real = (
+            dimension == "tasa_real" and tasa_desde is not None and tasa_hasta_exclusiva is not None
+        )
+        if dimension in {"tasa_normal", "tasa_real"} and not usa_rango_tasa_real:
             valor_dimension_normalizado = (
                 None if valor_dimension.strip().upper() == "SIN DATOS" else float(valor_dimension)
             )
 
         filtro_dimension = dimensiones[dimension] == valor_dimension_normalizado
+        if usa_rango_tasa_real:
+            filtro_dimension = (Prestamo.tea >= tasa_desde) & (Prestamo.tea < tasa_hasta_exclusiva)
         if dimension in {"tasa_normal", "tasa_real"} and valor_dimension_normalizado is None:
             filtro_dimension = or_(dimensiones[dimension].is_(None), dimensiones[dimension] < 0)
 

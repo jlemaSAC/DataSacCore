@@ -222,6 +222,8 @@ class ColocacionHistoricoService:
         dimension: DimensionFiltroColocacion,
         valor_dimension: str,
         asesores: list[str] | None = None,
+        tasa_desde: float | None = None,
+        tasa_hasta_exclusiva: float | None = None,
     ) -> list[DetalleColocacion]:
         """Obtiene operaciones del detalle usando exactamente el corte híbrido del resumen."""
         segmentos = self._segmentar_rango(fecha_desde, fecha_hasta)
@@ -232,6 +234,8 @@ class ColocacionHistoricoService:
             dimension,
             valor_dimension,
             asesores,
+            tasa_desde,
+            tasa_hasta_exclusiva,
         )
         if fecha_desde <= fecha_hoy <= fecha_hasta:
             detalles.extend(
@@ -242,6 +246,8 @@ class ColocacionHistoricoService:
                     dimension,
                     valor_dimension,
                     asesores,
+                    tasa_desde,
+                    tasa_hasta_exclusiva,
                 )
             )
         return sorted(

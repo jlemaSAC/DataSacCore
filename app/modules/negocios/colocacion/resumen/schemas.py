@@ -13,6 +13,8 @@ class InputResumenColocacion(BaseModel):
     def validar_rango(self) -> "InputResumenColocacion":
         if self.fecha_fin < self.fecha_inicio:
             raise ValueError("fecha_fin no puede ser menor que fecha_inicio.")
+        if (self.fecha_inicio.year, self.fecha_inicio.month) != (self.fecha_fin.year, self.fecha_fin.month):
+            raise ValueError("El rango de consulta debe estar dentro del mismo mes.")
         if any(not agencia.strip() for agencia in self.agencias):
             raise ValueError("agencias no puede contener nombres vacíos.")
         return self
@@ -61,6 +63,8 @@ class InputDetalleResumenColocacion(BaseModel):
     fecha_fin: date = Field(examples=["2026-08-31"])
     dimension: DimensionDetalleColocacion
     valor_dimension: str = Field(min_length=1, examples=["CREDI AGIL CONSUMO"])
+    tasa_desde: float | None = Field(default=None, ge=0, examples=[4])
+    tasa_hasta_exclusiva: float | None = Field(default=None, gt=0, examples=[5])
     asesores: list[str] = Field(default_factory=list)
     pagina: int = Field(default=1, ge=1)
     tamano_pagina: int = Field(default=100, ge=1, le=500)
@@ -69,11 +73,25 @@ class InputDetalleResumenColocacion(BaseModel):
     def validar_filtros(self) -> "InputDetalleResumenColocacion":
         if self.fecha_fin < self.fecha_inicio:
             raise ValueError("fecha_fin no puede ser menor que fecha_inicio.")
+        if (self.fecha_inicio.year, self.fecha_inicio.month) != (self.fecha_fin.year, self.fecha_fin.month):
+            raise ValueError("El rango de consulta debe estar dentro del mismo mes.")
         if any(not agencia.strip() for agencia in self.agencias):
             raise ValueError("agencias no puede contener nombres vacíos.")
         if not self.valor_dimension.strip():
             raise ValueError("valor_dimension no puede estar vacío.")
-        if self.dimension in {"tasa_normal", "tasa_real"} and self.valor_dimension.strip().upper() != "SIN DATOS":
+        tiene_rango_tasa_real = self.tasa_desde is not None or self.tasa_hasta_exclusiva is not None
+        if tiene_rango_tasa_real:
+            if self.dimension != "tasa_real":
+                raise ValueError("El rango de tasa solo aplica para la dimensión tasa_real.")
+            if self.tasa_desde is None or self.tasa_hasta_exclusiva is None:
+                raise ValueError("tasa_desde y tasa_hasta_exclusiva son requeridas para el rango de tasa real.")
+            if self.tasa_hasta_exclusiva <= self.tasa_desde:
+                raise ValueError("tasa_hasta_exclusiva debe ser mayor que tasa_desde.")
+        if (
+            self.dimension in {"tasa_normal", "tasa_real"}
+            and not tiene_rango_tasa_real
+            and self.valor_dimension.strip().upper() != "SIN DATOS"
+        ):
             try:
                 valor_tasa = float(self.valor_dimension)
             except ValueError as exc:

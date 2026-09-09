@@ -118,6 +118,8 @@ class ResumenColocacionService:
                 input_data.dimension,
                 input_data.valor_dimension.strip(),
                 asesores,
+                input_data.tasa_desde,
+                input_data.tasa_hasta_exclusiva,
             )
             inicio = (input_data.pagina - 1) * input_data.tamano_pagina
             items = detalles[inicio : inicio + input_data.tamano_pagina]

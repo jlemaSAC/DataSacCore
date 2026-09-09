@@ -68,6 +68,7 @@ class FakeColocacionHistoricoService:
     def __init__(self) -> None:
         self.llamadas: list[tuple[date, date, date, list[str]]] = []
         self.llamadas_detalle: list[tuple] = []
+        self.rango_tasa_real: tuple[float | None, float | None] | None = None
 
     def obtener_agrupaciones_resumen_por_rango(self, fecha_inicio, fecha_fin, fecha_hoy, agencias):
         self.llamadas.append((fecha_inicio, fecha_fin, fecha_hoy, agencias))
@@ -90,6 +91,8 @@ class FakeColocacionHistoricoService:
         dimension,
         valor_dimension,
         asesores,
+        tasa_desde=None,
+        tasa_hasta_exclusiva=None,
     ):
         self.llamadas_detalle.append(
             (
@@ -102,6 +105,7 @@ class FakeColocacionHistoricoService:
                 asesores,
             )
         )
+        self.rango_tasa_real = (tasa_desde, tasa_hasta_exclusiva)
         return [
             DetalleColocacion(
                 numero_cliente="99014201",
@@ -169,15 +173,29 @@ def test_servicio_rechaza_fecha_final_posterior_a_fecha_del_sistema() -> None:
 
     with pytest.raises(HTTPException, match="fecha_fin no puede ser posterior") as error:
         service.obtener_resumen(
-            InputResumenColocacion(
-                agencias=["MATRIZ"],
-                fecha_inicio=date(2026, 8, 1),
-                fecha_fin=date(2026, 9, 1),
+                InputResumenColocacion(
+                    agencias=["MATRIZ"],
+                    fecha_inicio=date(2026, 9, 1),
+                    fecha_fin=date(2026, 9, 2),
             ),
             auth_context(),
         )
 
     assert error.value.status_code == 400
+
+
+@pytest.mark.parametrize("modelo", [InputResumenColocacion, InputDetalleResumenColocacion])
+def test_consulta_rechaza_rango_que_cruza_de_mes(modelo) -> None:
+    datos = {
+        "agencias": ["MATRIZ"],
+        "fecha_inicio": date(2026, 8, 31),
+        "fecha_fin": date(2026, 9, 1),
+    }
+    if modelo is InputDetalleResumenColocacion:
+        datos.update({"dimension": "agencia", "valor_dimension": "MATRIZ"})
+
+    with pytest.raises(ValueError, match="dentro del mismo mes"):
+        modelo(**datos)
 
 
 def test_detalle_acepta_tasas_numericas_y_sin_datos() -> None:
@@ -198,6 +216,41 @@ def test_detalle_acepta_tasas_numericas_y_sin_datos() -> None:
 
     assert tasa_real.dimension == "tasa_real"
     assert tasa_normal_sin_datos.valor_dimension == "SIN DATOS"
+
+
+def test_detalle_acepta_rango_exclusivo_de_tasa_real() -> None:
+    detalle = InputDetalleResumenColocacion(
+        agencias=["MATRIZ"],
+        fecha_inicio=date(2026, 8, 1),
+        fecha_fin=date(2026, 8, 31),
+        dimension="tasa_real",
+        valor_dimension="4% – 4.99%",
+        tasa_desde=4,
+        tasa_hasta_exclusiva=5,
+    )
+
+    assert detalle.tasa_desde == 4
+    assert detalle.tasa_hasta_exclusiva == 5
+
+
+def test_servicio_envia_rango_de_tasa_real_al_historico() -> None:
+    historico = FakeColocacionHistoricoService()
+    service = ResumenColocacionService(historico)  # type: ignore[arg-type]
+
+    service.obtener_detalle(
+        InputDetalleResumenColocacion(
+            agencias=["QUITO"],
+            fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 31),
+            dimension="tasa_real",
+            valor_dimension="4% – 4.99%",
+            tasa_desde=4,
+            tasa_hasta_exclusiva=5,
+        ),
+        auth_context(),
+    )
+
+    assert historico.rango_tasa_real == (4, 5)
 
 
 def test_endpoint_devuelve_agrupaciones_dimensionales() -> None:
