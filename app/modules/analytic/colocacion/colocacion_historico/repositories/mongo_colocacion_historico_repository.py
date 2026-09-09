@@ -14,6 +14,36 @@ from app.modules.analytic.colocacion.colocacion_historico.domain import (
 MongoDocument = dict[str, Any]
 
 
+# Esta selección sostiene exclusivamente el resumen de Negocios.  El endpoint
+# analítico conserva el conjunto dimensional completo.
+CAMPOS_DIMENSION_RESUMEN = (
+    "agencia",
+    "condicion",
+    "tipo_prestamo",
+    "producto",
+    "segmento",
+    "asesor",
+    "tasa_valor",
+    "tasa_real",
+)
+
+_VALORES_DIMENSION_NO_USADA: dict[str, str | float | int | None] = {
+    "provincia": "SIN DATOS",
+    "canton": "SIN DATOS",
+    "parroquia": "SIN DATOS",
+    "educacion": "SIN DATOS",
+    "edad": "SIN DATOS",
+    "garantia": "SIN DATOS",
+    "monto": "SIN DATOS",
+    "tasa": "SIN DATOS",
+    "tasa_valor": None,
+    "tasa_real": "SIN DATOS",
+    "tasa_real_valor": None,
+    "plazo": "SIN DATOS",
+    "plazo_valor": None,
+}
+
+
 @dataclass(frozen=True)
 class CorteMensual:
     anio: int
@@ -222,6 +252,27 @@ class MongoColocacionHistoricoRepository:
     def obtener_colocaciones_agrupadas(
         self,
         cortes: list[CorteMensual],
+        agencias: list[str] | None = None,
+    ) -> list[ColocacionAgrupada]:
+        return self._obtener_colocaciones_agrupadas(cortes, agencias)
+
+    def obtener_colocaciones_resumen_agrupadas(
+        self,
+        cortes: list[CorteMensual],
+        agencias: list[str] | None = None,
+    ) -> list[ColocacionAgrupada]:
+        """Agrupa el hecho histórico con las dimensiones que usa Negocios."""
+        return self._obtener_colocaciones_agrupadas(
+            cortes,
+            agencias,
+            CAMPOS_DIMENSION_RESUMEN,
+        )
+
+    def _obtener_colocaciones_agrupadas(
+        self,
+        cortes: list[CorteMensual],
+        agencias: list[str] | None,
+        campos_dimension: tuple[str, ...] | None = None,
     ) -> list[ColocacionAgrupada]:
         if not cortes:
             return []
@@ -314,12 +365,19 @@ class MongoColocacionHistoricoRepository:
             "plazo": _rango_plazo(),
             "plazo_valor": _plazo_dias(),
         }
+        campos = campos_dimension or tuple(dimensiones)
+        filtros: dict[str, Any] = {"EstadoPrestamo": {"$ne": "CANCELADO"}, "$or": rangos}
+        if agencias:
+            filtros["$expr"] = {
+                "$in": [_texto_normalizado("Agencia"), [agencia.strip().upper() for agencia in agencias]]
+            }
+
         pipeline: list[dict[str, Any]] = [
-            {"$match": {"EstadoPrestamo": {"$ne": "CANCELADO"}, "$or": rangos}},
+            {"$match": filtros},
             {
                 "$project": {
                     "fecha_corte": 1,
-                    **dimensiones,
+                    **{campo: dimensiones[campo] for campo in campos},
                     "deuda_inicial": {
                         "$convert": {
                             "input": "$DeudaInicial",
@@ -334,7 +392,7 @@ class MongoColocacionHistoricoRepository:
                 "$group": {
                     "_id": {
                         "fecha_corte": "$fecha_corte",
-                        **{campo: f"${campo}" for campo in dimensiones},
+                        **{campo: f"${campo}" for campo in campos},
                     },
                     "operaciones": {"$sum": 1},
                     "saldo_inicial": {"$sum": "$deuda_inicial"},
@@ -354,8 +412,10 @@ class MongoColocacionHistoricoRepository:
             if periodo is None:
                 continue
             anio, mes = periodo
-            valores = {}
+            valores = dict(_VALORES_DIMENSION_NO_USADA)
             for campo in dimensiones:
+                if campo not in campos:
+                    continue
                 if campo in {"tasa_valor", "tasa_real_valor"}:
                     valor_tasa = identificador.get(campo)
                     valores[campo] = (

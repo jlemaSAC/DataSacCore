@@ -4,11 +4,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class InputResumenColocacion(BaseModel):
-    agencia_ids: list[int] = Field(
-        min_length=1,
-        examples=[[2, 17]],
-        description="Identificadores de las agencias que se desean consultar.",
-    )
+    agencias: list[str] = Field(min_length=1, examples=[["MATRIZ", "CUENCA"]])
     fecha_inicio: date = Field(examples=["2026-08-01"])
     fecha_fin: date = Field(examples=["2026-08-31"])
 
@@ -16,24 +12,24 @@ class InputResumenColocacion(BaseModel):
     def validar_rango(self) -> "InputResumenColocacion":
         if self.fecha_fin < self.fecha_inicio:
             raise ValueError("fecha_fin no puede ser menor que fecha_inicio.")
+        if any(not agencia.strip() for agencia in self.agencias):
+            raise ValueError("agencias no puede contener nombres vacíos.")
         return self
 
 
-class FilaResumenColocacion(BaseModel):
-    id_agencia: int
+class FilaComparativaColocacion(BaseModel):
     agencia: str
-    dimension: str | None = Field(
-        default=None,
-        description="Valor del desglose; es nulo en el resumen por agencia.",
-    )
+    condicion: str
+    tipo_prestamo: str
+    producto: str
+    segmento: str
+    asesor: str
+    tasa_valor: float | None
+    tasa_real: str
     monto_colocado: float
     monto_colocado_periodo_anterior: float
+    monto_mismo_rango_mes_anterior: float
     variacion_valor: float
-    variacion_porcentaje: float | None
-    monto_mes_a_fecha: float
-    monto_mes_anterior_mismo_dia: float
-    variacion_mes_a_fecha_valor: float
-    variacion_mes_a_fecha_porcentaje: float | None
 
 
 class ResumenColocacionResponse(BaseModel):
@@ -41,12 +37,6 @@ class ResumenColocacionResponse(BaseModel):
     fecha_fin: date
     fecha_inicio_periodo_anterior: date
     fecha_fin_periodo_anterior: date
-    fecha_inicio_mes_a_fecha: date
-    fecha_fin_mes_a_fecha: date
-    fecha_inicio_mes_anterior_mismo_dia: date
-    fecha_fin_mes_anterior_mismo_dia: date
-    resumen_por_agencia: list[FilaResumenColocacion]
-    por_tipo_prestamo: list[FilaResumenColocacion]
-    por_producto: list[FilaResumenColocacion]
-    por_segmento: list[FilaResumenColocacion]
-    por_condicion: list[FilaResumenColocacion]
+    fecha_inicio_mismo_rango_mes_anterior: date
+    fecha_fin_mismo_rango_mes_anterior: date
+    agrupaciones: list[FilaComparativaColocacion]

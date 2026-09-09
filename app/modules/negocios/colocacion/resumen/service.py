@@ -1,28 +1,51 @@
 import calendar
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException
 
-from app.modules.auth.schemas import AuthContext
-from app.modules.negocios.colocacion.resumen.repositories.sql_colocacion_resumen_repository import (
-    PeriodosComparacionColocacion,
-    SqlColocacionResumenRepository,
-    TotalesColocacion,
+from app.modules.analytic.colocacion.colocacion_historico.domain import (
+    DimensionesColocacion,
 )
+from app.modules.analytic.colocacion.colocacion_historico.service import (
+    ColocacionHistoricoService,
+)
+from app.modules.auth.schemas import AuthContext
 from app.modules.negocios.colocacion.resumen.schemas import (
-    FilaResumenColocacion,
+    FilaComparativaColocacion,
     InputResumenColocacion,
     ResumenColocacionResponse,
 )
 
 
 logger = logging.getLogger("uvicorn.error")
+MAX_MESES_RANGO = 60
+
+
+@dataclass
+class _ComparativoColocacion:
+    dimensiones: DimensionesColocacion
+    saldo_inicial: float = 0.0
+    saldo_inicial_periodo_anterior: float = 0.0
+    saldo_inicial_mismo_rango_mes_anterior: float = 0.0
+
+
+@dataclass(frozen=True)
+class PeriodosComparacionColocacion:
+    actual_inicio: date
+    actual_fin: date
+    anterior_inicio: date
+    anterior_fin: date
+    mismo_rango_anterior_inicio: date
+    mismo_rango_anterior_fin: date
 
 
 class ResumenColocacionService:
-    def __init__(self, repository: SqlColocacionResumenRepository) -> None:
-        self.repository = repository
+    """Resumen comparativo construido sobre el mismo hecho dimensional de Analítica."""
+
+    def __init__(self, colocacion_historico_service: ColocacionHistoricoService) -> None:
+        self.colocacion_historico_service = colocacion_historico_service
 
     def obtener_resumen(
         self,
@@ -36,36 +59,24 @@ class ResumenColocacionService:
                 status_code=400,
                 detail="fecha_fin no puede ser posterior a la fecha del sistema.",
             )
+        if _cantidad_meses(input_data.fecha_inicio, input_data.fecha_fin) > MAX_MESES_RANGO:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El rango no puede superar {MAX_MESES_RANGO} meses.",
+            )
 
         try:
+            agencias = list(dict.fromkeys(agencia.strip() for agencia in input_data.agencias))
             periodos = self._construir_periodos(input_data.fecha_inicio, input_data.fecha_fin)
-            agencia_ids = list(dict.fromkeys(input_data.agencia_ids))
+            comparativos = self._obtener_comparativos(agencias, periodos, fecha_hoy)
             return ResumenColocacionResponse(
-                fecha_inicio=input_data.fecha_inicio,
-                fecha_fin=input_data.fecha_fin,
+                fecha_inicio=periodos.actual_inicio,
+                fecha_fin=periodos.actual_fin,
                 fecha_inicio_periodo_anterior=periodos.anterior_inicio,
                 fecha_fin_periodo_anterior=periodos.anterior_fin,
-                fecha_inicio_mes_a_fecha=periodos.mes_a_fecha_inicio,
-                fecha_fin_mes_a_fecha=periodos.mes_a_fecha_fin,
-                fecha_inicio_mes_anterior_mismo_dia=periodos.mes_anterior_inicio,
-                fecha_fin_mes_anterior_mismo_dia=periodos.mes_anterior_fin,
-                resumen_por_agencia=self._filas(
-                    self.repository.obtener_por_agencia(agencia_ids, periodos)
-                ),
-                por_tipo_prestamo=self._filas(
-                    self.repository.obtener_por_dimension(
-                        agencia_ids, periodos, "tipo_prestamo"
-                    )
-                ),
-                por_producto=self._filas(
-                    self.repository.obtener_por_dimension(agencia_ids, periodos, "producto")
-                ),
-                por_segmento=self._filas(
-                    self.repository.obtener_por_dimension(agencia_ids, periodos, "segmento")
-                ),
-                por_condicion=self._filas(
-                    self.repository.obtener_por_dimension(agencia_ids, periodos, "condicion")
-                ),
+                fecha_inicio_mismo_rango_mes_anterior=periodos.mismo_rango_anterior_inicio,
+                fecha_fin_mismo_rango_mes_anterior=periodos.mismo_rango_anterior_fin,
+                agrupaciones=self._filas_comparativas(comparativos),
             )
         except HTTPException:
             raise
@@ -76,66 +87,97 @@ class ResumenColocacionService:
                 detail="Error consultando resumen de colocacion.",
             ) from exc
 
+    def _obtener_comparativos(
+        self,
+        agencias: list[str],
+        periodos: PeriodosComparacionColocacion,
+        fecha_hoy: date,
+    ) -> dict[tuple, _ComparativoColocacion]: # type: ignore
+        rangos = (
+            ("actual", periodos.actual_inicio, periodos.actual_fin),
+            ("anterior", periodos.anterior_inicio, periodos.anterior_fin),
+            (
+                "mismo_rango_anterior",
+                periodos.mismo_rango_anterior_inicio,
+                periodos.mismo_rango_anterior_fin,
+            ),
+        )
+        comparativos: dict[tuple, _ComparativoColocacion] = {} # type: ignore
+        for nombre, fecha_inicio, fecha_fin in rangos:
+            agrupaciones = self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
+                fecha_inicio,
+                fecha_fin,
+                fecha_hoy,
+                agencias,
+            )
+            for dimensiones, agrupacion in agrupaciones.items():
+                fila = comparativos.setdefault(
+                    _clave_dimensiones(dimensiones), _ComparativoColocacion(dimensiones)
+                )
+                if nombre == "actual":
+                    fila.saldo_inicial += agrupacion.saldo_inicial
+                elif nombre == "anterior":
+                    fila.saldo_inicial_periodo_anterior += agrupacion.saldo_inicial
+                else:
+                    fila.saldo_inicial_mismo_rango_mes_anterior += agrupacion.saldo_inicial
+        return comparativos
+
     @staticmethod
     def _construir_periodos(fecha_inicio: date, fecha_fin: date) -> PeriodosComparacionColocacion:
-        mes_a_fecha_inicio = fecha_fin.replace(day=1)
-        mes_anterior_fin = mes_a_fecha_inicio - timedelta(days=1)
-        mes_anterior_inicio = mes_anterior_fin.replace(day=1)
+        mismo_rango_anterior_fin = _mover_mes(fecha_fin, -1)
+        mes_anterior_completo_fin = fecha_fin.replace(day=1) - timedelta(days=1)
         return PeriodosComparacionColocacion(
             actual_inicio=fecha_inicio,
             actual_fin=fecha_fin,
-            # El comparativo mensual usa el cierre completo del mes anterior.
-            anterior_inicio=mes_anterior_inicio,
-            anterior_fin=mes_anterior_fin,
-            mes_a_fecha_inicio=mes_a_fecha_inicio,
-            mes_a_fecha_fin=fecha_fin,
-            # El comparativo MTD llega al mismo día calendario del mes anterior.
-            mes_anterior_inicio=mes_anterior_inicio,
-            mes_anterior_fin=_mover_mes(fecha_fin, -1),
+            anterior_inicio=mes_anterior_completo_fin.replace(day=1),
+            anterior_fin=mes_anterior_completo_fin,
+            mismo_rango_anterior_inicio=_mover_mes(fecha_inicio, -1),
+            mismo_rango_anterior_fin=mismo_rango_anterior_fin,
         )
 
     @staticmethod
-    def _filas(totales: list[TotalesColocacion]) -> list[FilaResumenColocacion]:
+    def _filas_comparativas(
+        comparativos: dict[tuple, _ComparativoColocacion], # type: ignore
+    ) -> list[FilaComparativaColocacion]:
         return [
-            FilaResumenColocacion(
-                id_agencia=item.id_agencia,
-                agencia=item.agencia,
-                dimension=item.dimension,
-                monto_colocado=_monto(item.monto_colocado),
-                monto_colocado_periodo_anterior=_monto(item.monto_colocado_periodo_anterior),
-                variacion_valor=_monto(
-                    item.monto_colocado - item.monto_colocado_periodo_anterior
-                ),
-                variacion_porcentaje=_porcentaje_variacion(
-                    item.monto_colocado,
-                    item.monto_colocado_periodo_anterior,
-                ),
-                monto_mes_a_fecha=_monto(item.monto_mes_a_fecha),
-                monto_mes_anterior_mismo_dia=_monto(item.monto_mes_anterior_mismo_dia),
-                variacion_mes_a_fecha_valor=_monto(
-                    item.monto_mes_a_fecha - item.monto_mes_anterior_mismo_dia
-                ),
-                variacion_mes_a_fecha_porcentaje=_porcentaje_variacion(
-                    item.monto_mes_a_fecha,
-                    item.monto_mes_anterior_mismo_dia,
-                ),
-            )
-            for item in totales
+            _fila_comparativa(fila)
+            for _, fila in sorted(comparativos.items(), key=lambda item: _clave_dimensiones(item[1].dimensiones))
         ]
+
+def _clave_dimensiones(dimensiones: DimensionesColocacion) -> tuple: # type: ignore
+    return tuple(
+        valor
+        for campo, valor in dimensiones.__dict__.items()
+        if campo not in {"periodo", "anio", "mes"}
+    )
+
+
+def _fila_comparativa(fila: _ComparativoColocacion) -> FilaComparativaColocacion:
+    return FilaComparativaColocacion(
+        agencia=fila.dimensiones.agencia,
+        condicion=fila.dimensiones.condicion,
+        tipo_prestamo=fila.dimensiones.tipo_prestamo,
+        producto=fila.dimensiones.producto,
+        segmento=fila.dimensiones.segmento,
+        asesor=fila.dimensiones.asesor,
+        tasa_valor=fila.dimensiones.tasa_valor,
+        tasa_real=fila.dimensiones.tasa_real,
+        monto_colocado=_monto(fila.saldo_inicial),
+        monto_colocado_periodo_anterior=_monto(fila.saldo_inicial_periodo_anterior),
+        monto_mismo_rango_mes_anterior=_monto(fila.saldo_inicial_mismo_rango_mes_anterior),
+        variacion_valor=_monto(fila.saldo_inicial - fila.saldo_inicial_mismo_rango_mes_anterior),
+    )
+
+
+def _cantidad_meses(fecha_inicio: date, fecha_fin: date) -> int:
+    return (fecha_fin.year - fecha_inicio.year) * 12 + fecha_fin.month - fecha_inicio.month + 1
 
 
 def _mover_mes(fecha: date, cantidad_meses: int) -> date:
     indice_mes = fecha.year * 12 + fecha.month - 1 + cantidad_meses
     anio, mes_base_cero = divmod(indice_mes, 12)
     mes = mes_base_cero + 1
-    ultimo_dia = calendar.monthrange(anio, mes)[1]
-    return date(anio, mes, min(fecha.day, ultimo_dia))
-
-
-def _porcentaje_variacion(actual: float, anterior: float) -> float | None:
-    if anterior == 0:
-        return None
-    return round(((actual - anterior) / anterior) * 100, 2)
+    return date(anio, mes, min(fecha.day, calendar.monthrange(anio, mes)[1]))
 
 
 def _monto(valor: float) -> float:

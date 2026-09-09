@@ -62,10 +62,141 @@ class SqlColocacionHistoricoRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
+    def obtener_colocaciones_resumen_agrupadas(
+        self,
+        fecha_inicio: datetime,
+        fecha_fin: datetime,
+        agencias: list[str] | None = None,
+    ) -> list[ColocacionAgrupada]:
+        """Consulta reducida para Negocios, sin los joins dimensionales no usados."""
+        tasa_valor = case(
+            (Prestamo.tasa.is_(None), None),
+            (Prestamo.tasa < 0, None),
+            else_=Prestamo.tasa,
+        )
+        tasa_real = _rango_sql(
+            Prestamo.tea,
+            (
+                (13, "Hasta 13"),
+                (14, "Hasta 14"),
+                (16, "Hasta 16"),
+                (17, "Hasta 17"),
+                (18, "Hasta 18"),
+                (19, "Hasta 19"),
+                (20, "Hasta 20"),
+                (21, "Hasta 21"),
+            ),
+            "Mas de 22",
+        )
+        filtros_agencia = []
+        if agencias:
+            filtros_agencia.append(
+                func.upper(func.ltrim(func.rtrim(Agencia.nombre))).in_(
+                    [agencia.strip().upper() for agencia in agencias]
+                )
+            )
+
+        base = (
+            select(
+                Prestamo.id.label("id_prestamo"),
+                Prestamo.deuda_inicial.label("deuda_inicial"),
+                Agencia.nombre.label("agencia"),
+                TipoEmision.nombre.label("condicion"),
+                TipoPrestamo.nombre.label("tipo_prestamo"),
+                CalificacionContable.nombre.label("producto"),
+                SubcalificacionContable.nombre.label("segmento"),
+                func.coalesce(Usuario.nombre, Prestamo.codigo_usuario).label("asesor"),
+                tasa_valor.label("tasa_valor"),
+                tasa_real.label("tasa_real"),
+            )
+            .select_from(Prestamo)
+            .join(PrestamoCliente, PrestamoCliente.id_prestamo == Prestamo.id)
+            .join(EstadoPrestamo, EstadoPrestamo.codigo == Prestamo.codigo_estado)
+            .join(Agencia, Agencia.id == Prestamo.id_agencia)
+            .outerjoin(Usuario, Usuario.usuario == Prestamo.codigo_usuario)
+            .outerjoin(
+                SubcalificacionContable,
+                SubcalificacionContable.codigo == Prestamo.codigo_subcalificacion_contable,
+            )
+            .outerjoin(
+                CalificacionContable,
+                CalificacionContable.codigo == SubcalificacionContable.codigo_calificacion_contable,
+            )
+            .outerjoin(PrestamoSolicitud, PrestamoSolicitud.id_prestamo == Prestamo.id)
+            .outerjoin(
+                SolicitudPrestamoTipoEmision,
+                SolicitudPrestamoTipoEmision.id_solicitud == PrestamoSolicitud.id_solicitud,
+            )
+            .outerjoin(
+                TipoEmision,
+                TipoEmision.codigo == SolicitudPrestamoTipoEmision.codigo_tipo_emision,
+            )
+            .outerjoin(TipoPrestamo, TipoPrestamo.codigo == Prestamo.codigo_tipo_prestamo)
+            .where(PrestamoCliente.activo == 1)
+            .where(PrestamoCliente.es_principal == 1)
+            .where(EstadoPrestamo.nombre != "CANCELADO")
+            .where(Prestamo.fecha_adjudicacion >= fecha_inicio)
+            .where(Prestamo.fecha_adjudicacion <= fecha_fin)
+            .where(*filtros_agencia)
+            .distinct()
+            .subquery()
+        )
+        columnas_grupo = (
+            base.c.agencia,
+            base.c.condicion,
+            base.c.tipo_prestamo,
+            base.c.producto,
+            base.c.segmento,
+            base.c.asesor,
+            base.c.tasa_valor,
+            base.c.tasa_real,
+        )
+        statement = select(
+            *columnas_grupo,
+            func.count(func.distinct(base.c.id_prestamo)).label("operaciones"),
+            func.sum(base.c.deuda_inicial).label("saldo_inicial"),
+        ).group_by(*columnas_grupo)
+
+        resultado: list[ColocacionAgrupada] = []
+        for row in self.db.execute(statement):
+            dimensiones = DimensionesColocacion(
+                periodo=fecha_inicio.strftime("%Y-%m"),
+                anio=fecha_inicio.year,
+                mes=fecha_inicio.month,
+                agencia=_normalizar(row[0]),
+                condicion=_normalizar(row[1]),
+                tipo_prestamo=_normalizar(row[2]),
+                producto=_normalizar(row[3]),
+                segmento=_normalizar(row[4]),
+                asesor=_normalizar(row[5]),
+                provincia="SIN DATOS",
+                canton="SIN DATOS",
+                parroquia="SIN DATOS",
+                educacion="SIN DATOS",
+                edad="SIN DATOS",
+                garantia="SIN DATOS",
+                monto="SIN DATOS",
+                tasa="SIN DATOS",
+                tasa_valor=float(row[6]) if row[6] is not None else None,
+                tasa_real=str(row[7] or "SIN DATOS").strip() or "SIN DATOS",
+                tasa_real_valor=None,
+                plazo="SIN DATOS",
+                plazo_valor=None,
+            )
+            resultado.append(
+                ColocacionAgrupada(
+                    dimensiones=dimensiones,
+                    operaciones=int(row[8] or 0),
+                    saldo_inicial=float(row[9] or 0.0),
+                )
+            )
+        return resultado
+
     def obtener_colocaciones_agrupadas(
         self,
         fecha_inicio: datetime,
         fecha_fin: datetime,
+        agencias: list[str] | None = None,
     ) -> list[ColocacionAgrupada]:
         monto = _rango_sql(
             Prestamo.deuda_inicial,
@@ -199,6 +330,14 @@ class SqlColocacionHistoricoRepository:
             ),
             else_="SIN GARANTIA",
         )
+        filtros_agencia = []
+        if agencias:
+            filtros_agencia.append(
+                func.upper(func.ltrim(func.rtrim(Agencia.nombre))).in_(
+                    [agencia.strip().upper() for agencia in agencias]
+                )
+            )
+
         base = (
             select(
                 Prestamo.id.label("id_prestamo"),
@@ -260,6 +399,7 @@ class SqlColocacionHistoricoRepository:
             .where(EstadoPrestamo.nombre != "CANCELADO")
             .where(Prestamo.fecha_adjudicacion >= fecha_inicio)
             .where(Prestamo.fecha_adjudicacion <= fecha_fin)
+            .where(*filtros_agencia)
             .distinct()
             .subquery()
         )

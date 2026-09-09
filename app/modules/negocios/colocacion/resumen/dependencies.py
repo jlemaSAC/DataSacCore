@@ -1,14 +1,15 @@
 from fastapi import Depends
-from sqlalchemy.orm import Session
 
-from app.db.session import get_db
-from app.modules.negocios.colocacion.resumen.repositories.sql_colocacion_resumen_repository import (
-    SqlColocacionResumenRepository,
+from app.modules.analytic.colocacion.colocacion_historico.dependencies import (
+    get_colocacion_historico_service,
 )
+from app.modules.analytic.colocacion.colocacion_historico.service import ColocacionHistoricoService
 from app.modules.negocios.colocacion.resumen.service import ResumenColocacionService
 
 
 def get_resumen_colocacion_service(
-    db: Session = Depends(get_db),
+    colocacion_historico_service: ColocacionHistoricoService = Depends(
+        get_colocacion_historico_service
+    ),
 ) -> ResumenColocacionService:
-    return ResumenColocacionService(SqlColocacionResumenRepository(db))
+    return ResumenColocacionService(colocacion_historico_service)
