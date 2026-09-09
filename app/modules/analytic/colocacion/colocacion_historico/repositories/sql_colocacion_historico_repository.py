@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import case, exists, func, literal_column, select
+from sqlalchemy import String, case, exists, func, literal_column, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.clientes.cliente_model import Cliente
@@ -25,6 +25,8 @@ from app.models.sujeto.persona_model import Persona
 from app.models.sujeto.persona_natural_model import PersonaNatural
 from app.modules.analytic.colocacion.colocacion_historico.domain import (
     ColocacionAgrupada,
+    DetalleColocacion,
+    DimensionFiltroColocacion,
     DimensionesColocacion,
 )
 
@@ -58,6 +60,10 @@ def _rango_sql(columna, rangos: tuple[tuple[float, str], ...], etiqueta_superior
     )
 
 
+def _texto_sql(columna):
+    return func.upper(func.ltrim(func.rtrim(func.coalesce(columna, "SIN DATOS"))))
+
+
 class SqlColocacionHistoricoRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -74,19 +80,10 @@ class SqlColocacionHistoricoRepository:
             (Prestamo.tasa < 0, None),
             else_=Prestamo.tasa,
         )
-        tasa_real = _rango_sql(
-            Prestamo.tea,
-            (
-                (13, "Hasta 13"),
-                (14, "Hasta 14"),
-                (16, "Hasta 16"),
-                (17, "Hasta 17"),
-                (18, "Hasta 18"),
-                (19, "Hasta 19"),
-                (20, "Hasta 20"),
-                (21, "Hasta 21"),
-            ),
-            "Mas de 22",
+        tasa_real_valor = case(
+            (Prestamo.tea.is_(None), None),
+            (Prestamo.tea < 0, None),
+            else_=Prestamo.tea,
         )
         filtros_agencia = []
         if agencias:
@@ -107,7 +104,7 @@ class SqlColocacionHistoricoRepository:
                 SubcalificacionContable.nombre.label("segmento"),
                 func.coalesce(Usuario.nombre, Prestamo.codigo_usuario).label("asesor"),
                 tasa_valor.label("tasa_valor"),
-                tasa_real.label("tasa_real"),
+                tasa_real_valor.label("tasa_real_valor"),
             )
             .select_from(Prestamo)
             .join(PrestamoCliente, PrestamoCliente.id_prestamo == Prestamo.id)
@@ -149,7 +146,7 @@ class SqlColocacionHistoricoRepository:
             base.c.segmento,
             base.c.asesor,
             base.c.tasa_valor,
-            base.c.tasa_real,
+            base.c.tasa_real_valor,
         )
         statement = select(
             *columnas_grupo,
@@ -178,8 +175,8 @@ class SqlColocacionHistoricoRepository:
                 monto="SIN DATOS",
                 tasa="SIN DATOS",
                 tasa_valor=float(row[6]) if row[6] is not None else None,
-                tasa_real=str(row[7] or "SIN DATOS").strip() or "SIN DATOS",
-                tasa_real_valor=None,
+                tasa_real="SIN DATOS",
+                tasa_real_valor=float(row[7]) if row[7] is not None else None,
                 plazo="SIN DATOS",
                 plazo_valor=None,
             )
@@ -191,6 +188,118 @@ class SqlColocacionHistoricoRepository:
                 )
             )
         return resultado
+
+    def obtener_detalles_resumen(
+        self,
+        fecha_inicio: datetime,
+        fecha_fin: datetime,
+        agencias: list[str],
+        dimension: DimensionFiltroColocacion,
+        valor_dimension: str,
+        asesores: list[str] | None = None,
+    ) -> list[DetalleColocacion]:
+        """Obtiene el detalle SQL del día actual, con la misma semántica del resumen."""
+        agencia = _texto_sql(Agencia.nombre)
+        condicion = _texto_sql(TipoEmision.nombre)
+        tipo_prestamo = _texto_sql(TipoPrestamo.nombre)
+        producto = _texto_sql(CalificacionContable.nombre)
+        segmento = _texto_sql(SubcalificacionContable.nombre)
+        asesor = _texto_sql(func.coalesce(Usuario.nombre, Prestamo.codigo_usuario))
+        numero_operacion = _texto_sql(Prestamo.numero).label("numero_operacion")
+        dimensiones = {
+            "agencia": agencia,
+            "condicion": condicion,
+            "tipo_prestamo": tipo_prestamo,
+            "producto": producto,
+            "segmento": segmento,
+            "asesor": asesor,
+            "tasa_normal": Prestamo.tasa,
+            "tasa_real": Prestamo.tea,
+        }
+
+        valor_dimension_normalizado: str | float | None = valor_dimension.strip().upper()
+        if dimension in {"tasa_normal", "tasa_real"}:
+            valor_dimension_normalizado = (
+                None if valor_dimension.strip().upper() == "SIN DATOS" else float(valor_dimension)
+            )
+
+        filtro_dimension = dimensiones[dimension] == valor_dimension_normalizado
+        if dimension in {"tasa_normal", "tasa_real"} and valor_dimension_normalizado is None:
+            filtro_dimension = or_(dimensiones[dimension].is_(None), dimensiones[dimension] < 0)
+
+        filtros = [
+            agencia.in_([valor.strip().upper() for valor in agencias]),
+            filtro_dimension,
+        ]
+        if asesores:
+            filtros.append(asesor.in_([valor.strip().upper() for valor in asesores]))
+
+        statement = (
+            select(
+                _texto_sql(func.cast(Cliente.numero, String)).label("numero_cliente"),
+                _texto_sql(Persona.nombre).label("nombre_cliente"),
+                numero_operacion,
+                agencia.label("agencia"),
+                asesor.label("asesor"),
+                condicion.label("tipo_condicion"),
+                producto.label("producto"),
+                tipo_prestamo.label("tipo_prestamo"),
+                segmento.label("segmento"),
+                Prestamo.tasa.label("tasa_nominal"),
+                Prestamo.tea.label("tasa_real"),
+                Prestamo.deuda_inicial.label("monto_colocado"),
+            )
+            .select_from(Prestamo)
+            .join(PrestamoCliente, PrestamoCliente.id_prestamo == Prestamo.id)
+            .join(EstadoPrestamo, EstadoPrestamo.codigo == Prestamo.codigo_estado)
+            .join(Agencia, Agencia.id == Prestamo.id_agencia)
+            .outerjoin(Cliente, Cliente.id == PrestamoCliente.id_cliente)
+            .outerjoin(Persona, Persona.id == Cliente.id_persona)
+            .outerjoin(Usuario, Usuario.usuario == Prestamo.codigo_usuario)
+            .outerjoin(
+                SubcalificacionContable,
+                SubcalificacionContable.codigo == Prestamo.codigo_subcalificacion_contable,
+            )
+            .outerjoin(
+                CalificacionContable,
+                CalificacionContable.codigo == SubcalificacionContable.codigo_calificacion_contable,
+            )
+            .outerjoin(PrestamoSolicitud, PrestamoSolicitud.id_prestamo == Prestamo.id)
+            .outerjoin(
+                SolicitudPrestamoTipoEmision,
+                SolicitudPrestamoTipoEmision.id_solicitud == PrestamoSolicitud.id_solicitud,
+            )
+            .outerjoin(
+                TipoEmision,
+                TipoEmision.codigo == SolicitudPrestamoTipoEmision.codigo_tipo_emision,
+            )
+            .outerjoin(TipoPrestamo, TipoPrestamo.codigo == Prestamo.codigo_tipo_prestamo)
+            .where(PrestamoCliente.activo == 1)
+            .where(PrestamoCliente.es_principal == 1)
+            .where(EstadoPrestamo.nombre != "CANCELADO")
+            .where(Prestamo.fecha_adjudicacion >= fecha_inicio)
+            .where(Prestamo.fecha_adjudicacion <= fecha_fin)
+            .where(*filtros)
+            .distinct()
+            .order_by(literal_column("numero_operacion"))
+        )
+        return [
+            DetalleColocacion(
+                numero_cliente=str(row.numero_cliente or "SIN DATOS"),
+                nombre_cliente=str(row.nombre_cliente or "SIN DATOS"),
+                numero_operacion=str(row.numero_operacion or "SIN DATOS"),
+                agencia=str(row.agencia or "SIN DATOS"),
+                asesor=str(row.asesor or "SIN DATOS"),
+                tipo_condicion=str(row.tipo_condicion or "SIN DATOS"),
+                producto=str(row.producto or "SIN DATOS"),
+                tipo_prestamo=str(row.tipo_prestamo or "SIN DATOS"),
+                segmento=str(row.segmento or "SIN DATOS"),
+                tasa_nominal=float(row.tasa_nominal) if row.tasa_nominal is not None else None,
+                tasa_real=float(row.tasa_real) if row.tasa_real is not None else None,
+                monto_colocado=float(row.monto_colocado or 0.0),
+            )
+            for row in self.db.execute(statement)
+        ]
 
     def obtener_colocaciones_agrupadas(
         self,

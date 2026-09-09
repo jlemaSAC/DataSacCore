@@ -13,7 +13,10 @@ from app.modules.analytic.colocacion.colocacion_historico.service import (
 )
 from app.modules.auth.schemas import AuthContext
 from app.modules.negocios.colocacion.resumen.schemas import (
+    DetalleResumenColocacionResponse,
+    FilaDetalleColocacion,
     FilaComparativaColocacion,
+    InputDetalleResumenColocacion,
     InputResumenColocacion,
     ResumenColocacionResponse,
 )
@@ -85,6 +88,73 @@ class ResumenColocacionService:
             raise HTTPException(
                 status_code=500,
                 detail="Error consultando resumen de colocacion.",
+            ) from exc
+
+    def obtener_detalle(
+        self,
+        input_data: InputDetalleResumenColocacion,
+        auth_context: AuthContext,
+    ) -> DetalleResumenColocacionResponse:
+        fecha_hoy = _fecha_sistema(auth_context)
+        if input_data.fecha_fin > fecha_hoy:
+            raise HTTPException(
+                status_code=400,
+                detail="fecha_fin no puede ser posterior a la fecha del sistema.",
+            )
+        if _cantidad_meses(input_data.fecha_inicio, input_data.fecha_fin) > MAX_MESES_RANGO:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El rango no puede superar {MAX_MESES_RANGO} meses.",
+            )
+
+        try:
+            agencias = list(dict.fromkeys(agencia.strip() for agencia in input_data.agencias))
+            asesores = list(dict.fromkeys(asesor.strip() for asesor in input_data.asesores))
+            detalles = self.colocacion_historico_service.obtener_detalles_resumen_por_rango(
+                input_data.fecha_inicio,
+                input_data.fecha_fin,
+                fecha_hoy,
+                agencias,
+                input_data.dimension,
+                input_data.valor_dimension.strip(),
+                asesores,
+            )
+            inicio = (input_data.pagina - 1) * input_data.tamano_pagina
+            items = detalles[inicio : inicio + input_data.tamano_pagina]
+            return DetalleResumenColocacionResponse(
+                fecha_inicio=input_data.fecha_inicio,
+                fecha_fin=input_data.fecha_fin,
+                dimension=input_data.dimension,
+                valor_dimension=input_data.valor_dimension.strip(),
+                pagina=input_data.pagina,
+                tamano_pagina=input_data.tamano_pagina,
+                total_registros=len(detalles),
+                total_monto_colocado=_monto(sum(detalle.monto_colocado for detalle in detalles)),
+                items=[
+                    FilaDetalleColocacion(
+                        numero_cliente=detalle.numero_cliente,
+                        nombre_cliente=detalle.nombre_cliente,
+                        numero_operacion=detalle.numero_operacion,
+                        agencia=detalle.agencia,
+                        asesor=detalle.asesor,
+                        tipo_condicion=detalle.tipo_condicion,
+                        producto=detalle.producto,
+                        tipo_prestamo=detalle.tipo_prestamo,
+                        segmento=detalle.segmento,
+                        tasa_nominal=detalle.tasa_nominal,
+                        tasa_real=detalle.tasa_real,
+                        monto_colocado=_monto(detalle.monto_colocado),
+                    )
+                    for detalle in items
+                ],
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Error consultando detalle de resumen de colocacion")
+            raise HTTPException(
+                status_code=500,
+                detail="Error consultando detalle de resumen de colocacion.",
             ) from exc
 
     def _obtener_comparativos(
@@ -161,7 +231,7 @@ def _fila_comparativa(fila: _ComparativoColocacion) -> FilaComparativaColocacion
         segmento=fila.dimensiones.segmento,
         asesor=fila.dimensiones.asesor,
         tasa_valor=fila.dimensiones.tasa_valor,
-        tasa_real=fila.dimensiones.tasa_real,
+        tasa_real=fila.dimensiones.tasa_real_valor,
         monto_colocado=_monto(fila.saldo_inicial),
         monto_colocado_periodo_anterior=_monto(fila.saldo_inicial_periodo_anterior),
         monto_mismo_rango_mes_anterior=_monto(fila.saldo_inicial_mismo_rango_mes_anterior),
@@ -171,6 +241,11 @@ def _fila_comparativa(fila: _ComparativoColocacion) -> FilaComparativaColocacion
 
 def _cantidad_meses(fecha_inicio: date, fecha_fin: date) -> int:
     return (fecha_fin.year - fecha_inicio.year) * 12 + fecha_fin.month - fecha_inicio.month + 1
+
+
+def _fecha_sistema(auth_context: AuthContext) -> date:
+    fecha_sistema = auth_context.usuario.fecha_sistema
+    return fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
 
 
 def _mover_mes(fecha: date, cantidad_meses: int) -> date:

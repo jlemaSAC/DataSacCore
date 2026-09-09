@@ -7,12 +7,16 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.modules.analytic.colocacion.colocacion_historico.domain import (
     ColocacionAgrupada,
+    DetalleColocacion,
     DimensionesColocacion,
 )
 from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.auth.schemas import AuthContext, UsuarioTokenPayload
 from app.modules.negocios.colocacion.resumen.dependencies import get_resumen_colocacion_service
-from app.modules.negocios.colocacion.resumen.schemas import InputResumenColocacion
+from app.modules.negocios.colocacion.resumen.schemas import (
+    InputDetalleResumenColocacion,
+    InputResumenColocacion,
+)
 from app.modules.negocios.colocacion.resumen.service import ResumenColocacionService
 
 
@@ -63,6 +67,7 @@ def agrupacion(operaciones: int, saldo: float) -> ColocacionAgrupada:
 class FakeColocacionHistoricoService:
     def __init__(self) -> None:
         self.llamadas: list[tuple[date, date, date, list[str]]] = []
+        self.llamadas_detalle: list[tuple] = []
 
     def obtener_agrupaciones_resumen_por_rango(self, fecha_inicio, fecha_fin, fecha_hoy, agencias):
         self.llamadas.append((fecha_inicio, fecha_fin, fecha_hoy, agencias))
@@ -75,6 +80,58 @@ class FakeColocacionHistoricoService:
         }
         fila = datos.get((fecha_inicio, fecha_fin))
         return {fila.dimensiones: fila} if fila else {}
+
+    def obtener_detalles_resumen_por_rango(
+        self,
+        fecha_inicio,
+        fecha_fin,
+        fecha_hoy,
+        agencias,
+        dimension,
+        valor_dimension,
+        asesores,
+    ):
+        self.llamadas_detalle.append(
+            (
+                fecha_inicio,
+                fecha_fin,
+                fecha_hoy,
+                agencias,
+                dimension,
+                valor_dimension,
+                asesores,
+            )
+        )
+        return [
+            DetalleColocacion(
+                numero_cliente="99014201",
+                nombre_cliente="PILATAXI NAULA ELENA",
+                numero_operacion="2026081703165",
+                agencia="QUITO",
+                asesor="ACHAFIA",
+                tipo_condicion="NORMAL",
+                producto="CONSUMO",
+                tipo_prestamo="CREDI AGIL CONSUMO",
+                segmento="MINORISTA",
+                tasa_nominal=15.55,
+                tasa_real=16.71,
+                monto_colocado=5000.0,
+            ),
+            DetalleColocacion(
+                numero_cliente="99035714",
+                nombre_cliente="CHALUISA GUANOTUÑA VANESSA FERNANDA",
+                numero_operacion="2026081703136",
+                agencia="QUITO",
+                asesor="ACHAFIA",
+                tipo_condicion="NORMAL",
+                producto="CONSUMO",
+                tipo_prestamo="CREDI AGIL CONSUMO",
+                segmento="MINORISTA",
+                tasa_nominal=15.55,
+                tasa_real=16.71,
+                monto_colocado=5000.0,
+            ),
+        ]
 
 
 def test_servicio_usa_agencias_por_nombre_y_compara_el_mismo_rango_del_mes_anterior() -> None:
@@ -103,7 +160,7 @@ def test_servicio_usa_agencias_por_nombre_y_compara_el_mismo_rango_del_mes_anter
     assert respuesta.agrupaciones[0].monto_colocado_periodo_anterior == 3000.0
     assert respuesta.agrupaciones[0].monto_mismo_rango_mes_anterior == 800.0
     assert respuesta.agrupaciones[0].variacion_valor == 200.0
-    assert respuesta.agrupaciones[0].tasa_real == "Hasta 17"
+    assert respuesta.agrupaciones[0].tasa_real == 17.0
     assert respuesta.agrupaciones[0].tasa_valor == 16.0
 
 
@@ -121,6 +178,26 @@ def test_servicio_rechaza_fecha_final_posterior_a_fecha_del_sistema() -> None:
         )
 
     assert error.value.status_code == 400
+
+
+def test_detalle_acepta_tasas_numericas_y_sin_datos() -> None:
+    tasa_real = InputDetalleResumenColocacion(
+        agencias=["MATRIZ"],
+        fecha_inicio=date(2026, 8, 1),
+        fecha_fin=date(2026, 8, 31),
+        dimension="tasa_real",
+        valor_dimension="16.71",
+    )
+    tasa_normal_sin_datos = InputDetalleResumenColocacion(
+        agencias=["MATRIZ"],
+        fecha_inicio=date(2026, 8, 1),
+        fecha_fin=date(2026, 8, 31),
+        dimension="tasa_normal",
+        valor_dimension="SIN DATOS",
+    )
+
+    assert tasa_real.dimension == "tasa_real"
+    assert tasa_normal_sin_datos.valor_dimension == "SIN DATOS"
 
 
 def test_endpoint_devuelve_agrupaciones_dimensionales() -> None:
@@ -142,6 +219,61 @@ def test_endpoint_devuelve_agrupaciones_dimensionales() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["agrupaciones"][0]["asesor"] == "JUAN PEREZ"
-    assert body["agrupaciones"][0]["tasa_real"] == "Hasta 17"
+    assert body["agrupaciones"][0]["tasa_real"] == 17.0
     assert "garantia" not in body["agrupaciones"][0]
     assert "por_producto" not in body
+
+
+def test_endpoint_detalle_filtra_dimension_y_pagina() -> None:
+    historico = FakeColocacionHistoricoService()
+    service = ResumenColocacionService(historico)  # type: ignore[arg-type]
+    app.dependency_overrides[get_current_auth_context] = auth_context
+    app.dependency_overrides[get_resumen_colocacion_service] = lambda: service
+    try:
+        response = client.post(
+            "/negocios/colocacion/resumen/detalle",
+            json={
+                "agencias": ["QUITO"],
+                "fecha_inicio": "2026-08-01",
+                "fecha_fin": "2026-08-31",
+                "dimension": "tipo_prestamo",
+                "valor_dimension": "CREDI AGIL CONSUMO",
+                "asesores": ["ACHAFIA"],
+                "pagina": 2,
+                "tamano_pagina": 1,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert historico.llamadas_detalle == [
+        (
+            date(2026, 8, 1),
+            date(2026, 8, 31),
+            date(2026, 8, 31),
+            ["QUITO"],
+            "tipo_prestamo",
+            "CREDI AGIL CONSUMO",
+            ["ACHAFIA"],
+        )
+    ]
+    body = response.json()
+    assert body["total_registros"] == 2
+    assert body["total_monto_colocado"] == 10000.0
+    assert body["items"] == [
+        {
+            "numero_cliente": "99035714",
+            "nombre_cliente": "CHALUISA GUANOTUÑA VANESSA FERNANDA",
+            "numero_operacion": "2026081703136",
+            "agencia": "QUITO",
+            "asesor": "ACHAFIA",
+            "tipo_condicion": "NORMAL",
+            "producto": "CONSUMO",
+            "tipo_prestamo": "CREDI AGIL CONSUMO",
+            "segmento": "MINORISTA",
+            "tasa_nominal": 15.55,
+            "tasa_real": 16.71,
+            "monto_colocado": 5000.0,
+        }
+    ]

@@ -169,7 +169,7 @@ class FakeResumenSqlSession:
                 " minorista ",
                 " juan perez ",
                 16.0,
-                "Hasta 17",
+                17.0,
                 2,
                 125.0,
             )
@@ -309,7 +309,7 @@ def test_repositorios_livianos_omiten_dimensiones_no_usadas() -> None:
         ]
     )
     project_mongo = mongo_db.collection.pipeline[1]["$project"]
-    assert {"agencia", "asesor", "tasa_valor", "tasa_real"} <= project_mongo.keys()
+    assert {"agencia", "asesor", "tasa_valor", "tasa_real_valor"} <= project_mongo.keys()
     assert "provincia" not in project_mongo
     assert "garantia" not in project_mongo
     assert "plazo" not in project_mongo
@@ -324,7 +324,7 @@ def test_repositorios_livianos_omiten_dimensiones_no_usadas() -> None:
     sql = str(db.statement.compile(dialect=mssql.dialect(), compile_kwargs={"literal_binds": True}))
     assert "[PRESTAMOGARANTIAPERSONAL]" not in sql
     assert "[DIVISIONPOLITICACONSOLIDADO]" not in sql
-    assert datos[0].dimensiones.tasa_real == "Hasta 17"
+    assert datos[0].dimensiones.tasa_real_valor == 17.0
     assert datos[0].dimensiones.tasa_valor == 16.0
     assert datos[0].dimensiones.provincia == "SIN DATOS"
 

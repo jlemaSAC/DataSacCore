@@ -7,6 +7,8 @@ from fastapi import HTTPException
 
 from app.modules.analytic.colocacion.colocacion_historico.domain import (
     ColocacionAgrupada,
+    DetalleColocacion,
+    DimensionFiltroColocacion,
     DimensionesColocacion,
 )
 from app.modules.analytic.colocacion.colocacion_historico.repositories.mongo_colocacion_historico_repository import (
@@ -50,6 +52,20 @@ def _orden_dimensiones(item: tuple[DimensionesColocacion, ColocacionAgrupada]) -
         else:
             valores.append(valor)
     return tuple(valores)
+
+
+def _sin_duplicados_detalle(detalles: list[DetalleColocacion]) -> list[DetalleColocacion]:
+    """Evita duplicados de joins sin fusionar operaciones distintas sin identificador."""
+    unicos: dict[tuple, DetalleColocacion] = {}
+    for detalle in detalles:
+        clave = (
+            detalle.numero_operacion,
+            detalle.numero_cliente,
+            detalle.agencia,
+            detalle.monto_colocado,
+        )
+        unicos.setdefault(clave, detalle)
+    return list(unicos.values())
 
 
 class ColocacionHistoricoService:
@@ -196,6 +212,42 @@ class ColocacionHistoricoService:
                 )
             )
         return self._consolidar(agrupaciones)
+
+    def obtener_detalles_resumen_por_rango(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_hoy: date,
+        agencias: list[str],
+        dimension: DimensionFiltroColocacion,
+        valor_dimension: str,
+        asesores: list[str] | None = None,
+    ) -> list[DetalleColocacion]:
+        """Obtiene operaciones del detalle usando exactamente el corte híbrido del resumen."""
+        segmentos = self._segmentar_rango(fecha_desde, fecha_hasta)
+        cortes = self._construir_cortes_por_rango(segmentos, fecha_hoy)
+        detalles = self.mongo_repository.obtener_detalles_resumen(
+            cortes,
+            agencias,
+            dimension,
+            valor_dimension,
+            asesores,
+        )
+        if fecha_desde <= fecha_hoy <= fecha_hasta:
+            detalles.extend(
+                self.sql_repository.obtener_detalles_resumen(
+                    datetime.combine(fecha_hoy, time.min),
+                    datetime.combine(fecha_hoy, time.max),
+                    agencias,
+                    dimension,
+                    valor_dimension,
+                    asesores,
+                )
+            )
+        return sorted(
+            _sin_duplicados_detalle(detalles),
+            key=lambda detalle: (detalle.numero_operacion, detalle.numero_cliente),
+        )
 
     @staticmethod
     def _construir_cortes_por_rango(
