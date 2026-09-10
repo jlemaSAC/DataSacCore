@@ -29,6 +29,9 @@ MAX_MESES_RANGO = 60
 @dataclass
 class _ComparativoColocacion:
     dimensiones: DimensionesColocacion
+    numero_operaciones: int = 0
+    numero_operaciones_periodo_anterior: int = 0
+    numero_operaciones_mismo_rango_mes_anterior: int = 0
     saldo_inicial: float = 0.0
     saldo_inicial_periodo_anterior: float = 0.0
     saldo_inicial_mismo_rango_mes_anterior: float = 0.0
@@ -187,10 +190,13 @@ class ResumenColocacionService:
                     _clave_dimensiones(dimensiones), _ComparativoColocacion(dimensiones)
                 )
                 if nombre == "actual":
+                    fila.numero_operaciones += agrupacion.operaciones
                     fila.saldo_inicial += agrupacion.saldo_inicial
                 elif nombre == "anterior":
+                    fila.numero_operaciones_periodo_anterior += agrupacion.operaciones
                     fila.saldo_inicial_periodo_anterior += agrupacion.saldo_inicial
                 else:
+                    fila.numero_operaciones_mismo_rango_mes_anterior += agrupacion.operaciones
                     fila.saldo_inicial_mismo_rango_mes_anterior += agrupacion.saldo_inicial
         return comparativos
 
@@ -234,6 +240,12 @@ def _fila_comparativa(fila: _ComparativoColocacion) -> FilaComparativaColocacion
         asesor=fila.dimensiones.asesor,
         tasa_valor=fila.dimensiones.tasa_valor,
         tasa_real=fila.dimensiones.tasa_real_valor,
+        numero_operaciones=fila.numero_operaciones,
+        numero_operaciones_periodo_anterior=fila.numero_operaciones_periodo_anterior,
+        numero_operaciones_mismo_rango_mes_anterior=fila.numero_operaciones_mismo_rango_mes_anterior,
+        variacion_operaciones=(
+            fila.numero_operaciones - fila.numero_operaciones_mismo_rango_mes_anterior
+        ),
         monto_colocado=_monto(fila.saldo_inicial),
         monto_colocado_periodo_anterior=_monto(fila.saldo_inicial_periodo_anterior),
         monto_mismo_rango_mes_anterior=_monto(fila.saldo_inicial_mismo_rango_mes_anterior),

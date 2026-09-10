@@ -29,6 +29,10 @@ class FilaComparativaColocacion(BaseModel):
     asesor: str
     tasa_valor: float | None
     tasa_real: float | None
+    numero_operaciones: int
+    numero_operaciones_periodo_anterior: int
+    numero_operaciones_mismo_rango_mes_anterior: int
+    variacion_operaciones: int
     monto_colocado: float
     monto_colocado_periodo_anterior: float
     monto_mismo_rango_mes_anterior: float

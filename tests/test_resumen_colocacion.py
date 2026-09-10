@@ -166,6 +166,10 @@ def test_servicio_usa_agencias_por_nombre_y_compara_el_mismo_rango_del_mes_anter
     assert respuesta.agrupaciones[0].variacion_valor == 200.0
     assert respuesta.agrupaciones[0].tasa_real == 17.0
     assert respuesta.agrupaciones[0].tasa_valor == 16.0
+    assert respuesta.agrupaciones[0].numero_operaciones == 10
+    assert respuesta.agrupaciones[0].numero_operaciones_periodo_anterior == 30
+    assert respuesta.agrupaciones[0].numero_operaciones_mismo_rango_mes_anterior == 8
+    assert respuesta.agrupaciones[0].variacion_operaciones == 2
 
 
 def test_servicio_rechaza_fecha_final_posterior_a_fecha_del_sistema() -> None:
@@ -273,6 +277,7 @@ def test_endpoint_devuelve_agrupaciones_dimensionales() -> None:
     body = response.json()
     assert body["agrupaciones"][0]["asesor"] == "JUAN PEREZ"
     assert body["agrupaciones"][0]["tasa_real"] == 17.0
+    assert body["agrupaciones"][0]["numero_operaciones"] == 10
     assert "garantia" not in body["agrupaciones"][0]
     assert "por_producto" not in body
 
