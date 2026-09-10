@@ -169,16 +169,18 @@ def test_servicio_usa_agencias_por_nombre_y_compara_el_mismo_rango_del_mes_anter
     assert respuesta.fecha_fin_periodo_anterior == date(2026, 7, 31)
     assert respuesta.fecha_inicio_mismo_rango_mes_anterior == date(2026, 7, 15)
     assert respuesta.fecha_fin_mismo_rango_mes_anterior == date(2026, 7, 25)
-    assert respuesta.agrupaciones[0].monto_colocado == 1000.0
-    assert respuesta.agrupaciones[0].monto_colocado_periodo_anterior == 3000.0
-    assert respuesta.agrupaciones[0].monto_mismo_rango_mes_anterior == 800.0
-    assert respuesta.agrupaciones[0].variacion_valor == 200.0
-    assert respuesta.agrupaciones[0].tasa_real == 17.0
-    assert respuesta.agrupaciones[0].tasa_valor == 16.0
-    assert respuesta.agrupaciones[0].numero_operaciones == 10
-    assert respuesta.agrupaciones[0].numero_operaciones_periodo_anterior == 30
-    assert respuesta.agrupaciones[0].numero_operaciones_mismo_rango_mes_anterior == 8
-    assert respuesta.agrupaciones[0].variacion_operaciones == 2
+    por_agencia = respuesta.agrupaciones.por_agencia[0]
+    assert por_agencia.monto_colocado == 1000.0
+    assert por_agencia.monto_colocado_periodo_anterior == 3000.0
+    assert por_agencia.monto_mismo_rango_mes_anterior == 800.0
+    assert por_agencia.variacion_valor == 200.0
+    assert por_agencia.numero_operaciones == 10
+    assert por_agencia.numero_operaciones_periodo_anterior == 30
+    assert por_agencia.numero_operaciones_mismo_rango_mes_anterior == 8
+    assert por_agencia.variacion_operaciones == 2
+    assert respuesta.agrupaciones.por_tasa_normal[0].dimension == "16"
+    assert respuesta.agrupaciones.por_tasa_real[0].dimension == "17% – 17.99%"
+    assert respuesta.asesores_disponibles == ["JUAN PEREZ"]
 
 
 def test_servicio_rechaza_fecha_final_posterior_a_fecha_del_sistema() -> None:
@@ -229,6 +231,24 @@ def test_detalle_acepta_tasas_numericas_y_sin_datos() -> None:
 
     assert tasa_real.dimension == "tasa_real"
     assert tasa_normal_sin_datos.valor_dimension == "SIN DATOS"
+
+
+def test_resumen_filtra_asesores_y_conserva_los_disponibles() -> None:
+    service = ResumenColocacionService(FakeColocacionHistoricoService())  # type: ignore[arg-type]
+
+    respuesta = service.obtener_resumen(
+        InputResumenColocacion(
+            agencias=["MATRIZ"],
+            fecha_inicio=date(2026, 8, 15),
+            fecha_fin=date(2026, 8, 25),
+            asesores=["ASESOR INEXISTENTE"],
+        ),
+        auth_context(),
+    )
+
+    assert respuesta.asesores_disponibles == ["JUAN PEREZ"]
+    assert respuesta.agrupaciones.por_agencia == []
+    assert respuesta.agrupaciones.por_asesor == []
 
 
 def test_detalle_acepta_rango_exclusivo_de_tasa_real() -> None:
@@ -284,11 +304,11 @@ def test_endpoint_devuelve_agrupaciones_dimensionales() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["agrupaciones"][0]["asesor"] == "JUAN PEREZ"
-    assert body["agrupaciones"][0]["tasa_real"] == 17.0
-    assert body["agrupaciones"][0]["numero_operaciones"] == 10
-    assert "garantia" not in body["agrupaciones"][0]
-    assert "por_producto" not in body
+    assert body["asesores_disponibles"] == ["JUAN PEREZ"]
+    assert body["agrupaciones"]["por_asesor"][0]["dimension"] == "JUAN PEREZ"
+    assert body["agrupaciones"]["por_tasa_real"][0]["dimension"] == "17% – 17.99%"
+    assert body["agrupaciones"]["por_agencia"][0]["numero_operaciones"] == 10
+    assert "por_producto" in body["agrupaciones"]
 
 
 def test_endpoint_detalle_filtra_dimension_y_pagina() -> None:

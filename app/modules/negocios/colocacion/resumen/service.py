@@ -2,6 +2,7 @@ import calendar
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from math import floor
 
 from fastapi import HTTPException
 
@@ -13,7 +14,9 @@ from app.modules.analytic.colocacion.colocacion_historico.service import (
 )
 from app.modules.auth.schemas import AuthContext
 from app.modules.negocios.colocacion.resumen.schemas import (
+    AgrupacionesResumenColocacion,
     DetalleResumenColocacionResponse,
+    FilaAgrupacionColocacion,
     FilaDetalleColocacion,
     FilaComparativaColocacion,
     InputDetalleResumenColocacion,
@@ -75,6 +78,17 @@ class ResumenColocacionService:
             agencias = list(dict.fromkeys(agencia.strip() for agencia in input_data.agencias))
             periodos = self._construir_periodos(input_data.fecha_inicio, input_data.fecha_fin)
             comparativos = self._obtener_comparativos(agencias, periodos, fecha_hoy)
+            asesores_disponibles = sorted(
+                {fila.dimensiones.asesor for fila in comparativos.values()},
+                key=lambda asesor: asesor.casefold(),
+            )
+            asesores = {asesor.strip().upper() for asesor in input_data.asesores}
+            if asesores:
+                comparativos = {
+                    clave: fila
+                    for clave, fila in comparativos.items()
+                    if fila.dimensiones.asesor in asesores
+                }
             return ResumenColocacionResponse(
                 fecha_inicio=periodos.actual_inicio,
                 fecha_fin=periodos.actual_fin,
@@ -82,7 +96,8 @@ class ResumenColocacionService:
                 fecha_fin_periodo_anterior=periodos.anterior_fin,
                 fecha_inicio_mismo_rango_mes_anterior=periodos.mismo_rango_anterior_inicio,
                 fecha_fin_mismo_rango_mes_anterior=periodos.mismo_rango_anterior_fin,
-                agrupaciones=self._filas_comparativas(comparativos),
+                asesores_disponibles=asesores_disponibles,
+                agrupaciones=_agrupar_dimensiones(self._filas_comparativas(comparativos)),
             )
         except HTTPException:
             raise
@@ -252,6 +267,113 @@ def _fila_comparativa(fila: _ComparativoColocacion) -> FilaComparativaColocacion
         monto_mismo_rango_mes_anterior=_monto(fila.saldo_inicial_mismo_rango_mes_anterior),
         variacion_valor=_monto(fila.saldo_inicial - fila.saldo_inicial_mismo_rango_mes_anterior),
     )
+
+
+def _agrupar_dimensiones(
+    filas: list[FilaComparativaColocacion],
+) -> AgrupacionesResumenColocacion:
+    return AgrupacionesResumenColocacion(
+        por_agencia=_agrupar_por_dimension(filas, "agencia"),
+        por_asesor=_agrupar_por_dimension(filas, "asesor", incluir_agencia=True),
+        por_tipo_prestamo=_agrupar_por_dimension(filas, "tipo_prestamo"),
+        por_producto=_agrupar_por_dimension(filas, "producto"),
+        por_segmento=_agrupar_por_dimension(filas, "segmento"),
+        por_condicion=_agrupar_por_dimension(filas, "condicion"),
+        por_tasa_normal=_agrupar_por_dimension(filas, "tasa_valor"),
+        por_tasa_real=_agrupar_por_dimension(filas, "tasa_real", rangos_tasa_real=True),
+    )
+
+
+def _agrupar_por_dimension(
+    filas: list[FilaComparativaColocacion],
+    campo: str,
+    incluir_agencia: bool = False,
+    rangos_tasa_real: bool = False,
+) -> list[FilaAgrupacionColocacion]:
+    agrupadas: dict[tuple[str | None, str], dict[str, str | float | int | None]] = {}
+    for fila in filas:
+        agencia = fila.agencia if incluir_agencia else None
+        valor = getattr(fila, campo)
+        tasa_desde: float | None = None
+        tasa_hasta_exclusiva: float | None = None
+        if rangos_tasa_real and isinstance(valor, int | float):
+            tasa_desde = float(floor(valor))
+            tasa_hasta_exclusiva = tasa_desde + 1
+            dimension = f"{_formatear_tasa(tasa_desde)}% – {_formatear_tasa(tasa_desde + 0.99)}%"
+        else:
+            dimension = _etiqueta_dimension(valor)
+
+        clave = (agencia, dimension)
+        acumulado = agrupadas.setdefault(
+            clave,
+            {
+                "agencia": agencia,
+                "dimension": dimension,
+                "tasa_desde": tasa_desde,
+                "tasa_hasta_exclusiva": tasa_hasta_exclusiva,
+                "numero_operaciones": 0,
+                "numero_operaciones_periodo_anterior": 0,
+                "numero_operaciones_mismo_rango_mes_anterior": 0,
+                "monto_colocado": 0.0,
+                "monto_colocado_periodo_anterior": 0.0,
+                "monto_mismo_rango_mes_anterior": 0.0,
+            },
+        )
+        for atributo in (
+            "numero_operaciones",
+            "numero_operaciones_periodo_anterior",
+            "numero_operaciones_mismo_rango_mes_anterior",
+            "monto_colocado",
+            "monto_colocado_periodo_anterior",
+            "monto_mismo_rango_mes_anterior",
+        ):
+            acumulado[atributo] = acumulado[atributo] + getattr(fila, atributo)  # type: ignore[operator]
+
+    return [
+        FilaAgrupacionColocacion(
+            agencia=acumulado["agencia"],  # type: ignore[arg-type]
+            dimension=str(acumulado["dimension"]),
+            tasa_desde=acumulado["tasa_desde"],  # type: ignore[arg-type]
+            tasa_hasta_exclusiva=acumulado["tasa_hasta_exclusiva"],  # type: ignore[arg-type]
+            numero_operaciones=int(acumulado["numero_operaciones"]),
+            numero_operaciones_periodo_anterior=int(acumulado["numero_operaciones_periodo_anterior"]),
+            numero_operaciones_mismo_rango_mes_anterior=int(acumulado["numero_operaciones_mismo_rango_mes_anterior"]),
+            variacion_operaciones=(
+                int(acumulado["numero_operaciones"])
+                - int(acumulado["numero_operaciones_mismo_rango_mes_anterior"])
+            ),
+            monto_colocado=_monto(float(acumulado["monto_colocado"])),
+            monto_colocado_periodo_anterior=_monto(float(acumulado["monto_colocado_periodo_anterior"])),
+            monto_mismo_rango_mes_anterior=_monto(float(acumulado["monto_mismo_rango_mes_anterior"])),
+            variacion_valor=_monto(
+                float(acumulado["monto_colocado"])
+                - float(acumulado["monto_mismo_rango_mes_anterior"])
+            ),
+        )
+        for acumulado in sorted(
+            agrupadas.values(),
+            key=lambda fila: (str(fila["agencia"] or ""), _orden_dimension(str(fila["dimension"]))),
+        )
+    ]
+
+
+def _etiqueta_dimension(valor: object) -> str:
+    if valor is None:
+        return "SIN DATOS"
+    if isinstance(valor, int | float):
+        return _formatear_tasa(float(valor))
+    return str(valor).strip() or "SIN DATOS"
+
+
+def _formatear_tasa(valor: float) -> str:
+    return f"{valor:g}"
+
+
+def _orden_dimension(valor: str) -> tuple[int, float | str]:
+    try:
+        return (0, float(valor.split("%", maxsplit=1)[0]))
+    except ValueError:
+        return (1, valor)
 
 
 def _cantidad_meses(fecha_inicio: date, fecha_fin: date) -> int:

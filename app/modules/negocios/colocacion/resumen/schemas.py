@@ -8,6 +8,7 @@ class InputResumenColocacion(BaseModel):
     agencias: list[str] = Field(min_length=1, examples=[["MATRIZ", "CUENCA"]])
     fecha_inicio: date = Field(examples=["2026-08-01"])
     fecha_fin: date = Field(examples=["2026-08-31"])
+    asesores: list[str] = Field(default_factory=list, examples=[["JUAN PEREZ"]])
 
     @model_validator(mode="after")
     def validar_rango(self) -> "InputResumenColocacion":
@@ -17,6 +18,8 @@ class InputResumenColocacion(BaseModel):
             raise ValueError("El rango de consulta debe estar dentro del mismo mes.")
         if any(not agencia.strip() for agencia in self.agencias):
             raise ValueError("agencias no puede contener nombres vacíos.")
+        if any(not asesor.strip() for asesor in self.asesores):
+            raise ValueError("asesores no puede contener nombres vacíos.")
         return self
 
 
@@ -39,6 +42,32 @@ class FilaComparativaColocacion(BaseModel):
     variacion_valor: float
 
 
+class FilaAgrupacionColocacion(BaseModel):
+    agencia: str | None = None
+    dimension: str
+    tasa_desde: float | None = None
+    tasa_hasta_exclusiva: float | None = None
+    numero_operaciones: int
+    numero_operaciones_periodo_anterior: int
+    numero_operaciones_mismo_rango_mes_anterior: int
+    variacion_operaciones: int
+    monto_colocado: float
+    monto_colocado_periodo_anterior: float
+    monto_mismo_rango_mes_anterior: float
+    variacion_valor: float
+
+
+class AgrupacionesResumenColocacion(BaseModel):
+    por_agencia: list[FilaAgrupacionColocacion] = Field(default_factory=list)
+    por_asesor: list[FilaAgrupacionColocacion] = Field(default_factory=list)
+    por_tipo_prestamo: list[FilaAgrupacionColocacion] = Field(default_factory=list)
+    por_producto: list[FilaAgrupacionColocacion] = Field(default_factory=list)
+    por_segmento: list[FilaAgrupacionColocacion] = Field(default_factory=list)
+    por_condicion: list[FilaAgrupacionColocacion] = Field(default_factory=list)
+    por_tasa_normal: list[FilaAgrupacionColocacion] = Field(default_factory=list)
+    por_tasa_real: list[FilaAgrupacionColocacion] = Field(default_factory=list)
+
+
 class ResumenColocacionResponse(BaseModel):
     fecha_inicio: date
     fecha_fin: date
@@ -46,7 +75,8 @@ class ResumenColocacionResponse(BaseModel):
     fecha_fin_periodo_anterior: date
     fecha_inicio_mismo_rango_mes_anterior: date
     fecha_fin_mismo_rango_mes_anterior: date
-    agrupaciones: list[FilaComparativaColocacion]
+    asesores_disponibles: list[str]
+    agrupaciones: AgrupacionesResumenColocacion
 
 
 DimensionDetalleColocacion = Literal[
