@@ -10,6 +10,7 @@ from app.modules.analytic.colocacion.colocacion_historico.domain import (
     DetalleColocacion,
     DimensionFiltroColocacion,
     DimensionesColocacion,
+    ResultadoDetalleColocacion,
 )
 
 
@@ -279,10 +280,11 @@ class MongoColocacionHistoricoRepository:
         asesores: list[str] | None = None,
         tasa_desde: float | None = None,
         tasa_hasta_exclusiva: float | None = None,
-    ) -> list[DetalleColocacion]:
-        """Devuelve operaciones históricas con el mismo corte del resumen de Negocios."""
+        limite: int = 500,
+    ) -> ResultadoDetalleColocacion:
+        """Devuelve un prefijo ordenado y sus totales, calculados dentro de Mongo."""
         if not cortes:
-            return []
+            return ResultadoDetalleColocacion([], 0, 0.0)
 
         rangos = [
             {
@@ -370,29 +372,49 @@ class MongoColocacionHistoricoRepository:
                     },
                 }
             },
-            {"$sort": {"numero_operacion": 1}},
+            {
+                "$group": {
+                    "_id": {
+                        "numero_operacion": "$numero_operacion",
+                        "numero_cliente": "$numero_cliente",
+                        "agencia": "$agencia",
+                        "monto_colocado": "$monto_colocado",
+                    },
+                    "detalle": {"$first": "$$ROOT"},
+                }
+            },
+            {"$replaceRoot": {"newRoot": "$detalle"}},
+            {
+                "$facet": {
+                    "items": [
+                        {"$sort": {"numero_operacion": 1, "numero_cliente": 1}},
+                        {"$limit": limite},
+                    ],
+                    "totales": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "total_registros": {"$sum": 1},
+                                "total_monto_colocado": {"$sum": "$monto_colocado"},
+                            }
+                        }
+                    ],
+                }
+            },
         ]
-        return [
-            DetalleColocacion(
-                numero_cliente=str(row.get("numero_cliente") or "SIN DATOS"),
-                nombre_cliente=str(row.get("nombre_cliente") or "SIN DATOS"),
-                numero_operacion=str(row.get("numero_operacion") or "SIN DATOS"),
-                agencia=str(row.get("agencia") or "SIN DATOS"),
-                asesor=str(row.get("asesor") or "SIN DATOS"),
-                tipo_condicion=str(row.get("tipo_condicion") or "SIN DATOS"),
-                producto=str(row.get("producto") or "SIN DATOS"),
-                tipo_prestamo=str(row.get("tipo_prestamo") or "SIN DATOS"),
-                segmento=str(row.get("segmento") or "SIN DATOS"),
-                tasa_nominal=_numero_detalle(row.get("tasa_nominal")),
-                tasa_real=_numero_detalle(row.get("tasa_real")),
-                monto_colocado=float(row.get("monto_colocado") or 0.0),
-            )
-            for row in self.collection.aggregate(
-                pipeline,
-                hint="fecha_corte_1",
-                allowDiskUse=True,
-            )
-        ]
+        resultados = self.collection.aggregate(
+            pipeline,
+            hint="fecha_corte_1",
+            allowDiskUse=True,
+        )
+        resultado = next(iter(resultados), {"items": [], "totales": []})
+        totales = resultado.get("totales") or []
+        total = totales[0] if totales else {}
+        return ResultadoDetalleColocacion(
+            items=[_detalle_desde_documento(row) for row in resultado.get("items") or []],
+            total_registros=int(total.get("total_registros") or 0),
+            total_monto_colocado=float(total.get("total_monto_colocado") or 0.0),
+        )
 
     def _obtener_colocaciones_agrupadas(
         self,
@@ -577,3 +599,20 @@ class MongoColocacionHistoricoRepository:
 
 def _numero_detalle(valor: object) -> float | None:
     return float(valor) if isinstance(valor, int | float) and valor >= 0 else None
+
+
+def _detalle_desde_documento(row: MongoDocument) -> DetalleColocacion:
+    return DetalleColocacion(
+        numero_cliente=str(row.get("numero_cliente") or "SIN DATOS"),
+        nombre_cliente=str(row.get("nombre_cliente") or "SIN DATOS"),
+        numero_operacion=str(row.get("numero_operacion") or "SIN DATOS"),
+        agencia=str(row.get("agencia") or "SIN DATOS"),
+        asesor=str(row.get("asesor") or "SIN DATOS"),
+        tipo_condicion=str(row.get("tipo_condicion") or "SIN DATOS"),
+        producto=str(row.get("producto") or "SIN DATOS"),
+        tipo_prestamo=str(row.get("tipo_prestamo") or "SIN DATOS"),
+        segmento=str(row.get("segmento") or "SIN DATOS"),
+        tasa_nominal=_numero_detalle(row.get("tasa_nominal")),
+        tasa_real=_numero_detalle(row.get("tasa_real")),
+        monto_colocado=float(row.get("monto_colocado") or 0.0),
+    )

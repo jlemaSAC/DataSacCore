@@ -61,3 +61,12 @@ class DetalleColocacion:
     tasa_nominal: float | None
     tasa_real: float | None
     monto_colocado: float
+
+
+@dataclass(frozen=True)
+class ResultadoDetalleColocacion:
+    """Página parcial y totales calculados por una fuente de colocación."""
+
+    items: list[DetalleColocacion]
+    total_registros: int
+    total_monto_colocado: float

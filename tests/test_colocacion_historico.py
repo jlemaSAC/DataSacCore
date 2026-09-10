@@ -176,6 +176,29 @@ class FakeResumenSqlSession:
         ]
 
 
+class FakeDetalleSqlResult:
+    def __init__(self, total: tuple[int, float] | None = None) -> None:
+        self.total = total
+
+    def one(self):
+        assert self.total is not None
+        return self.total
+
+    def __iter__(self):
+        return iter(())
+
+
+class FakeDetalleSqlSession:
+    def __init__(self) -> None:
+        self.statements = []
+
+    def execute(self, statement):
+        self.statements.append(statement)
+        if len(self.statements) == 1:
+            return FakeDetalleSqlResult((2, 125.0))
+        return FakeDetalleSqlResult()
+
+
 class FakeMongoRepository:
     def __init__(self, datos: list[ColocacionAgrupada] | None = None) -> None:
         self.datos = datos or []
@@ -327,6 +350,55 @@ def test_repositorios_livianos_omiten_dimensiones_no_usadas() -> None:
     assert datos[0].dimensiones.tasa_real_valor == 17.0
     assert datos[0].dimensiones.tasa_valor == 16.0
     assert datos[0].dimensiones.provincia == "SIN DATOS"
+
+
+def test_repositorio_mongo_detalle_calcula_totales_y_limita_en_la_base() -> None:
+    mongo_db = FakeMongoDatabase()
+    repository = MongoColocacionHistoricoRepository(mongo_db)  # type: ignore[arg-type]
+
+    resultado = repository.obtener_detalles_resumen(
+        [
+            CorteMensual(
+                anio=2026,
+                mes=1,
+                fecha_corte="20260131",
+                fecha_inicio=datetime(2026, 1, 1),
+                fecha_fin=datetime(2026, 1, 31, 23, 59, 59),
+            )
+        ],
+        ["MATRIZ"],
+        "agencia",
+        "MATRIZ",
+        limite=25,
+    )
+
+    facet = mongo_db.collection.pipeline[-1]["$facet"]
+    assert facet["items"][-1] == {"$limit": 25}
+    assert "$group" in facet["totales"][0]
+    assert resultado.total_registros == 0
+    assert resultado.items == []
+
+
+def test_repositorio_sql_detalle_consulta_totales_y_prefijo_limitado() -> None:
+    db = FakeDetalleSqlSession()
+    repository = SqlColocacionHistoricoRepository(db)  # type: ignore[arg-type]
+
+    resultado = repository.obtener_detalles_resumen(
+        datetime(2026, 7, 3),
+        datetime(2026, 7, 3, 23, 59, 59),
+        ["MATRIZ"],
+        "agencia",
+        "MATRIZ",
+        limite=25,
+    )
+
+    sql_items = str(db.statements[1].compile(dialect=mssql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert len(db.statements) == 2
+    assert "TOP 25" in sql_items
+    assert "ORDER BY" in sql_items
+    assert resultado.total_registros == 2
+    assert resultado.total_monto_colocado == 125.0
+    assert resultado.items == []
 
 
 def test_servicio_consolida_mongo_sql_y_genera_resumen_dashboard() -> None:

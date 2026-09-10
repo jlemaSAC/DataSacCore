@@ -9,6 +9,7 @@ from app.modules.analytic.colocacion.colocacion_historico.domain import (
     ColocacionAgrupada,
     DetalleColocacion,
     DimensionesColocacion,
+    ResultadoDetalleColocacion,
 )
 from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.auth.schemas import AuthContext, UsuarioTokenPayload
@@ -69,6 +70,7 @@ class FakeColocacionHistoricoService:
         self.llamadas: list[tuple[date, date, date, list[str]]] = []
         self.llamadas_detalle: list[tuple] = []
         self.rango_tasa_real: tuple[float | None, float | None] | None = None
+        self.limite_detalle: int | None = None
 
     def obtener_agrupaciones_resumen_por_rango(self, fecha_inicio, fecha_fin, fecha_hoy, agencias):
         self.llamadas.append((fecha_inicio, fecha_fin, fecha_hoy, agencias))
@@ -93,6 +95,7 @@ class FakeColocacionHistoricoService:
         asesores,
         tasa_desde=None,
         tasa_hasta_exclusiva=None,
+        limite=500,
     ):
         self.llamadas_detalle.append(
             (
@@ -106,7 +109,8 @@ class FakeColocacionHistoricoService:
             )
         )
         self.rango_tasa_real = (tasa_desde, tasa_hasta_exclusiva)
-        return [
+        self.limite_detalle = limite
+        detalles = [
             DetalleColocacion(
                 numero_cliente="99014201",
                 nombre_cliente="PILATAXI NAULA ELENA",
@@ -136,6 +140,11 @@ class FakeColocacionHistoricoService:
                 monto_colocado=5000.0,
             ),
         ]
+        return ResultadoDetalleColocacion(
+            items=detalles[:limite],
+            total_registros=len(detalles),
+            total_monto_colocado=sum(detalle.monto_colocado for detalle in detalles),
+        )
 
 
 def test_servicio_usa_agencias_por_nombre_y_compara_el_mismo_rango_del_mes_anterior() -> None:
@@ -319,6 +328,7 @@ def test_endpoint_detalle_filtra_dimension_y_pagina() -> None:
     body = response.json()
     assert body["total_registros"] == 2
     assert body["total_monto_colocado"] == 10000.0
+    assert historico.limite_detalle == 2
     assert body["items"] == [
         {
             "numero_cliente": "99035714",

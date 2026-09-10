@@ -28,6 +28,7 @@ from app.modules.analytic.colocacion.colocacion_historico.domain import (
     DetalleColocacion,
     DimensionFiltroColocacion,
     DimensionesColocacion,
+    ResultadoDetalleColocacion,
 )
 
 
@@ -199,8 +200,9 @@ class SqlColocacionHistoricoRepository:
         asesores: list[str] | None = None,
         tasa_desde: float | None = None,
         tasa_hasta_exclusiva: float | None = None,
-    ) -> list[DetalleColocacion]:
-        """Obtiene el detalle SQL del día actual, con la misma semántica del resumen."""
+        limite: int = 500,
+    ) -> ResultadoDetalleColocacion:
+        """Devuelve un prefijo ordenado y sus totales sin materializar todo el detalle."""
         agencia = _texto_sql(Agencia.nombre)
         condicion = _texto_sql(TipoEmision.nombre)
         tipo_prestamo = _texto_sql(TipoPrestamo.nombre)
@@ -241,7 +243,7 @@ class SqlColocacionHistoricoRepository:
         if asesores:
             filtros.append(asesor.in_([valor.strip().upper() for valor in asesores]))
 
-        statement = (
+        base = (
             select(
                 _texto_sql(func.cast(Cliente.numero, String)).label("numero_cliente"),
                 _texto_sql(Persona.nombre).label("nombre_cliente"),
@@ -288,9 +290,21 @@ class SqlColocacionHistoricoRepository:
             .where(Prestamo.fecha_adjudicacion <= fecha_fin)
             .where(*filtros)
             .distinct()
-            .order_by(literal_column("numero_operacion"))
+            .subquery()
         )
-        return [
+        total_registros, total_monto_colocado = self.db.execute(
+            select(
+                func.count().label("total_registros"),
+                func.coalesce(func.sum(base.c.monto_colocado), 0).label("total_monto_colocado"),
+            )
+        ).one()
+        filas = self.db.execute(
+            select(base)
+            .order_by(base.c.numero_operacion, base.c.numero_cliente)
+            .limit(limite)
+        )
+        return ResultadoDetalleColocacion(
+            items=[
             DetalleColocacion(
                 numero_cliente=str(row.numero_cliente or "SIN DATOS"),
                 nombre_cliente=str(row.nombre_cliente or "SIN DATOS"),
@@ -305,8 +319,11 @@ class SqlColocacionHistoricoRepository:
                 tasa_real=float(row.tasa_real) if row.tasa_real is not None else None,
                 monto_colocado=float(row.monto_colocado or 0.0),
             )
-            for row in self.db.execute(statement)
-        ]
+            for row in filas
+            ],
+            total_registros=int(total_registros or 0),
+            total_monto_colocado=float(total_monto_colocado or 0.0),
+        )
 
     def obtener_colocaciones_agrupadas(
         self,

@@ -10,6 +10,7 @@ from app.modules.analytic.colocacion.colocacion_historico.domain import (
     DetalleColocacion,
     DimensionFiltroColocacion,
     DimensionesColocacion,
+    ResultadoDetalleColocacion,
 )
 from app.modules.analytic.colocacion.colocacion_historico.repositories.mongo_colocacion_historico_repository import (
     CorteMensual,
@@ -224,11 +225,12 @@ class ColocacionHistoricoService:
         asesores: list[str] | None = None,
         tasa_desde: float | None = None,
         tasa_hasta_exclusiva: float | None = None,
-    ) -> list[DetalleColocacion]:
-        """Obtiene operaciones del detalle usando exactamente el corte híbrido del resumen."""
+        limite: int = 500,
+    ) -> ResultadoDetalleColocacion:
+        """Obtiene un prefijo ordenado y los totales del corte híbrido del resumen."""
         segmentos = self._segmentar_rango(fecha_desde, fecha_hasta)
         cortes = self._construir_cortes_por_rango(segmentos, fecha_hoy)
-        detalles = self.mongo_repository.obtener_detalles_resumen(
+        resultado_mongo = self.mongo_repository.obtener_detalles_resumen(
             cortes,
             agencias,
             dimension,
@@ -236,23 +238,33 @@ class ColocacionHistoricoService:
             asesores,
             tasa_desde,
             tasa_hasta_exclusiva,
+            limite,
         )
+        detalles = list(resultado_mongo.items)
+        total_registros = resultado_mongo.total_registros
+        total_monto_colocado = resultado_mongo.total_monto_colocado
         if fecha_desde <= fecha_hoy <= fecha_hasta:
-            detalles.extend(
-                self.sql_repository.obtener_detalles_resumen(
-                    datetime.combine(fecha_hoy, time.min),
-                    datetime.combine(fecha_hoy, time.max),
-                    agencias,
-                    dimension,
-                    valor_dimension,
-                    asesores,
-                    tasa_desde,
-                    tasa_hasta_exclusiva,
-                )
+            resultado_sql = self.sql_repository.obtener_detalles_resumen(
+                datetime.combine(fecha_hoy, time.min),
+                datetime.combine(fecha_hoy, time.max),
+                agencias,
+                dimension,
+                valor_dimension,
+                asesores,
+                tasa_desde,
+                tasa_hasta_exclusiva,
+                limite,
             )
-        return sorted(
-            _sin_duplicados_detalle(detalles),
-            key=lambda detalle: (detalle.numero_operacion, detalle.numero_cliente),
+            detalles.extend(resultado_sql.items)
+            total_registros += resultado_sql.total_registros
+            total_monto_colocado += resultado_sql.total_monto_colocado
+        return ResultadoDetalleColocacion(
+            items=sorted(
+                _sin_duplicados_detalle(detalles),
+                key=lambda detalle: (detalle.numero_operacion, detalle.numero_cliente),
+            ),
+            total_registros=total_registros,
+            total_monto_colocado=total_monto_colocado,
         )
 
     @staticmethod

@@ -113,7 +113,8 @@ class ResumenColocacionService:
         try:
             agencias = list(dict.fromkeys(agencia.strip() for agencia in input_data.agencias))
             asesores = list(dict.fromkeys(asesor.strip() for asesor in input_data.asesores))
-            detalles = self.colocacion_historico_service.obtener_detalles_resumen_por_rango(
+            inicio = (input_data.pagina - 1) * input_data.tamano_pagina
+            resultado = self.colocacion_historico_service.obtener_detalles_resumen_por_rango(
                 input_data.fecha_inicio,
                 input_data.fecha_fin,
                 fecha_hoy,
@@ -123,9 +124,9 @@ class ResumenColocacionService:
                 asesores,
                 input_data.tasa_desde,
                 input_data.tasa_hasta_exclusiva,
+                inicio + input_data.tamano_pagina,
             )
-            inicio = (input_data.pagina - 1) * input_data.tamano_pagina
-            items = detalles[inicio : inicio + input_data.tamano_pagina]
+            items = resultado.items[inicio : inicio + input_data.tamano_pagina]
             return DetalleResumenColocacionResponse(
                 fecha_inicio=input_data.fecha_inicio,
                 fecha_fin=input_data.fecha_fin,
@@ -133,8 +134,8 @@ class ResumenColocacionService:
                 valor_dimension=input_data.valor_dimension.strip(),
                 pagina=input_data.pagina,
                 tamano_pagina=input_data.tamano_pagina,
-                total_registros=len(detalles),
-                total_monto_colocado=_monto(sum(detalle.monto_colocado for detalle in detalles)),
+                total_registros=resultado.total_registros,
+                total_monto_colocado=_monto(resultado.total_monto_colocado),
                 items=[
                     FilaDetalleColocacion(
                         numero_cliente=detalle.numero_cliente,
