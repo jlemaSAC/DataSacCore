@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
     PrestamoRecuperacion,
     RecuperacionEtiquetada,
+    ResultadoResumenRecuperacion,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.repositories.mongo_recuperacion_historico_repository import (
     MongoRecuperacionHistoricoRepository,
@@ -58,6 +59,25 @@ class RecuperacionHistoricoService:
     ) -> None:
         self.mongo_repository = mongo_repository
         self.sql_repository = sql_repository
+
+    def obtener_agrupaciones_resumen_por_rango(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_hoy: date,
+        agencias: list[str],
+        asesores: list[str] | None = None,
+        cargos: list[str] | None = None,
+    ) -> ResultadoResumenRecuperacion:
+        """Hecho agregado para Negocios, conservando la consulta dentro de Analítica."""
+        return self.mongo_repository.obtener_resumen_negocios(
+            fecha_desde,
+            fecha_hasta,
+            fecha_hoy,
+            agencias,
+            asesores,
+            cargos,
+        )
 
     def obtener_recuperacion_por_rango(
         self,

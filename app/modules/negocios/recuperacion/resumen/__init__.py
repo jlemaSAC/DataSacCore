@@ -1,0 +1,1 @@
+"""Resumen comparativo de recuperación."""

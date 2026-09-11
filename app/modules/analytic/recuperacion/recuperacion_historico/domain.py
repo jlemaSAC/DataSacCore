@@ -45,3 +45,18 @@ class PrestamoRecuperacion:
     estado_prestamo_fin: str
     calificacion_inicio: str = "SIN DATOS"
     calificacion_fin: str = "SIN DATOS"
+
+
+@dataclass(frozen=True)
+class RecuperacionResumenAgrupada:
+    dimension: str
+    numero_operaciones: int
+    monto_recuperado: float
+    agencia: str | None = None
+
+
+@dataclass(frozen=True)
+class ResultadoResumenRecuperacion:
+    agrupaciones: dict[str, list[RecuperacionResumenAgrupada]]
+    asesores_disponibles: set[str]
+    cargos_disponibles: set[str]
