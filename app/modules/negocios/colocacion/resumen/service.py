@@ -82,13 +82,7 @@ class ResumenColocacionService:
                 {fila.dimensiones.asesor for fila in comparativos.values()},
                 key=lambda asesor: asesor.casefold(),
             )
-            asesores = {asesor.strip().upper() for asesor in input_data.asesores}
-            if asesores:
-                comparativos = {
-                    clave: fila
-                    for clave, fila in comparativos.items()
-                    if fila.dimensiones.asesor in asesores
-                }
+            filas_filtro = self._filas_comparativas(comparativos)
             return ResumenColocacionResponse(
                 fecha_inicio=periodos.actual_inicio,
                 fecha_fin=periodos.actual_fin,
@@ -97,7 +91,8 @@ class ResumenColocacionService:
                 fecha_inicio_mismo_rango_mes_anterior=periodos.mismo_rango_anterior_inicio,
                 fecha_fin_mismo_rango_mes_anterior=periodos.mismo_rango_anterior_fin,
                 asesores_disponibles=asesores_disponibles,
-                agrupaciones=_agrupar_dimensiones(self._filas_comparativas(comparativos)),
+                filas_filtro=filas_filtro,
+                agrupaciones=_agrupar_dimensiones(filas_filtro),
             )
         except HTTPException:
             raise

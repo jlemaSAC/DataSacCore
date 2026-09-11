@@ -56,7 +56,33 @@ class RecuperacionResumenAgrupada:
 
 
 @dataclass(frozen=True)
+class CuboFiltroRecuperacion:
+    tipo_dimension: str
+    dimension: str
+    agencia: str | None
+    asesor: str
+    cargo: str
+    numero_operaciones: int
+    monto_recuperado: float
+
+
+@dataclass(frozen=True)
 class ResultadoResumenRecuperacion:
     agrupaciones: dict[str, list[RecuperacionResumenAgrupada]]
     asesores_disponibles: set[str]
     cargos_disponibles: set[str]
+    cubos_filtro: list[CuboFiltroRecuperacion]
+
+
+@dataclass(frozen=True)
+class DetalleRecuperacionAgrupado:
+    numero_prestamo: str
+    fecha_ultimo_cobro: date
+    total_recuperado_periodo: float
+
+
+@dataclass(frozen=True)
+class ResultadoDetalleRecuperacion:
+    items: list[DetalleRecuperacionAgrupado]
+    total_registros: int
+    total_recuperado_periodo: float

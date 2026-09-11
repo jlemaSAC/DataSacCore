@@ -8,7 +8,6 @@ class InputResumenColocacion(BaseModel):
     agencias: list[str] = Field(min_length=1, examples=[["MATRIZ", "CUENCA"]])
     fecha_inicio: date = Field(examples=["2026-08-01"])
     fecha_fin: date = Field(examples=["2026-08-31"])
-    asesores: list[str] = Field(default_factory=list, examples=[["JUAN PEREZ"]])
 
     @model_validator(mode="after")
     def validar_rango(self) -> "InputResumenColocacion":
@@ -18,8 +17,6 @@ class InputResumenColocacion(BaseModel):
             raise ValueError("El rango de consulta debe estar dentro del mismo mes.")
         if any(not agencia.strip() for agencia in self.agencias):
             raise ValueError("agencias no puede contener nombres vacíos.")
-        if any(not asesor.strip() for asesor in self.asesores):
-            raise ValueError("asesores no puede contener nombres vacíos.")
         return self
 
 
@@ -76,6 +73,7 @@ class ResumenColocacionResponse(BaseModel):
     fecha_inicio_mismo_rango_mes_anterior: date
     fecha_fin_mismo_rango_mes_anterior: date
     asesores_disponibles: list[str]
+    filas_filtro: list[FilaComparativaColocacion]
     agrupaciones: AgrupacionesResumenColocacion
 
 

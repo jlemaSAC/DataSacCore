@@ -233,7 +233,7 @@ def test_detalle_acepta_tasas_numericas_y_sin_datos() -> None:
     assert tasa_normal_sin_datos.valor_dimension == "SIN DATOS"
 
 
-def test_resumen_filtra_asesores_y_conserva_los_disponibles() -> None:
+def test_resumen_entrega_filas_para_filtrar_asesores_en_frontend() -> None:
     service = ResumenColocacionService(FakeColocacionHistoricoService())  # type: ignore[arg-type]
 
     respuesta = service.obtener_resumen(
@@ -241,14 +241,13 @@ def test_resumen_filtra_asesores_y_conserva_los_disponibles() -> None:
             agencias=["MATRIZ"],
             fecha_inicio=date(2026, 8, 15),
             fecha_fin=date(2026, 8, 25),
-            asesores=["ASESOR INEXISTENTE"],
         ),
         auth_context(),
     )
 
     assert respuesta.asesores_disponibles == ["JUAN PEREZ"]
-    assert respuesta.agrupaciones.por_agencia == []
-    assert respuesta.agrupaciones.por_asesor == []
+    assert respuesta.filas_filtro[0].asesor == "JUAN PEREZ"
+    assert respuesta.agrupaciones.por_agencia
 
 
 def test_detalle_acepta_rango_exclusivo_de_tasa_real() -> None:
@@ -305,6 +304,7 @@ def test_endpoint_devuelve_agrupaciones_dimensionales() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["asesores_disponibles"] == ["JUAN PEREZ"]
+    assert body["filas_filtro"][0]["asesor"] == "JUAN PEREZ"
     assert body["agrupaciones"]["por_asesor"][0]["dimension"] == "JUAN PEREZ"
     assert body["agrupaciones"]["por_tasa_real"][0]["dimension"] == "17% – 17.99%"
     assert body["agrupaciones"]["por_agencia"][0]["numero_operaciones"] == 10

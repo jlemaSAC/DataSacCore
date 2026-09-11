@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
+    ResultadoDetalleRecuperacion,
     PrestamoRecuperacion,
     RecuperacionEtiquetada,
     ResultadoResumenRecuperacion,
@@ -66,8 +67,6 @@ class RecuperacionHistoricoService:
         fecha_hasta: date,
         fecha_hoy: date,
         agencias: list[str],
-        asesores: list[str] | None = None,
-        cargos: list[str] | None = None,
     ) -> ResultadoResumenRecuperacion:
         """Hecho agregado para Negocios, conservando la consulta dentro de Analítica."""
         return self.mongo_repository.obtener_resumen_negocios(
@@ -75,8 +74,32 @@ class RecuperacionHistoricoService:
             fecha_hasta,
             fecha_hoy,
             agencias,
-            asesores,
-            cargos,
+        )
+
+    def obtener_detalle_resumen_por_rango(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_hoy: date,
+        agencias: list[str],
+        dimension: str,
+        valor_dimension: str,
+        asesores: list[str],
+        cargos: list[str],
+        offset: int,
+        limite: int,
+    ) -> ResultadoDetalleRecuperacion:
+        return self.mongo_repository.obtener_detalle_resumen_negocios(
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
+            fecha_actual=fecha_hoy,
+            agencias=agencias,
+            dimension=dimension,
+            valor_dimension=valor_dimension,
+            asesores=asesores,
+            cargos=cargos,
+            offset=offset,
+            limite=limite,
         )
 
     def obtener_recuperacion_por_rango(

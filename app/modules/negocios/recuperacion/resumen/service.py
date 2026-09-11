@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from fastapi import HTTPException
 
 from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
+    ResultadoDetalleRecuperacion,
     ResultadoResumenRecuperacion,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.service import (
@@ -14,9 +15,17 @@ from app.modules.analytic.recuperacion.recuperacion_historico.service import (
 from app.modules.auth.schemas import AuthContext
 from app.modules.negocios.recuperacion.resumen.schemas import (
     AgrupacionesResumenRecuperacion,
+    CuboFiltroRecuperacion,
+    DetalleResumenRecuperacionResponse,
     FilaAgrupacionRecuperacion,
+    FilaDetalleRecuperacion,
+    InputDetalleResumenRecuperacion,
     InputResumenRecuperacion,
     ResumenRecuperacionResponse,
+    TotalesPaginaDetalleRecuperacion,
+)
+from app.modules.negocios.recuperacion.resumen.repositories.sql_detalle_recuperacion_repository import (
+    SqlDetalleRecuperacionRepository,
 )
 
 
@@ -56,8 +65,13 @@ class _ComparativoRecuperacion:
 
 
 class ResumenRecuperacionService:
-    def __init__(self, recuperacion_historico_service: RecuperacionHistoricoService) -> None:
+    def __init__(
+        self,
+        recuperacion_historico_service: RecuperacionHistoricoService,
+        detalle_sql_repository: SqlDetalleRecuperacionRepository | None = None,
+    ) -> None:
         self.recuperacion_historico_service = recuperacion_historico_service
+        self.detalle_sql_repository = detalle_sql_repository
 
     def obtener_resumen(
         self,
@@ -74,10 +88,13 @@ class ResumenRecuperacionService:
 
         try:
             periodos = self._construir_periodos(input_data.fecha_inicio, input_data.fecha_fin)
-            comparativos, asesores_disponibles, cargos_disponibles = self._obtener_comparativos(
+            (
+                comparativos,
+                asesores_disponibles,
+                cargos_disponibles,
+                cubos_filtro,
+            ) = self._obtener_comparativos(
                 input_data.agencias,
-                input_data.asesores,
-                input_data.cargos,
                 periodos,
                 fecha_hoy,
             )
@@ -90,6 +107,7 @@ class ResumenRecuperacionService:
                 fecha_fin_mismo_rango_mes_anterior=periodos.mismo_rango_anterior_fin,
                 asesores_disponibles=sorted(asesores_disponibles, key=str.casefold),
                 cargos_disponibles=sorted(cargos_disponibles, key=str.casefold),
+                cubos_filtro=cubos_filtro,
                 agrupaciones=AgrupacionesResumenRecuperacion(
                     por_agencia=_filas(comparativos["agencia"]),
                     por_asesor=_filas(comparativos["asesor"]),
@@ -110,23 +128,145 @@ class ResumenRecuperacionService:
                 detail="Error consultando resumen de recuperacion.",
             ) from exc
 
+    def obtener_detalle(
+        self,
+        input_data: InputDetalleResumenRecuperacion,
+        auth_context: AuthContext,
+    ) -> DetalleResumenRecuperacionResponse:
+        fecha_sistema = auth_context.usuario.fecha_sistema
+        fecha_hoy = fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
+        if input_data.fecha_fin > fecha_hoy:
+            raise HTTPException(
+                status_code=400,
+                detail="fecha_fin no puede ser posterior a la fecha del sistema.",
+            )
+        if self.detalle_sql_repository is None:
+            raise HTTPException(
+                status_code=500,
+                detail="El repositorio de detalle de recuperación no está configurado.",
+            )
+
+        try:
+            resultado: ResultadoDetalleRecuperacion = (
+                self.recuperacion_historico_service.obtener_detalle_resumen_por_rango(
+                    fecha_desde=input_data.fecha_inicio,
+                    fecha_hasta=input_data.fecha_fin,
+                    fecha_hoy=fecha_hoy,
+                    agencias=input_data.agencias,
+                    dimension=input_data.dimension,
+                    valor_dimension=input_data.valor_dimension,
+                    asesores=input_data.asesores,
+                    cargos=input_data.cargos,
+                    offset=(input_data.pagina - 1) * input_data.tamano_pagina,
+                    limite=input_data.tamano_pagina,
+                )
+            )
+            numeros = [item.numero_prestamo for item in resultado.items]
+            datos_actuales = self.detalle_sql_repository.obtener_datos_actuales(numeros)
+            items: list[FilaDetalleRecuperacion] = []
+            for recuperacion in resultado.items:
+                actual = datos_actuales.get(recuperacion.numero_prestamo)
+                if actual is None:
+                    logger.warning(
+                        "Préstamo de recuperación no encontrado en SQL: %s",
+                        recuperacion.numero_prestamo,
+                    )
+                    items.append(
+                        FilaDetalleRecuperacion(
+                            numero_prestamo=recuperacion.numero_prestamo,
+                            nombre="SIN DATOS",
+                            estado_prestamo="SIN DATOS",
+                            calificacion_actual="SIN DATOS",
+                            fecha_ultimo_cobro=recuperacion.fecha_ultimo_cobro,
+                            saldo_capital=0,
+                            total_recuperado_mes=round(
+                                recuperacion.total_recuperado_periodo, 2
+                            ),
+                            pendiente_pago=0,
+                            valor_al_dia_mas_cuota_actual=0,
+                            cuotas_pagadas=0,
+                            total_cuotas=0,
+                            es_diferido=False,
+                        )
+                    )
+                else:
+                    items.append(
+                        FilaDetalleRecuperacion(
+                            socio=actual.socio,
+                            numero_prestamo=recuperacion.numero_prestamo,
+                            nombre=actual.nombre,
+                            estado_prestamo=actual.estado_prestamo,
+                            calificacion_actual=actual.calificacion_actual,
+                            fecha_ultimo_cobro=recuperacion.fecha_ultimo_cobro,
+                            saldo_capital=round(actual.saldo_capital, 2),
+                            total_recuperado_mes=round(
+                                recuperacion.total_recuperado_periodo, 2
+                            ),
+                            pendiente_pago=round(actual.pendiente_pago, 2),
+                            valor_al_dia_mas_cuota_actual=round(
+                                actual.valor_al_dia_mas_cuota_actual, 2
+                            ),
+                            cuotas_pagadas=actual.cuotas_pagadas,
+                            total_cuotas=actual.total_cuotas,
+                            es_diferido=actual.es_diferido,
+                        )
+                    )
+            total_paginas = (
+                (resultado.total_registros + input_data.tamano_pagina - 1)
+                // input_data.tamano_pagina
+            )
+            return DetalleResumenRecuperacionResponse(
+                fecha_inicio=input_data.fecha_inicio,
+                fecha_fin=input_data.fecha_fin,
+                dimension=input_data.dimension,
+                valor_dimension=input_data.valor_dimension,
+                pagina=input_data.pagina,
+                tamano_pagina=input_data.tamano_pagina,
+                total_registros=resultado.total_registros,
+                total_paginas=total_paginas,
+                total_recuperado_mes=round(
+                    resultado.total_recuperado_periodo, 2
+                ),
+                totales_pagina=TotalesPaginaDetalleRecuperacion(
+                    saldo_capital=round(sum(item.saldo_capital for item in items), 2),
+                    total_recuperado_mes=round(
+                        sum(item.total_recuperado_mes for item in items), 2
+                    ),
+                    pendiente_pago=round(sum(item.pendiente_pago for item in items), 2),
+                    valor_al_dia_mas_cuota_actual=round(
+                        sum(item.valor_al_dia_mas_cuota_actual for item in items), 2
+                    ),
+                    cuotas_pagadas=sum(item.cuotas_pagadas for item in items),
+                    total_cuotas=sum(item.total_cuotas for item in items),
+                ),
+                items=items,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Error consultando detalle de recuperación")
+            raise HTTPException(
+                status_code=500,
+                detail="Error consultando detalle de recuperación.",
+            ) from exc
+
     def _obtener_comparativos(
         self,
         agencias: list[str],
-        asesores: list[str],
-        cargos: list[str],
         periodos: PeriodosComparacionRecuperacion,
         fecha_hoy: date,
     ) -> tuple[
         dict[str, dict[tuple[str | None, str], _ComparativoRecuperacion]],
         set[str],
         set[str],
+        list[CuboFiltroRecuperacion],
     ]:
         comparativos: dict[
             str, dict[tuple[str | None, str], _ComparativoRecuperacion]
         ] = {dimension: {} for dimension in TIPOS_DIMENSION}
         asesores_disponibles: set[str] = set()
         cargos_disponibles: set[str] = set()
+        cubos_filtro: list[CuboFiltroRecuperacion] = []
         rangos = (
             ("actual", periodos.actual_inicio, periodos.actual_fin),
             ("anterior", periodos.anterior_inicio, periodos.anterior_fin),
@@ -143,12 +283,23 @@ class ResumenRecuperacionService:
                     fecha_fin,
                     fecha_hoy,
                     agencias,
-                    asesores,
-                    cargos,
                 )
             )
             asesores_disponibles.update(resultado.asesores_disponibles)
             cargos_disponibles.update(resultado.cargos_disponibles)
+            cubos_filtro.extend(
+                CuboFiltroRecuperacion(
+                    periodo=nombre,
+                    tipo_dimension=cubo.tipo_dimension,
+                    dimension=cubo.dimension,
+                    agencia=cubo.agencia,
+                    asesor=cubo.asesor,
+                    cargo=cubo.cargo,
+                    numero_operaciones=cubo.numero_operaciones,
+                    monto_recuperado=round(cubo.monto_recuperado, 2),
+                )
+                for cubo in resultado.cubos_filtro
+            )
             for tipo_dimension, agrupaciones in resultado.agrupaciones.items():
                 for agrupacion in agrupaciones:
                     clave = (agrupacion.agencia, agrupacion.dimension)
@@ -170,7 +321,7 @@ class ResumenRecuperacionService:
                             agrupacion.numero_operaciones
                         )
                         fila.monto_mismo_rango_mes_anterior += agrupacion.monto_recuperado
-        return comparativos, asesores_disponibles, cargos_disponibles
+        return comparativos, asesores_disponibles, cargos_disponibles, cubos_filtro
 
     @staticmethod
     def _construir_periodos(

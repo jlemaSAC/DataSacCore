@@ -5,10 +5,13 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 
 from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
+    CuboFiltroRecuperacion,
+    DetalleRecuperacionAgrupado,
     PrestamoRecuperacion,
     RecuperacionEtiquetada,
     RecuperacionResumenAgrupada,
     ResultadoResumenRecuperacion,
+    ResultadoDetalleRecuperacion,
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.schemas import (
     InputRecuperacionHistoricoAgrupado,
@@ -224,8 +227,6 @@ class MongoRecuperacionHistoricoRepository:
         fecha_hasta: date,
         fecha_actual: date,
         agencias: list[str],
-        asesores: list[str] | None = None,
-        cargos: list[str] | None = None,
     ) -> ResultadoResumenRecuperacion:
         """Agrega todas las dimensiones del resumen sin materializar movimientos."""
         desde = fecha_desde.strftime("%Y%m%d")
@@ -246,6 +247,7 @@ class MongoRecuperacionHistoricoRepository:
         ] = {dimension: {} for dimension in DIMENSIONES_RESUMEN_NEGOCIOS}
         asesores_disponibles: set[str] = set()
         cargos_disponibles: set[str] = set()
+        cubos_filtro: list[CuboFiltroRecuperacion] = []
         for collection, consulta_desde, consulta_hasta in consultas:
             pipeline = self._construir_pipeline_resumen_negocios(
                 consulta_desde,
@@ -253,8 +255,6 @@ class MongoRecuperacionHistoricoRepository:
                 hasta,
                 actual,
                 agencias,
-                asesores or [],
-                cargos or [],
             )
             documento = next(iter(collection.aggregate(pipeline, allowDiskUse=True)), None) or {}
             asesores_disponibles.update(
@@ -263,6 +263,23 @@ class MongoRecuperacionHistoricoRepository:
             cargos_disponibles.update(
                 _catalogo_desde_facet(documento.get("cargos_disponibles", []))
             )
+            for tipo_dimension in DIMENSIONES_RESUMEN_NEGOCIOS:
+                cubos_filtro.extend(
+                    CuboFiltroRecuperacion(
+                        tipo_dimension=tipo_dimension,
+                        dimension=_texto(fila.get("dimension")),
+                        agencia=(
+                            _texto(fila.get("agencia"))
+                            if tipo_dimension == "asesor"
+                            else None
+                        ),
+                        asesor=_texto(fila.get("asesor")),
+                        cargo=_texto(fila.get("cargo")),
+                        numero_operaciones=int(fila.get("numero_operaciones") or 0),
+                        monto_recuperado=float(fila.get("monto_recuperado") or 0),
+                    )
+                    for fila in documento.get(f"filtro_{tipo_dimension}", [])
+                )
             for tipo_dimension in DIMENSIONES_RESUMEN_NEGOCIOS:
                 for fila in documento.get(tipo_dimension, []):
                     etiqueta = _texto(fila.get("dimension"))
@@ -293,7 +310,213 @@ class MongoRecuperacionHistoricoRepository:
             },
             asesores_disponibles=asesores_disponibles,
             cargos_disponibles=cargos_disponibles,
+            cubos_filtro=cubos_filtro,
         )
+
+    def obtener_detalle_resumen_negocios(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_actual: date,
+        agencias: list[str],
+        dimension: str,
+        valor_dimension: str,
+        asesores: list[str],
+        cargos: list[str],
+        offset: int,
+        limite: int,
+    ) -> ResultadoDetalleRecuperacion:
+        """Pagina préstamos recuperados y evita materializar movimientos en la API."""
+        desde = fecha_desde.strftime("%Y%m%d")
+        hasta = fecha_hasta.strftime("%Y%m%d")
+        actual = fecha_actual.strftime("%Y%m%d")
+        historica_hasta = min(
+            hasta,
+            (fecha_actual - timedelta(days=1)).strftime("%Y%m%d"),
+        )
+        incluir_historico = desde <= historica_hasta
+        incluir_actual = desde <= actual <= hasta
+        if not incluir_historico and not incluir_actual:
+            return ResultadoDetalleRecuperacion([], 0, 0.0)
+
+        collection = self.collection if incluir_historico else self.actual_collection
+        pipeline = self._construir_pipeline_detalle_resumen(
+            fecha_desde=desde if incluir_historico else actual,
+            fecha_hasta=historica_hasta if incluir_historico else actual,
+            fecha_corte=hasta,
+            fecha_actual=actual,
+            agencias=agencias,
+            dimension=dimension,
+            valor_dimension=valor_dimension,
+            asesores=asesores,
+            cargos=cargos,
+            offset=offset,
+            limite=limite,
+            incluir_actual=incluir_historico and incluir_actual,
+        )
+        documento = next(iter(collection.aggregate(pipeline, allowDiskUse=True)), None) or {}
+        estadisticas = (documento.get("estadisticas") or [{}])[0]
+        items = [
+            DetalleRecuperacionAgrupado(
+                numero_prestamo=str(fila.get("numero_prestamo") or ""),
+                fecha_ultimo_cobro=datetime.strptime(
+                    str(fila["fecha_ultimo_cobro"]), "%Y%m%d"
+                ).date(),
+                total_recuperado_periodo=float(
+                    fila.get("total_recuperado_periodo") or 0
+                ),
+            )
+            for fila in documento.get("items", [])
+            if fila.get("numero_prestamo") and fila.get("fecha_ultimo_cobro")
+        ]
+        return ResultadoDetalleRecuperacion(
+            items=items,
+            total_registros=int(estadisticas.get("total_registros") or 0),
+            total_recuperado_periodo=float(
+                estadisticas.get("total_recuperado_periodo") or 0
+            ),
+        )
+
+    @staticmethod
+    def _construir_pipeline_detalle_resumen(
+        *,
+        fecha_desde: str,
+        fecha_hasta: str,
+        fecha_corte: str,
+        fecha_actual: str,
+        agencias: list[str],
+        dimension: str,
+        valor_dimension: str,
+        asesores: list[str],
+        cargos: list[str],
+        offset: int,
+        limite: int,
+        incluir_actual: bool,
+    ) -> list[dict[str, Any]]:
+        pipeline = _pipeline_movimientos_detalle(fecha_desde, fecha_hasta)
+        if incluir_actual:
+            pipeline.append(
+                {
+                    "$unionWith": {
+                        "coll": COLECCION_RECUPERACION_ACTUAL,
+                        "pipeline": _pipeline_movimientos_detalle(
+                            fecha_actual, fecha_actual
+                        ),
+                    }
+                }
+            )
+        pipeline.extend(
+            [
+                {
+                    "$group": {
+                        "_id": {
+                            "numero": "$numero",
+                            "movimiento": "$movimiento",
+                            "fecha_corte": "$fecha_corte",
+                            "agencia": "$agencia",
+                            "asesor": "$asesor",
+                            "cargo": "$cargo",
+                            "abogado": "$abogado",
+                            "tipo_cobro": "$tipo_cobro",
+                        },
+                        "monto_recuperado": {"$sum": "$monto_recuperado"},
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": {"numero": "$_id.numero"},
+                        "fecha_ultimo_cobro": {"$max": "$_id.fecha_corte"},
+                        "movimientos": {
+                            "$push": {
+                                "movimiento": "$_id.movimiento",
+                                "fecha_corte": "$_id.fecha_corte",
+                                "agencia": "$_id.agencia",
+                                "asesor": "$_id.asesor",
+                                "cargo": "$_id.cargo",
+                                "abogado": "$_id.abogado",
+                                "tipo_cobro": "$_id.tipo_cobro",
+                                "monto_recuperado": "$monto_recuperado",
+                            }
+                        },
+                    }
+                },
+            ]
+        )
+        pipeline.extend(
+            _lookup_corte(
+                alias="prestamo_fin",
+                fecha_corte=fecha_corte,
+                fecha_actual=fecha_actual,
+                projection=_proyeccion_inicio(),
+            )
+        )
+        agencia = _contexto_mongo("$movimientos.agencia", "$prestamo_fin.Agencia")
+        asesor = _contexto_mongo(
+            "$movimientos.asesor",
+            {"$ifNull": ["$prestamo_fin.NombreAsesor", "$prestamo_fin.CodigoAsesor"]},
+        )
+        pipeline.extend(
+            [
+                {"$unwind": "$movimientos"},
+                {
+                    "$project": {
+                        "numero_prestamo": "$_id.numero",
+                        "fecha_ultimo_cobro": "$movimientos.fecha_corte",
+                        "movimiento": "$movimientos.movimiento",
+                        "monto_recuperado": "$movimientos.monto_recuperado",
+                        "agencia": agencia,
+                        "asesor": asesor,
+                        "cargo": _texto_mongo("$movimientos.cargo"),
+                        "tipo_prestamo": _texto_mongo("$prestamo_fin.TipoPrestamo"),
+                        "producto": _texto_mongo("$prestamo_fin.Producto"),
+                        "condicion": _texto_mongo("$prestamo_fin.TipoCondicion"),
+                        "tipo_cobro": _texto_mongo("$movimientos.tipo_cobro"),
+                        "abogado": _texto_mongo("$movimientos.abogado"),
+                    }
+                },
+                *_match_lista("agencia", agencias),
+                *_match_lista("asesor", asesores),
+                *_match_lista("cargo", cargos),
+                {"$match": {dimension: valor_dimension}},
+                {
+                    "$group": {
+                        "_id": "$numero_prestamo",
+                        "fecha_ultimo_cobro": {"$max": "$fecha_ultimo_cobro"},
+                        "total_recuperado_periodo": {"$sum": "$monto_recuperado"},
+                    }
+                },
+                {
+                    "$facet": {
+                        "estadisticas": [
+                            {
+                                "$group": {
+                                    "_id": None,
+                                    "total_registros": {"$sum": 1},
+                                    "total_recuperado_periodo": {
+                                        "$sum": "$total_recuperado_periodo"
+                                    },
+                                }
+                            },
+                            {"$project": {"_id": 0}},
+                        ],
+                        "items": [
+                            {"$sort": {"_id": 1}},
+                            {"$skip": offset},
+                            {"$limit": limite},
+                            {
+                                "$project": {
+                                    "_id": 0,
+                                    "numero_prestamo": "$_id",
+                                    "fecha_ultimo_cobro": 1,
+                                    "total_recuperado_periodo": 1,
+                                }
+                            },
+                        ],
+                    }
+                },
+            ]
+        )
+        return pipeline
 
     @staticmethod
     def _construir_pipeline_resumen_negocios(
@@ -302,8 +525,6 @@ class MongoRecuperacionHistoricoRepository:
         fecha_corte: str,
         fecha_actual: str,
         agencias: list[str],
-        asesores: list[str],
-        cargos: list[str],
     ) -> list[dict[str, Any]]:
         pipeline: list[dict[str, Any]] = [
             {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
@@ -396,32 +617,25 @@ class MongoRecuperacionHistoricoRepository:
                 *_match_lista("agencia", agencias),
                 {
                     "$facet": {
-                        "agencia": _pipeline_dimension_resumen_filtrada(
-                            "agencia", asesores, cargos
+                        "agencia": _pipeline_dimension_resumen("agencia"),
+                        "asesor": _pipeline_dimension_resumen(
+                            "asesor", incluir_agencia=True
                         ),
-                        "asesor": _pipeline_dimension_resumen_filtrada(
-                            "asesor", asesores, cargos, incluir_agencia=True
-                        ),
-                        "cargo": _pipeline_dimension_resumen_filtrada(
-                            "cargo", asesores, cargos
-                        ),
-                        "tipo_prestamo": _pipeline_dimension_resumen_filtrada(
-                            "tipo_prestamo", asesores, cargos
-                        ),
-                        "producto": _pipeline_dimension_resumen_filtrada(
-                            "producto", asesores, cargos
-                        ),
-                        "condicion": _pipeline_dimension_resumen_filtrada(
-                            "condicion", asesores, cargos
-                        ),
-                        "tipo_cobro": _pipeline_dimension_resumen_filtrada(
-                            "tipo_cobro", asesores, cargos
-                        ),
-                        "abogado": _pipeline_dimension_resumen_filtrada(
-                            "abogado", asesores, cargos
-                        ),
+                        "cargo": _pipeline_dimension_resumen("cargo"),
+                        "tipo_prestamo": _pipeline_dimension_resumen("tipo_prestamo"),
+                        "producto": _pipeline_dimension_resumen("producto"),
+                        "condicion": _pipeline_dimension_resumen("condicion"),
+                        "tipo_cobro": _pipeline_dimension_resumen("tipo_cobro"),
+                        "abogado": _pipeline_dimension_resumen("abogado"),
                         "asesores_disponibles": _pipeline_catalogo("asesor"),
                         "cargos_disponibles": _pipeline_catalogo("cargo"),
+                        **{
+                            f"filtro_{dimension}": _pipeline_cubo_filtro(
+                                dimension,
+                                incluir_agencia=dimension == "asesor",
+                            )
+                            for dimension in DIMENSIONES_RESUMEN_NEGOCIOS
+                        },
                     }
                 },
             ]
@@ -1359,15 +1573,101 @@ def _pipeline_dimension_resumen(
     ]
 
 
-def _pipeline_dimension_resumen_filtrada(
+def _pipeline_cubo_filtro(
     campo: str,
-    asesores: list[str],
-    cargos: list[str],
     *,
     incluir_agencia: bool = False,
 ) -> list[dict[str, Any]]:
+    clave_operacion: dict[str, Any] = {
+        "dimension": f"${campo}",
+        "asesor": "$asesor",
+        "cargo": "$cargo",
+        "movimiento": "$movimiento",
+    }
+    if incluir_agencia:
+        clave_operacion["agencia"] = "$agencia"
+    clave_cubo: dict[str, Any] = {
+        "dimension": "$_id.dimension",
+        "asesor": "$_id.asesor",
+        "cargo": "$_id.cargo",
+    }
+    if incluir_agencia:
+        clave_cubo["agencia"] = "$_id.agencia"
     return [
-        *_match_lista("asesor", asesores),
-        *_match_lista("cargo", cargos),
-        *_pipeline_dimension_resumen(campo, incluir_agencia=incluir_agencia),
+        {
+            "$group": {
+                "_id": clave_operacion,
+                "monto_recuperado": {"$sum": "$monto_recuperado"},
+            }
+        },
+        {
+            "$group": {
+                "_id": clave_cubo,
+                "numero_operaciones": {"$sum": 1},
+                "monto_recuperado": {"$sum": "$monto_recuperado"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "dimension": "$_id.dimension",
+                **({"agencia": "$_id.agencia"} if incluir_agencia else {}),
+                "asesor": "$_id.asesor",
+                "cargo": "$_id.cargo",
+                "numero_operaciones": 1,
+                "monto_recuperado": 1,
+            }
+        },
+    ]
+
+
+def _pipeline_movimientos_detalle(
+    fecha_desde: str,
+    fecha_hasta: str,
+) -> list[dict[str, Any]]:
+    return [
+        {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
+        {
+            "$project": {
+                "fecha_corte": 1,
+                "movimiento": "$_id",
+                "numero": {
+                    "$trim": {
+                        "input": {
+                            "$convert": {
+                                "input": {
+                                    "$ifNull": ["$NUMERO_PRESTAMO", "$NumeroPrestamo"]
+                                },
+                                "to": "string",
+                                "onError": "",
+                                "onNull": "",
+                            }
+                        }
+                    }
+                },
+                "agencia": "$AGENCIA",
+                "asesor": {
+                    "$ifNull": ["$NOMBRE_ASESOR_COBRO", "$CODIGO_ASESOR_COBRO"]
+                },
+                "cargo": "$CARGO_ASESOR_COBRO",
+                "abogado": "$ABOGADO_EXTERNO_COBRO",
+                "cobros": _cobros(),
+            }
+        },
+        {"$unwind": "$cobros"},
+        {"$match": {"cobros.valor": {"$ne": 0}, "numero": {"$ne": ""}}},
+        {
+            "$project": {
+                "_id": 0,
+                "fecha_corte": 1,
+                "movimiento": 1,
+                "numero": 1,
+                "agencia": 1,
+                "asesor": 1,
+                "cargo": 1,
+                "abogado": 1,
+                "tipo_cobro": "$cobros.tipo_cobro",
+                "monto_recuperado": "$cobros.valor",
+            }
+        },
     ]
