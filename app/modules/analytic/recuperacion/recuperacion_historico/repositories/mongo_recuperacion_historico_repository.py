@@ -6,6 +6,7 @@ from pymongo.database import Database
 
 from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
     CuboFiltroRecuperacion,
+    DesgloseCobroRecuperacion,
     DetalleRecuperacionAgrupado,
     PrestamoRecuperacion,
     RecuperacionEtiquetada,
@@ -227,6 +228,7 @@ class MongoRecuperacionHistoricoRepository:
         fecha_hasta: date,
         fecha_actual: date,
         agencias: list[str],
+        incluir_desglose_cobros: bool = False,
     ) -> ResultadoResumenRecuperacion:
         """Agrega todas las dimensiones del resumen sin materializar movimientos."""
         desde = fecha_desde.strftime("%Y%m%d")
@@ -248,6 +250,10 @@ class MongoRecuperacionHistoricoRepository:
         asesores_disponibles: set[str] = set()
         cargos_disponibles: set[str] = set()
         cubos_filtro: list[CuboFiltroRecuperacion] = []
+        desglose_cobros: dict[
+            tuple[str, str, str | None, str, str, str],
+            DesgloseCobroRecuperacion,
+        ] = {}
         for collection, consulta_desde, consulta_hasta in consultas:
             pipeline = self._construir_pipeline_resumen_negocios(
                 consulta_desde,
@@ -255,6 +261,7 @@ class MongoRecuperacionHistoricoRepository:
                 hasta,
                 actual,
                 agencias,
+                incluir_desglose_cobros,
             )
             documento = next(iter(collection.aggregate(pipeline, allowDiskUse=True)), None) or {}
             asesores_disponibles.update(
@@ -263,6 +270,46 @@ class MongoRecuperacionHistoricoRepository:
             cargos_disponibles.update(
                 _catalogo_desde_facet(documento.get("cargos_disponibles", []))
             )
+            for fila in documento.get("desglose_cobros", []):
+                desglose = DesgloseCobroRecuperacion(
+                    tipo_dimension=str(fila.get("tipo_dimension") or ""),
+                    dimension=_texto(fila.get("dimension")),
+                    agencia=(
+                        _texto(fila.get("agencia"))
+                        if fila.get("tipo_dimension") == "asesor"
+                        else None
+                    ),
+                    asesor=_texto(fila.get("asesor")),
+                    cargo=_texto(fila.get("cargo")),
+                    tipo_cobro=_texto(fila.get("tipo_cobro")),
+                    numero_rubros=int(fila.get("numero_rubros") or 0),
+                    monto_recuperado=float(fila.get("monto_recuperado") or 0),
+                )
+                clave_desglose = (
+                    desglose.tipo_dimension,
+                    desglose.dimension,
+                    desglose.agencia,
+                    desglose.asesor,
+                    desglose.cargo,
+                    desglose.tipo_cobro,
+                )
+                anterior_desglose = desglose_cobros.get(clave_desglose)
+                desglose_cobros[clave_desglose] = DesgloseCobroRecuperacion(
+                    tipo_dimension=desglose.tipo_dimension,
+                    dimension=desglose.dimension,
+                    agencia=desglose.agencia,
+                    asesor=desglose.asesor,
+                    cargo=desglose.cargo,
+                    tipo_cobro=desglose.tipo_cobro,
+                    numero_rubros=(
+                        (anterior_desglose.numero_rubros if anterior_desglose else 0)
+                        + desglose.numero_rubros
+                    ),
+                    monto_recuperado=(
+                        (anterior_desglose.monto_recuperado if anterior_desglose else 0)
+                        + desglose.monto_recuperado
+                    ),
+                )
             for tipo_dimension in DIMENSIONES_RESUMEN_NEGOCIOS:
                 cubos_filtro.extend(
                     CuboFiltroRecuperacion(
@@ -311,6 +358,7 @@ class MongoRecuperacionHistoricoRepository:
             asesores_disponibles=asesores_disponibles,
             cargos_disponibles=cargos_disponibles,
             cubos_filtro=cubos_filtro,
+            desglose_cobros=list(desglose_cobros.values()),
         )
 
     def obtener_detalle_resumen_negocios(
@@ -525,6 +573,7 @@ class MongoRecuperacionHistoricoRepository:
         fecha_corte: str,
         fecha_actual: str,
         agencias: list[str],
+        incluir_desglose_cobros: bool = False,
     ) -> list[dict[str, Any]]:
         pipeline: list[dict[str, Any]] = [
             {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
@@ -629,6 +678,11 @@ class MongoRecuperacionHistoricoRepository:
                         "abogado": _pipeline_dimension_resumen("abogado"),
                         "asesores_disponibles": _pipeline_catalogo("asesor"),
                         "cargos_disponibles": _pipeline_catalogo("cargo"),
+                        **(
+                            {"desglose_cobros": _pipeline_desglose_cobros()}
+                            if incluir_desglose_cobros
+                            else {}
+                        ),
                         **{
                             f"filtro_{dimension}": _pipeline_cubo_filtro(
                                 dimension,
@@ -1616,6 +1670,81 @@ def _pipeline_cubo_filtro(
                 "cargo": "$_id.cargo",
                 "numero_operaciones": 1,
                 "monto_recuperado": 1,
+            }
+        },
+    ]
+
+
+def _pipeline_desglose_cobros() -> list[dict[str, Any]]:
+    dimensiones = [
+        {
+            "tipo_dimension": {"$literal": dimension},
+            "dimension": f"${dimension}",
+            "agencia": "$agencia" if dimension == "asesor" else None,
+        }
+        for dimension in DIMENSIONES_RESUMEN_NEGOCIOS
+    ]
+    return [
+        {
+            "$project": {
+                "movimiento": 1,
+                "monto_recuperado": 1,
+                "asesor": 1,
+                "cargo": 1,
+                "tipo_cobro": 1,
+                "dimensiones": dimensiones,
+            }
+        },
+        {"$unwind": "$dimensiones"},
+        {
+            "$group": {
+                "_id": {
+                    "tipo_dimension": "$dimensiones.tipo_dimension",
+                    "dimension": "$dimensiones.dimension",
+                    "agencia": "$dimensiones.agencia",
+                    "asesor": "$asesor",
+                    "cargo": "$cargo",
+                    "tipo_cobro": "$tipo_cobro",
+                    "movimiento": "$movimiento",
+                },
+                "monto_recuperado": {"$sum": "$monto_recuperado"},
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "tipo_dimension": "$_id.tipo_dimension",
+                    "dimension": "$_id.dimension",
+                    "agencia": "$_id.agencia",
+                    "asesor": "$_id.asesor",
+                    "cargo": "$_id.cargo",
+                    "tipo_cobro": "$_id.tipo_cobro",
+                },
+                "numero_rubros": {"$sum": 1},
+                "monto_recuperado": {"$sum": "$monto_recuperado"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "tipo_dimension": "$_id.tipo_dimension",
+                "dimension": "$_id.dimension",
+                "agencia": "$_id.agencia",
+                "asesor": "$_id.asesor",
+                "cargo": "$_id.cargo",
+                "tipo_cobro": "$_id.tipo_cobro",
+                "numero_rubros": 1,
+                "monto_recuperado": 1,
+            }
+        },
+        {
+            "$sort": {
+                "tipo_dimension": 1,
+                "agencia": 1,
+                "dimension": 1,
+                "asesor": 1,
+                "cargo": 1,
+                "tipo_cobro": 1,
             }
         },
     ]

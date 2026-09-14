@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
     CuboFiltroRecuperacion,
+    DesgloseCobroRecuperacion,
     DetalleRecuperacionAgrupado,
     RecuperacionResumenAgrupada,
     ResultadoDetalleRecuperacion,
@@ -68,9 +69,16 @@ class FakeRecuperacionHistoricoService:
         fecha_fin,
         fecha_hoy,
         agencias,
+        incluir_desglose_cobros=False,
     ) -> ResultadoResumenRecuperacion:
         self.llamadas.append(
-            (fecha_inicio, fecha_fin, fecha_hoy, agencias)
+            (
+                fecha_inicio,
+                fecha_fin,
+                fecha_hoy,
+                agencias,
+                incluir_desglose_cobros,
+            )
         )
         valores = {
             (date(2026, 8, 15), date(2026, 8, 25)): (10, 1000.0),
@@ -112,6 +120,22 @@ class FakeRecuperacionHistoricoService:
                     monto_recuperado=monto,
                 )
             ],
+            desglose_cobros=(
+                [
+                    DesgloseCobroRecuperacion(
+                        tipo_dimension="agencia",
+                        dimension="MATRIZ",
+                        agencia=None,
+                        asesor="ANA ASESORA",
+                        cargo="GESTOR DE COBRANZAS",
+                        tipo_cobro="CAPITAL",
+                        numero_rubros=7,
+                        monto_recuperado=700.0,
+                    )
+                ]
+                if incluir_desglose_cobros
+                else []
+            ),
         )
 
     def obtener_detalle_resumen_por_rango(self, **kwargs) -> ResultadoDetalleRecuperacion:
@@ -171,18 +195,21 @@ def test_servicio_construye_comparativo_y_todas_las_dimensiones() -> None:
             date(2026, 8, 25),
             date(2026, 8, 31),
             ["MATRIZ"],
+            True,
         ),
         (
             date(2026, 7, 1),
             date(2026, 7, 31),
             date(2026, 8, 31),
             ["MATRIZ"],
+            False,
         ),
         (
             date(2026, 7, 15),
             date(2026, 7, 25),
             date(2026, 8, 31),
             ["MATRIZ"],
+            False,
         ),
     ]
     fila = respuesta.agrupaciones.por_agencia[0]
@@ -205,6 +232,8 @@ def test_servicio_construye_comparativo_y_todas_las_dimensiones() -> None:
         "anterior",
         "mismo_rango_anterior",
     }
+    assert respuesta.desglose_cobros[0].tipo_cobro == "CAPITAL"
+    assert respuesta.desglose_cobros[0].numero_rubros == 7
 
 
 def test_servicio_rechaza_fecha_posterior_a_fecha_sistema() -> None:
@@ -388,6 +417,18 @@ def test_repositorio_agrupa_dimensiones_en_un_solo_facet() -> None:
         "abogado": [],
         "asesores_disponibles": [{"valor": "ANA ASESORA"}],
         "cargos_disponibles": [{"valor": "GESTOR DE COBRANZAS"}],
+        "desglose_cobros": [
+            {
+                "tipo_dimension": "agencia",
+                "dimension": "MATRIZ",
+                "agencia": None,
+                "asesor": "ANA ASESORA",
+                "cargo": "GESTOR DE COBRANZAS",
+                "tipo_cobro": "CAPITAL",
+                "numero_rubros": 2,
+                "monto_recuperado": 125.5,
+            }
+        ],
         "filtro_agencia": [
             {
                 "dimension": "MATRIZ",
@@ -409,6 +450,7 @@ def test_repositorio_agrupa_dimensiones_en_un_solo_facet() -> None:
         date(2026, 8, 25),
         date(2026, 8, 31),
         ["MATRIZ"],
+        True,
     )
 
     assert resultado.agrupaciones["agencia"][0].monto_recuperado == 125.5
@@ -416,11 +458,13 @@ def test_repositorio_agrupa_dimensiones_en_un_solo_facet() -> None:
     assert resultado.asesores_disponibles == {"ANA ASESORA"}
     assert resultado.cargos_disponibles == {"GESTOR DE COBRANZAS"}
     assert resultado.cubos_filtro[0].dimension == "MATRIZ"
+    assert resultado.desglose_cobros[0].numero_rubros == 2
     facet = next(etapa["$facet"] for etapa in historico.pipeline if "$facet" in etapa)
     assert set(facet) == {
         *DIMENSIONES,
         "asesores_disponibles",
         "cargos_disponibles",
+        "desglose_cobros",
         *(f"filtro_{dimension}" for dimension in DIMENSIONES),
     }
     assert historico.pipeline[0] == {

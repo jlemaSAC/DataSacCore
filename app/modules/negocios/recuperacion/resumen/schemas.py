@@ -72,6 +72,17 @@ class CuboFiltroRecuperacion(BaseModel):
     monto_recuperado: float
 
 
+class DesgloseCobroRecuperacion(BaseModel):
+    tipo_dimension: str
+    dimension: str
+    agencia: str | None = None
+    asesor: str
+    cargo: str
+    tipo_cobro: str
+    numero_rubros: int
+    monto_recuperado: float
+
+
 class ResumenRecuperacionResponse(BaseModel):
     fecha_inicio: date
     fecha_fin: date
@@ -82,6 +93,7 @@ class ResumenRecuperacionResponse(BaseModel):
     asesores_disponibles: list[str]
     cargos_disponibles: list[str]
     cubos_filtro: list[CuboFiltroRecuperacion]
+    desglose_cobros: list[DesgloseCobroRecuperacion]
     agrupaciones: AgrupacionesResumenRecuperacion
 
 

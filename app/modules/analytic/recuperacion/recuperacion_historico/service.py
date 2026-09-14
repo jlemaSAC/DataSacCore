@@ -67,6 +67,7 @@ class RecuperacionHistoricoService:
         fecha_hasta: date,
         fecha_hoy: date,
         agencias: list[str],
+        incluir_desglose_cobros: bool = False,
     ) -> ResultadoResumenRecuperacion:
         """Hecho agregado para Negocios, conservando la consulta dentro de Analítica."""
         return self.mongo_repository.obtener_resumen_negocios(
@@ -74,6 +75,7 @@ class RecuperacionHistoricoService:
             fecha_hasta,
             fecha_hoy,
             agencias,
+            incluir_desglose_cobros,
         )
 
     def obtener_detalle_resumen_por_rango(

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 
@@ -67,11 +67,24 @@ class CuboFiltroRecuperacion:
 
 
 @dataclass(frozen=True)
+class DesgloseCobroRecuperacion:
+    tipo_dimension: str
+    dimension: str
+    agencia: str | None
+    asesor: str
+    cargo: str
+    tipo_cobro: str
+    numero_rubros: int
+    monto_recuperado: float
+
+
+@dataclass(frozen=True)
 class ResultadoResumenRecuperacion:
     agrupaciones: dict[str, list[RecuperacionResumenAgrupada]]
     asesores_disponibles: set[str]
     cargos_disponibles: set[str]
     cubos_filtro: list[CuboFiltroRecuperacion]
+    desglose_cobros: list[DesgloseCobroRecuperacion] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

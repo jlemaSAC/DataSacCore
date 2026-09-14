@@ -16,6 +16,7 @@ from app.modules.auth.schemas import AuthContext
 from app.modules.negocios.recuperacion.resumen.schemas import (
     AgrupacionesResumenRecuperacion,
     CuboFiltroRecuperacion,
+    DesgloseCobroRecuperacion,
     DetalleResumenRecuperacionResponse,
     FilaAgrupacionRecuperacion,
     FilaDetalleRecuperacion,
@@ -93,6 +94,7 @@ class ResumenRecuperacionService:
                 asesores_disponibles,
                 cargos_disponibles,
                 cubos_filtro,
+                desglose_cobros,
             ) = self._obtener_comparativos(
                 input_data.agencias,
                 periodos,
@@ -108,6 +110,7 @@ class ResumenRecuperacionService:
                 asesores_disponibles=sorted(asesores_disponibles, key=str.casefold),
                 cargos_disponibles=sorted(cargos_disponibles, key=str.casefold),
                 cubos_filtro=cubos_filtro,
+                desglose_cobros=desglose_cobros,
                 agrupaciones=AgrupacionesResumenRecuperacion(
                     por_agencia=_filas(comparativos["agencia"]),
                     por_asesor=_filas(comparativos["asesor"]),
@@ -260,6 +263,7 @@ class ResumenRecuperacionService:
         set[str],
         set[str],
         list[CuboFiltroRecuperacion],
+        list[DesgloseCobroRecuperacion],
     ]:
         comparativos: dict[
             str, dict[tuple[str | None, str], _ComparativoRecuperacion]
@@ -267,6 +271,7 @@ class ResumenRecuperacionService:
         asesores_disponibles: set[str] = set()
         cargos_disponibles: set[str] = set()
         cubos_filtro: list[CuboFiltroRecuperacion] = []
+        desglose_cobros: list[DesgloseCobroRecuperacion] = []
         rangos = (
             ("actual", periodos.actual_inicio, periodos.actual_fin),
             ("anterior", periodos.anterior_inicio, periodos.anterior_fin),
@@ -283,6 +288,7 @@ class ResumenRecuperacionService:
                     fecha_fin,
                     fecha_hoy,
                     agencias,
+                    incluir_desglose_cobros=nombre == "actual",
                 )
             )
             asesores_disponibles.update(resultado.asesores_disponibles)
@@ -300,6 +306,20 @@ class ResumenRecuperacionService:
                 )
                 for cubo in resultado.cubos_filtro
             )
+            if nombre == "actual":
+                desglose_cobros.extend(
+                    DesgloseCobroRecuperacion(
+                        tipo_dimension=fila.tipo_dimension,
+                        dimension=fila.dimension,
+                        agencia=fila.agencia,
+                        asesor=fila.asesor,
+                        cargo=fila.cargo,
+                        tipo_cobro=fila.tipo_cobro,
+                        numero_rubros=fila.numero_rubros,
+                        monto_recuperado=round(fila.monto_recuperado, 2),
+                    )
+                    for fila in resultado.desglose_cobros
+                )
             for tipo_dimension, agrupaciones in resultado.agrupaciones.items():
                 for agrupacion in agrupaciones:
                     clave = (agrupacion.agencia, agrupacion.dimension)
@@ -321,7 +341,13 @@ class ResumenRecuperacionService:
                             agrupacion.numero_operaciones
                         )
                         fila.monto_mismo_rango_mes_anterior += agrupacion.monto_recuperado
-        return comparativos, asesores_disponibles, cargos_disponibles, cubos_filtro
+        return (
+            comparativos,
+            asesores_disponibles,
+            cargos_disponibles,
+            cubos_filtro,
+            desglose_cobros,
+        )
 
     @staticmethod
     def _construir_periodos(
