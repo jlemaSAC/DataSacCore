@@ -118,6 +118,7 @@ class MongoSettings:
     datasac_db: str
     mayor_auxiliar_db: str
     analytic_sac_db: str
+    datasac_app_web_menu_db: str
 
 
 @dataclass(frozen=True)
@@ -211,6 +212,10 @@ def get_mongo_settings() -> MongoSettings:
         datasac_db=_optional("MONGO_DATASAC_DB_NAME", "DataSac"),
         mayor_auxiliar_db=_optional("MONGO_MAYOR_AUXILIAR_DB_NAME", "MayorAuxiliar"),
         analytic_sac_db=_optional("MONGO_ANALYTIC_SAC_DB_NAME", "AnalyticSac"),
+        datasac_app_web_menu_db=_optional(
+            "MONGO_DATASAC_APP_WEB_MENU_DB_NAME",
+            "DataSacWebAppMenu",
+        ),
     )
 
 

@@ -40,16 +40,16 @@ def obtener_saldo_inicial_agencias_por_mes(
     response_model=ColocacionHistoricoRangoResponse,
     summary="Consultar colocación histórica por rango de fechas",
     description="""
-Divide el rango solicitado en segmentos mensuales y devuelve un resumen por
-período `YYYY-MM`, además de las agrupaciones dimensionales para dashboards.
+    Divide el rango solicitado en segmentos mensuales y devuelve un resumen por
+    período `YYYY-MM`, además de las agrupaciones dimensionales para dashboards.
 
-- El rango máximo permitido es de 60 meses.
-- `fecha_hasta` no puede superar la fecha del sistema incluida en el token.
-- En el mes actual, MongoDB aporta hasta ayer y SQL Server aporta el día actual.
-- Para rangos parciales históricos se utiliza como corte Mongo el último día
-  efectivo de cada segmento.
-""",
-)
+    - El rango máximo permitido es de 60 meses.
+    - `fecha_hasta` no puede superar la fecha del sistema incluida en el token.
+    - En el mes actual, MongoDB aporta hasta ayer y SQL Server aporta el día actual.
+    - Para rangos parciales históricos se utiliza como corte Mongo el último día
+    efectivo de cada segmento.
+    """,
+    )
 def obtener_colocacion_historica_por_rango(
     body: InputColocacionHistoricoRango,
     auth_context: AuthContext = Depends(get_current_auth_context),

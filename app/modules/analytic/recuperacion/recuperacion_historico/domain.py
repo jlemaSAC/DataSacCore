@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 
@@ -45,3 +45,57 @@ class PrestamoRecuperacion:
     estado_prestamo_fin: str
     calificacion_inicio: str = "SIN DATOS"
     calificacion_fin: str = "SIN DATOS"
+
+
+@dataclass(frozen=True)
+class RecuperacionResumenAgrupada:
+    dimension: str
+    numero_operaciones: int
+    monto_recuperado: float
+    agencia: str | None = None
+
+
+@dataclass(frozen=True)
+class CuboFiltroRecuperacion:
+    tipo_dimension: str
+    dimension: str
+    agencia: str | None
+    asesor: str
+    cargo: str
+    numero_operaciones: int
+    monto_recuperado: float
+
+
+@dataclass(frozen=True)
+class DesgloseCobroRecuperacion:
+    tipo_dimension: str
+    dimension: str
+    agencia: str | None
+    asesor: str
+    cargo: str
+    tipo_cobro: str
+    numero_rubros: int
+    monto_recuperado: float
+
+
+@dataclass(frozen=True)
+class ResultadoResumenRecuperacion:
+    agrupaciones: dict[str, list[RecuperacionResumenAgrupada]]
+    asesores_disponibles: set[str]
+    cargos_disponibles: set[str]
+    cubos_filtro: list[CuboFiltroRecuperacion]
+    desglose_cobros: list[DesgloseCobroRecuperacion] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DetalleRecuperacionAgrupado:
+    numero_prestamo: str
+    fecha_ultimo_cobro: date
+    total_recuperado_periodo: float
+
+
+@dataclass(frozen=True)
+class ResultadoDetalleRecuperacion:
+    items: list[DetalleRecuperacionAgrupado]
+    total_registros: int
+    total_recuperado_periodo: float

@@ -33,7 +33,4 @@ USER app
 
 EXPOSE 9100
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/health', timeout=3).read()"
-
 CMD ["fastapi", "run", "app/main.py", "--host", "0.0.0.0", "--port", "9100"]

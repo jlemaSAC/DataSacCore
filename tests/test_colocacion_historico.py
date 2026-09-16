@@ -154,6 +154,51 @@ class FakeSqlSession:
         ]
 
 
+class FakeResumenSqlSession:
+    def __init__(self) -> None:
+        self.statement = None
+
+    def execute(self, statement):
+        self.statement = statement
+        return [
+            (
+                " matriz ",
+                " nuevo ",
+                " ordinario ",
+                " microcredito ",
+                " minorista ",
+                " juan perez ",
+                16.0,
+                17.0,
+                2,
+                125.0,
+            )
+        ]
+
+
+class FakeDetalleSqlResult:
+    def __init__(self, total: tuple[int, float] | None = None) -> None:
+        self.total = total
+
+    def one(self):
+        assert self.total is not None
+        return self.total
+
+    def __iter__(self):
+        return iter(())
+
+
+class FakeDetalleSqlSession:
+    def __init__(self) -> None:
+        self.statements = []
+
+    def execute(self, statement):
+        self.statements.append(statement)
+        if len(self.statements) == 1:
+            return FakeDetalleSqlResult((2, 125.0))
+        return FakeDetalleSqlResult()
+
+
 class FakeMongoRepository:
     def __init__(self, datos: list[ColocacionAgrupada] | None = None) -> None:
         self.datos = datos or []
@@ -207,12 +252,15 @@ def test_repositorio_mongo_agrupa_dimensiones_en_una_consulta() -> None:
                 fecha_inicio=datetime(2026, 1, 1),
                 fecha_fin=datetime(2026, 1, 31, 23, 59, 59),
             )
-        ]
+        ],
+        agencias=[" matriz "],
     )
 
     assert mongo_db.collection.calls == 1
     assert mongo_db.collection.options == {"hint": "fecha_corte_1", "allowDiskUse": True}
     project = mongo_db.collection.pipeline[1]["$project"]
+    filtro = mongo_db.collection.pipeline[0]["$match"]
+    assert filtro["$expr"]["$in"][1] == ["MATRIZ"]
     assert {
         "monto",
         "tasa",
@@ -250,6 +298,7 @@ def test_repositorio_sql_usa_exists_para_garantias_y_booleanos_validos() -> None
     datos = repository.obtener_colocaciones_agrupadas(
         datetime(2026, 7, 3),
         datetime(2026, 7, 3, 23, 59, 59),
+        agencias=[" matriz "],
     )
     sql = str(db.statement.compile(dialect=mssql.dialect(), compile_kwargs={"literal_binds": True}))
 
@@ -257,14 +306,99 @@ def test_repositorio_sql_usa_exists_para_garantias_y_booleanos_validos() -> None
     assert "[ESPRINCIPAL] = 1" in sql
     assert "EXISTS" in sql
     assert "dateadd(year" in sql
-    assert "A.Hasta 3.000" in sql
-    assert "N.Mas de 22" in sql
-    assert "K.Mas de 10 AÑOS" in sql
+    assert "Hasta 3.000" in sql
+    assert "Mas de 22" in sql
+    assert "Mas de 10 AÑOS" in sql
     assert "[TEA]" in sql
     assert "datediff(day" in sql
+    assert "MATRIZ" in sql
     assert " IS 1" not in sql
     assert datos[0].dimensiones.edad == "HASTA 30"
     assert datos[0].operaciones == 2
+
+
+def test_repositorios_livianos_omiten_dimensiones_no_usadas() -> None:
+    mongo_db = FakeMongoDatabase()
+    mongo_repository = MongoColocacionHistoricoRepository(mongo_db)  # type: ignore[arg-type]
+    mongo_repository.obtener_colocaciones_resumen_agrupadas(
+        [
+            CorteMensual(
+                anio=2026,
+                mes=1,
+                fecha_corte="20260131",
+                fecha_inicio=datetime(2026, 1, 1),
+                fecha_fin=datetime(2026, 1, 31, 23, 59, 59),
+            )
+        ]
+    )
+    project_mongo = mongo_db.collection.pipeline[1]["$project"]
+    assert {"agencia", "asesor", "tasa_valor", "tasa_real_valor"} <= project_mongo.keys()
+    assert "provincia" not in project_mongo
+    assert "garantia" not in project_mongo
+    assert "plazo" not in project_mongo
+
+    db = FakeResumenSqlSession()
+    sql_repository = SqlColocacionHistoricoRepository(db)  # type: ignore[arg-type]
+    datos = sql_repository.obtener_colocaciones_resumen_agrupadas(
+        datetime(2026, 7, 3),
+        datetime(2026, 7, 3, 23, 59, 59),
+        agencias=["MATRIZ"],
+    )
+    sql = str(db.statement.compile(dialect=mssql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "[PRESTAMOGARANTIAPERSONAL]" not in sql
+    assert "[DIVISIONPOLITICACONSOLIDADO]" not in sql
+    assert datos[0].dimensiones.tasa_real_valor == 17.0
+    assert datos[0].dimensiones.tasa_valor == 16.0
+    assert datos[0].dimensiones.provincia == "SIN DATOS"
+
+
+def test_repositorio_mongo_detalle_calcula_totales_y_limita_en_la_base() -> None:
+    mongo_db = FakeMongoDatabase()
+    repository = MongoColocacionHistoricoRepository(mongo_db)  # type: ignore[arg-type]
+
+    resultado = repository.obtener_detalles_resumen(
+        [
+            CorteMensual(
+                anio=2026,
+                mes=1,
+                fecha_corte="20260131",
+                fecha_inicio=datetime(2026, 1, 1),
+                fecha_fin=datetime(2026, 1, 31, 23, 59, 59),
+            )
+        ],
+        ["MATRIZ"],
+        "agencia",
+        "MATRIZ",
+        limite=25,
+    )
+
+    facet = mongo_db.collection.pipeline[-1]["$facet"]
+    assert facet["items"][-1] == {"$limit": 25}
+    assert "$group" in facet["totales"][0]
+    assert resultado.total_registros == 0
+    assert resultado.items == []
+
+
+def test_repositorio_sql_detalle_consulta_totales_y_prefijo_limitado() -> None:
+    db = FakeDetalleSqlSession()
+    repository = SqlColocacionHistoricoRepository(db)  # type: ignore[arg-type]
+
+    resultado = repository.obtener_detalles_resumen(
+        datetime(2026, 7, 3),
+        datetime(2026, 7, 3, 23, 59, 59),
+        ["MATRIZ"],
+        "agencia",
+        "MATRIZ",
+        limite=25,
+    )
+
+    sql_items = str(db.statements[1].compile(dialect=mssql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert len(db.statements) == 2
+    assert "TOP 25" in sql_items
+    assert "ORDER BY" in sql_items
+    assert resultado.total_registros == 2
+    assert resultado.total_monto_colocado == 125.0
+    assert resultado.items == []
 
 
 def test_servicio_consolida_mongo_sql_y_genera_resumen_dashboard() -> None:

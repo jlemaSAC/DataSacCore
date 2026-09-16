@@ -7,7 +7,10 @@ from fastapi import HTTPException
 
 from app.modules.analytic.colocacion.colocacion_historico.domain import (
     ColocacionAgrupada,
+    DetalleColocacion,
+    DimensionFiltroColocacion,
     DimensionesColocacion,
+    ResultadoDetalleColocacion,
 )
 from app.modules.analytic.colocacion.colocacion_historico.repositories.mongo_colocacion_historico_repository import (
     CorteMensual,
@@ -50,6 +53,20 @@ def _orden_dimensiones(item: tuple[DimensionesColocacion, ColocacionAgrupada]) -
         else:
             valores.append(valor)
     return tuple(valores)
+
+
+def _sin_duplicados_detalle(detalles: list[DetalleColocacion]) -> list[DetalleColocacion]:
+    """Evita duplicados de joins sin fusionar operaciones distintas sin identificador."""
+    unicos: dict[tuple, DetalleColocacion] = {}
+    for detalle in detalles:
+        clave = (
+            detalle.numero_operacion,
+            detalle.numero_cliente,
+            detalle.agencia,
+            detalle.monto_colocado,
+        )
+        unicos.setdefault(clave, detalle)
+    return list(unicos.values())
 
 
 class ColocacionHistoricoService:
@@ -122,40 +139,14 @@ class ColocacionHistoricoService:
                     detail=f"El rango no puede superar {MAX_MESES_RANGO} meses.",
                 )
 
-            segmentos = self._segmentar_rango(
-                input_data.fecha_desde,
-                input_data.fecha_hasta,
+            segmentos, agrupaciones = self.obtener_agrupaciones_por_rango(
+                input_data.fecha_desde, input_data.fecha_hasta, fecha_hoy
             )
-            cortes: list[CorteMensual] = []
-            for segmento in segmentos:
-                fecha_fin_mongo = segmento.fecha_hasta
-                if fecha_fin_mongo == fecha_hoy:
-                    fecha_fin_mongo = fecha_hoy - timedelta(days=1)
-                if fecha_fin_mongo < segmento.fecha_desde:
-                    continue
-                cortes.append(
-                    CorteMensual(
-                        anio=segmento.anio,
-                        mes=segmento.mes,
-                        fecha_corte=fecha_fin_mongo.strftime("%Y%m%d"),
-                        fecha_inicio=datetime.combine(segmento.fecha_desde, time.min),
-                        fecha_fin=datetime.combine(fecha_fin_mongo, time.max),
-                    )
-                )
-
-            agrupaciones = self.mongo_repository.obtener_colocaciones_agrupadas(cortes)
-            if input_data.fecha_desde <= fecha_hoy <= input_data.fecha_hasta:
-                agrupaciones.extend(
-                    self.sql_repository.obtener_colocaciones_agrupadas(
-                        datetime.combine(fecha_hoy, time.min),
-                        datetime.combine(fecha_hoy, time.max),
-                    )
-                )
 
             return self._construir_respuesta_rango(
                 input_data=input_data,
                 segmentos=segmentos,
-                agrupaciones=self._consolidar(agrupaciones),
+                agrupaciones=agrupaciones,
             )
         except HTTPException:
             raise
@@ -169,6 +160,135 @@ class ColocacionHistoricoService:
                 status_code=500,
                 detail=f"Error consultando colocacion historica: {exc}",
             ) from exc
+
+    def obtener_agrupaciones_por_rango(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_hoy: date,
+        agencias: list[str] | None = None,
+    ) -> tuple[list[SegmentoMensual], dict[DimensionesColocacion, ColocacionAgrupada]]:
+        """Obtiene el hecho dimensional para un rango usando el corte híbrido histórico."""
+        segmentos = self._segmentar_rango(fecha_desde, fecha_hasta)
+        cortes = self._construir_cortes_por_rango(segmentos, fecha_hoy)
+
+        if agencias:
+            agrupaciones = self.mongo_repository.obtener_colocaciones_agrupadas(cortes, agencias)
+        else:
+            agrupaciones = self.mongo_repository.obtener_colocaciones_agrupadas(cortes)
+        if fecha_desde <= fecha_hoy <= fecha_hasta:
+            fecha_inicio_sql = datetime.combine(fecha_hoy, time.min)
+            fecha_fin_sql = datetime.combine(fecha_hoy, time.max)
+            if agencias:
+                agrupaciones.extend(
+                    self.sql_repository.obtener_colocaciones_agrupadas(
+                        fecha_inicio_sql, fecha_fin_sql, agencias
+                    )
+                )
+            else:
+                agrupaciones.extend(
+                    self.sql_repository.obtener_colocaciones_agrupadas(fecha_inicio_sql, fecha_fin_sql)
+                )
+        return segmentos, self._consolidar(agrupaciones)
+
+    def obtener_agrupaciones_resumen_por_rango(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_hoy: date,
+        agencias: list[str],
+    ) -> dict[DimensionesColocacion, ColocacionAgrupada]:
+        """Hecho liviano exclusivo de Negocios; no modifica el contrato analítico."""
+        segmentos = self._segmentar_rango(fecha_desde, fecha_hasta)
+        cortes = self._construir_cortes_por_rango(segmentos, fecha_hoy)
+        agrupaciones = self.mongo_repository.obtener_colocaciones_resumen_agrupadas(cortes, agencias)
+        if fecha_desde <= fecha_hoy <= fecha_hasta:
+            fecha_inicio_sql = datetime.combine(fecha_hoy, time.min)
+            fecha_fin_sql = datetime.combine(fecha_hoy, time.max)
+            agrupaciones.extend(
+                self.sql_repository.obtener_colocaciones_resumen_agrupadas(
+                    fecha_inicio_sql,
+                    fecha_fin_sql,
+                    agencias,
+                )
+            )
+        return self._consolidar(agrupaciones)
+
+    def obtener_detalles_resumen_por_rango(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_hoy: date,
+        agencias: list[str],
+        dimension: DimensionFiltroColocacion,
+        valor_dimension: str,
+        asesores: list[str] | None = None,
+        tasa_desde: float | None = None,
+        tasa_hasta_exclusiva: float | None = None,
+        limite: int = 500,
+    ) -> ResultadoDetalleColocacion:
+        """Obtiene un prefijo ordenado y los totales del corte híbrido del resumen."""
+        segmentos = self._segmentar_rango(fecha_desde, fecha_hasta)
+        cortes = self._construir_cortes_por_rango(segmentos, fecha_hoy)
+        resultado_mongo = self.mongo_repository.obtener_detalles_resumen(
+            cortes,
+            agencias,
+            dimension,
+            valor_dimension,
+            asesores,
+            tasa_desde,
+            tasa_hasta_exclusiva,
+            limite,
+        )
+        detalles = list(resultado_mongo.items)
+        total_registros = resultado_mongo.total_registros
+        total_monto_colocado = resultado_mongo.total_monto_colocado
+        if fecha_desde <= fecha_hoy <= fecha_hasta:
+            resultado_sql = self.sql_repository.obtener_detalles_resumen(
+                datetime.combine(fecha_hoy, time.min),
+                datetime.combine(fecha_hoy, time.max),
+                agencias,
+                dimension,
+                valor_dimension,
+                asesores,
+                tasa_desde,
+                tasa_hasta_exclusiva,
+                limite,
+            )
+            detalles.extend(resultado_sql.items)
+            total_registros += resultado_sql.total_registros
+            total_monto_colocado += resultado_sql.total_monto_colocado
+        return ResultadoDetalleColocacion(
+            items=sorted(
+                _sin_duplicados_detalle(detalles),
+                key=lambda detalle: (detalle.numero_operacion, detalle.numero_cliente),
+            ),
+            total_registros=total_registros,
+            total_monto_colocado=total_monto_colocado,
+        )
+
+    @staticmethod
+    def _construir_cortes_por_rango(
+        segmentos: list[SegmentoMensual],
+        fecha_hoy: date,
+    ) -> list[CorteMensual]:
+        cortes: list[CorteMensual] = []
+        for segmento in segmentos:
+            fecha_fin_mongo = segmento.fecha_hasta
+            if fecha_fin_mongo == fecha_hoy:
+                fecha_fin_mongo = fecha_hoy - timedelta(days=1)
+            if fecha_fin_mongo < segmento.fecha_desde:
+                continue
+            cortes.append(
+                CorteMensual(
+                    anio=segmento.anio,
+                    mes=segmento.mes,
+                    fecha_corte=fecha_fin_mongo.strftime("%Y%m%d"),
+                    fecha_inicio=datetime.combine(segmento.fecha_desde, time.min),
+                    fecha_fin=datetime.combine(fecha_fin_mongo, time.max),
+                )
+            )
+        return cortes
 
     @staticmethod
     def _construir_cortes(anio: int, fecha_hoy: date) -> list[CorteMensual]:

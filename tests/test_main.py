@@ -1,9 +1,12 @@
 from datetime import date
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.requests import Request
 
 from app.core.settings import (
     AppSettings,
@@ -19,14 +22,15 @@ from app.db.session import (
     get_secondary_session_factory,
     get_session_factory,
 )
-from app.main import add_cors_middleware, add_gzip_middleware, app
+from app.main import add_cors_middleware, add_gzip_middleware, add_request_logging_middleware, app
 from app.main import (
     verify_database_on_startup,
     verify_mongo_on_startup,
     verify_secondary_database_on_startup,
 )
 from app.models import import_all_models
-from app.modules.auth.dependencies import get_auth_service
+from app.modules.auth.dependencies import get_auth_service, get_current_auth_context
+from app.modules.auth.schemas import UsuarioTokenPayload
 
 client = TestClient(app)
 MODELS_DIR = Path("app/models")
@@ -54,6 +58,7 @@ MONGO_ENV_VARS = (
     "MONGO_DATASAC_DB_NAME",
     "MONGO_MAYOR_AUXILIAR_DB_NAME",
     "MONGO_ANALYTIC_SAC_DB_NAME",
+    "MONGO_DATASAC_APP_WEB_MENU_DB_NAME",
 )
 
 
@@ -86,6 +91,44 @@ def test_health_check() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_request_log_includes_codigo_usuario(caplog) -> None:
+    request_log_app = FastAPI()
+    add_request_logging_middleware(request_log_app)
+
+    @request_log_app.get("/private")
+    async def private_endpoint(request: Request) -> dict[str, str]:
+        request.state.codigo_usuario = "JDOE"
+        return {"status": "ok"}
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        response = TestClient(request_log_app).get("/private")
+
+    assert response.status_code == 200
+    assert "HTTP client_ip=testclient http_version=1.1 codigo_usuario=JDOE method=GET path=/private status_code=200" in caplog.text
+
+
+def test_current_auth_context_saves_codigo_usuario_in_request(monkeypatch) -> None:
+    payload = UsuarioTokenPayload(
+        sub="JDOE",
+        usuario="John Doe",
+        id_agencia=1,
+        fecha_sistema=date(2026, 9, 16),
+    )
+    monkeypatch.setattr(
+        "app.modules.auth.dependencies.JwtTokenService.decode_access_token",
+        lambda _self, _token: payload,
+    )
+    request = Request({"type": "http", "method": "GET", "path": "/private", "headers": []})
+
+    auth_context = get_current_auth_context(
+        request,
+        HTTPAuthorizationCredentials(scheme="Bearer", credentials="test-token"),
+    )
+
+    assert auth_context.usuario.sub == "JDOE"
+    assert request.state.codigo_usuario == "JDOE"
+
+
 def test_auth_menu_completo_endpoint_is_not_registered() -> None:
     response = client.post("/auth/menuCompleto")
 
@@ -99,9 +142,39 @@ def test_auth_status_endpoint_is_not_registered() -> None:
 
 
 def test_auth_menu_endpoint_requires_bearer_token() -> None:
-    response = client.get("/auth/menu/data-sac-web")
+    response = client.get("/data-sac-web/auth/menu")
 
     assert response.status_code == 401
+
+
+def test_auth_complete_menu_endpoint_requires_bearer_token() -> None:
+    response = client.get("/data-sac-web/auth/menu/completo")
+
+    assert response.status_code == 401
+
+
+def test_auth_menu_administration_endpoints_require_bearer_token() -> None:
+    create_response = client.post(
+        "/data-sac-web/auth/menu",
+        json={"label": "NEGOCIOS", "roles_codigo": ["001"]},
+    )
+    update_response = client.patch(
+        "/data-sac-web/auth/menu/507f1f77bcf86cd799439011",
+        json={"roles_codigo": ["001"]},
+    )
+
+    assert create_response.status_code == 401
+    assert update_response.status_code == 401
+
+
+def test_auth_menu_administration_detail_and_delete_require_bearer_token() -> None:
+    menu_id = "507f1f77bcf86cd799439011"
+
+    detail_response = client.get(f"/data-sac-web/auth/menu/{menu_id}")
+    delete_response = client.delete(f"/data-sac-web/auth/menu/{menu_id}")
+
+    assert detail_response.status_code == 401
+    assert delete_response.status_code == 401
 
 
 def test_analytic_admin_endpoint_requires_bearer_token() -> None:
@@ -146,11 +219,17 @@ def test_login_response_does_not_include_menu() -> None:
     app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
     try:
         response = client.post("/auth/login", json={"codigo": "jdoe", "clave": "secret"})
+        data_sac_web_response = client.post(
+            "/data-sac-web/auth/login",
+            json={"codigo": "jdoe", "clave": "secret"},
+        )
     finally:
         app.dependency_overrides.pop(get_auth_service, None)
 
     assert response.status_code == 200
     assert "menu" not in response.json()
+    assert data_sac_web_response.status_code == 200
+    assert "menu" not in data_sac_web_response.json()
 
 
 def test_app_settings_dev_allows_all_cors_origins(monkeypatch) -> None:

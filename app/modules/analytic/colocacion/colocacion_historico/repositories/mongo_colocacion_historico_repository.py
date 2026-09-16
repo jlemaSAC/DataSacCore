@@ -7,11 +7,44 @@ from pymongo.database import Database
 
 from app.modules.analytic.colocacion.colocacion_historico.domain import (
     ColocacionAgrupada,
+    DetalleColocacion,
+    DimensionFiltroColocacion,
     DimensionesColocacion,
+    ResultadoDetalleColocacion,
 )
 
 
 MongoDocument = dict[str, Any]
+
+
+# Esta selección sostiene exclusivamente el resumen de Negocios.  El endpoint
+# analítico conserva el conjunto dimensional completo.
+CAMPOS_DIMENSION_RESUMEN = (
+    "agencia",
+    "condicion",
+    "tipo_prestamo",
+    "producto",
+    "segmento",
+    "asesor",
+    "tasa_valor",
+    "tasa_real_valor",
+)
+
+_VALORES_DIMENSION_NO_USADA: dict[str, str | float | int | None] = {
+    "provincia": "SIN DATOS",
+    "canton": "SIN DATOS",
+    "parroquia": "SIN DATOS",
+    "educacion": "SIN DATOS",
+    "edad": "SIN DATOS",
+    "garantia": "SIN DATOS",
+    "monto": "SIN DATOS",
+    "tasa": "SIN DATOS",
+    "tasa_valor": None,
+    "tasa_real": "SIN DATOS",
+    "tasa_real_valor": None,
+    "plazo": "SIN DATOS",
+    "plazo_valor": None,
+}
 
 
 @dataclass(frozen=True)
@@ -222,6 +255,172 @@ class MongoColocacionHistoricoRepository:
     def obtener_colocaciones_agrupadas(
         self,
         cortes: list[CorteMensual],
+        agencias: list[str] | None = None,
+    ) -> list[ColocacionAgrupada]:
+        return self._obtener_colocaciones_agrupadas(cortes, agencias)
+
+    def obtener_colocaciones_resumen_agrupadas(
+        self,
+        cortes: list[CorteMensual],
+        agencias: list[str] | None = None,
+    ) -> list[ColocacionAgrupada]:
+        """Agrupa el hecho histórico con las dimensiones que usa Negocios."""
+        return self._obtener_colocaciones_agrupadas(
+            cortes,
+            agencias,
+            CAMPOS_DIMENSION_RESUMEN,
+        )
+
+    def obtener_detalles_resumen(
+        self,
+        cortes: list[CorteMensual],
+        agencias: list[str],
+        dimension: DimensionFiltroColocacion,
+        valor_dimension: str,
+        asesores: list[str] | None = None,
+        tasa_desde: float | None = None,
+        tasa_hasta_exclusiva: float | None = None,
+        limite: int = 500,
+    ) -> ResultadoDetalleColocacion:
+        """Devuelve un prefijo ordenado y sus totales, calculados dentro de Mongo."""
+        if not cortes:
+            return ResultadoDetalleColocacion([], 0, 0.0)
+
+        rangos = [
+            {
+                "fecha_corte": corte.fecha_corte,
+                "FechaAdjudicacion": {
+                    "$gte": corte.fecha_inicio.isoformat(),
+                    "$lte": corte.fecha_fin.isoformat(),
+                },
+            }
+            for corte in cortes
+        ]
+        dimensiones = {
+            "agencia": _texto_normalizado("Agencia"),
+            "condicion": _texto_normalizado("TipoCondicion"),
+            "tipo_prestamo": _texto_normalizado("TipoPrestamo"),
+            "producto": _texto_normalizado("Producto"),
+            "segmento": _texto_normalizado("Segmento"),
+            "asesor": _texto_normalizado("NombreAsesor", "CodigoAsesor"),
+            "tasa_normal": _numero_valido("TasaNominal"),
+            "tasa_real": _numero_valido("TasaAnual"),
+        }
+        valor_dimension_normalizado: str | float | None = valor_dimension.strip().upper()
+        usa_rango_tasa_real = (
+            dimension == "tasa_real" and tasa_desde is not None and tasa_hasta_exclusiva is not None
+        )
+        if dimension in {"tasa_normal", "tasa_real"} and not usa_rango_tasa_real:
+            valor_dimension_normalizado = (
+                None if valor_dimension.strip().upper() == "SIN DATOS" else float(valor_dimension)
+            )
+        filtro_dimension: dict[str, Any] = {"$eq": [dimensiones[dimension], valor_dimension_normalizado]}
+        if usa_rango_tasa_real:
+            filtro_dimension = {
+                "$and": [
+                    {"$gte": [dimensiones["tasa_real"], tasa_desde]},
+                    {"$lt": [dimensiones["tasa_real"], tasa_hasta_exclusiva]},
+                ]
+            }
+        condiciones = [
+            {
+                "$in": [
+                    dimensiones["agencia"],
+                    [agencia.strip().upper() for agencia in agencias],
+                ]
+            },
+            filtro_dimension,
+        ]
+        if asesores:
+            condiciones.append(
+                {
+                    "$in": [
+                        dimensiones["asesor"],
+                        [asesor.strip().upper() for asesor in asesores],
+                    ]
+                }
+            )
+
+        pipeline: list[dict[str, Any]] = [
+            {
+                "$match": {
+                    "EstadoPrestamo": {"$ne": "CANCELADO"},
+                    "$or": rangos,
+                    "$expr": {"$and": condiciones},
+                }
+            },
+            {
+                "$project": {
+                    "numero_cliente": _texto_normalizado("Cliente"),
+                    "nombre_cliente": _texto_normalizado("Nombres"),
+                    "numero_operacion": _texto_normalizado("NumeroPrestamo"),
+                    "agencia": dimensiones["agencia"],
+                    "asesor": dimensiones["asesor"],
+                    "tipo_condicion": dimensiones["condicion"],
+                    "producto": dimensiones["producto"],
+                    "tipo_prestamo": dimensiones["tipo_prestamo"],
+                    "segmento": dimensiones["segmento"],
+                    "tasa_nominal": _numero_valido("TasaNominal"),
+                    "tasa_real": _numero_valido("TasaAnual"),
+                    "monto_colocado": {
+                        "$convert": {
+                            "input": "$DeudaInicial",
+                            "to": "double",
+                            "onError": 0,
+                            "onNull": 0,
+                        }
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "numero_operacion": "$numero_operacion",
+                        "numero_cliente": "$numero_cliente",
+                        "agencia": "$agencia",
+                        "monto_colocado": "$monto_colocado",
+                    },
+                    "detalle": {"$first": "$$ROOT"},
+                }
+            },
+            {"$replaceRoot": {"newRoot": "$detalle"}},
+            {
+                "$facet": {
+                    "items": [
+                        {"$sort": {"numero_operacion": 1, "numero_cliente": 1}},
+                        {"$limit": limite},
+                    ],
+                    "totales": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "total_registros": {"$sum": 1},
+                                "total_monto_colocado": {"$sum": "$monto_colocado"},
+                            }
+                        }
+                    ],
+                }
+            },
+        ]
+        resultados = self.collection.aggregate(
+            pipeline,
+            hint="fecha_corte_1",
+            allowDiskUse=True,
+        )
+        resultado = next(iter(resultados), {"items": [], "totales": []})
+        totales = resultado.get("totales") or []
+        total = totales[0] if totales else {}
+        return ResultadoDetalleColocacion(
+            items=[_detalle_desde_documento(row) for row in resultado.get("items") or []],
+            total_registros=int(total.get("total_registros") or 0),
+            total_monto_colocado=float(total.get("total_monto_colocado") or 0.0),
+        )
+
+    def _obtener_colocaciones_agrupadas(
+        self,
+        cortes: list[CorteMensual],
+        agencias: list[str] | None,
+        campos_dimension: tuple[str, ...] | None = None,
     ) -> list[ColocacionAgrupada]:
         if not cortes:
             return []
@@ -314,12 +513,19 @@ class MongoColocacionHistoricoRepository:
             "plazo": _rango_plazo(),
             "plazo_valor": _plazo_dias(),
         }
+        campos = campos_dimension or tuple(dimensiones)
+        filtros: dict[str, Any] = {"EstadoPrestamo": {"$ne": "CANCELADO"}, "$or": rangos}
+        if agencias:
+            filtros["$expr"] = {
+                "$in": [_texto_normalizado("Agencia"), [agencia.strip().upper() for agencia in agencias]]
+            }
+
         pipeline: list[dict[str, Any]] = [
-            {"$match": {"EstadoPrestamo": {"$ne": "CANCELADO"}, "$or": rangos}},
+            {"$match": filtros},
             {
                 "$project": {
                     "fecha_corte": 1,
-                    **dimensiones,
+                    **{campo: dimensiones[campo] for campo in campos},
                     "deuda_inicial": {
                         "$convert": {
                             "input": "$DeudaInicial",
@@ -334,7 +540,7 @@ class MongoColocacionHistoricoRepository:
                 "$group": {
                     "_id": {
                         "fecha_corte": "$fecha_corte",
-                        **{campo: f"${campo}" for campo in dimensiones},
+                        **{campo: f"${campo}" for campo in campos},
                     },
                     "operaciones": {"$sum": 1},
                     "saldo_inicial": {"$sum": "$deuda_inicial"},
@@ -354,8 +560,10 @@ class MongoColocacionHistoricoRepository:
             if periodo is None:
                 continue
             anio, mes = periodo
-            valores = {}
+            valores = dict(_VALORES_DIMENSION_NO_USADA)
             for campo in dimensiones:
+                if campo not in campos:
+                    continue
                 if campo in {"tasa_valor", "tasa_real_valor"}:
                     valor_tasa = identificador.get(campo)
                     valores[campo] = (
@@ -387,3 +595,24 @@ class MongoColocacionHistoricoRepository:
                 )
             )
         return resultado
+
+
+def _numero_detalle(valor: object) -> float | None:
+    return float(valor) if isinstance(valor, int | float) and valor >= 0 else None
+
+
+def _detalle_desde_documento(row: MongoDocument) -> DetalleColocacion:
+    return DetalleColocacion(
+        numero_cliente=str(row.get("numero_cliente") or "SIN DATOS"),
+        nombre_cliente=str(row.get("nombre_cliente") or "SIN DATOS"),
+        numero_operacion=str(row.get("numero_operacion") or "SIN DATOS"),
+        agencia=str(row.get("agencia") or "SIN DATOS"),
+        asesor=str(row.get("asesor") or "SIN DATOS"),
+        tipo_condicion=str(row.get("tipo_condicion") or "SIN DATOS"),
+        producto=str(row.get("producto") or "SIN DATOS"),
+        tipo_prestamo=str(row.get("tipo_prestamo") or "SIN DATOS"),
+        segmento=str(row.get("segmento") or "SIN DATOS"),
+        tasa_nominal=_numero_detalle(row.get("tasa_nominal")),
+        tasa_real=_numero_detalle(row.get("tasa_real")),
+        monto_colocado=float(row.get("monto_colocado") or 0.0),
+    )

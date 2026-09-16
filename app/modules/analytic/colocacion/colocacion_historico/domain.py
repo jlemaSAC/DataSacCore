@@ -1,4 +1,17 @@
 from dataclasses import dataclass
+from typing import Literal
+
+
+DimensionFiltroColocacion = Literal[
+    "agencia",
+    "asesor",
+    "tipo_prestamo",
+    "producto",
+    "segmento",
+    "condicion",
+    "tasa_normal",
+    "tasa_real",
+]
 
 
 @dataclass(frozen=True, order=True)
@@ -32,3 +45,28 @@ class ColocacionAgrupada:
     dimensiones: DimensionesColocacion
     operaciones: int
     saldo_inicial: float
+
+
+@dataclass(frozen=True)
+class DetalleColocacion:
+    numero_cliente: str
+    nombre_cliente: str
+    numero_operacion: str
+    agencia: str
+    asesor: str
+    tipo_condicion: str
+    producto: str
+    tipo_prestamo: str
+    segmento: str
+    tasa_nominal: float | None
+    tasa_real: float | None
+    monto_colocado: float
+
+
+@dataclass(frozen=True)
+class ResultadoDetalleColocacion:
+    """Página parcial y totales calculados por una fuente de colocación."""
+
+    items: list[DetalleColocacion]
+    total_registros: int
+    total_monto_colocado: float
