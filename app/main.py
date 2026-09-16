@@ -24,8 +24,6 @@ from app.routers import health
 
 logger = logging.getLogger("uvicorn.error")
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
-# El middleware de la aplicacion registra cada solicitud con mas contexto.
-logging.getLogger("uvicorn.access").disabled = True
 
 
 def verify_database_on_startup() -> None:
