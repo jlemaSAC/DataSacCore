@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
 
 
 def get_current_auth_context(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> AuthContext:
     if credentials is None or credentials.scheme.lower() != "bearer":
@@ -26,4 +27,6 @@ def get_current_auth_context(
     except TokenValidationError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    return AuthContext.from_token_payload(credentials.credentials, usuario)
+    auth_context = AuthContext.from_token_payload(credentials.credentials, usuario)
+    request.state.codigo_usuario = auth_context.usuario.sub
+    return auth_context

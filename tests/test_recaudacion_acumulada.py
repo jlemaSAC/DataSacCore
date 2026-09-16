@@ -95,6 +95,8 @@ class FakeMongoRepository:
                 "ProvisionRequerida": 45,
                 "ValorParaEstarAlDia": 20,
                 "ValorHastaCuotaActual": 120,
+                "ValorCancelarTotal": 980,
+                "GastoCobranza": 15,
                 "Plazo": 12,
             },
             "0002": {
@@ -231,12 +233,39 @@ def test_servicio_compone_mongo_y_una_sola_consulta_sql() -> None:
     assert prestamo.variacion_provisiones == -75
     assert prestamo.provision_con_cobro_una_cuota == 40
     assert prestamo.numero_cuota_siguiente == 5
-    assert prestamo.cobro_para_bajar_una_cuota == 100
+    assert prestamo.cobro_para_bajar_una_cuota == 115
     assert prestamo.cuotas_pendientes == 9
     assert prestamo.saldo_capital_con_cobro_una_cuota == 800
+    assert prestamo.pendiente_pago == 35
+    assert prestamo.pendiente_pago_mas_cuota_por_vencer == 135
+    assert prestamo.total_a_cancelar == 995
     assert prestamo.informacion_deudor.identificacion == "0101"  # type: ignore[union-attr]
     assert prestamo.garante_1.nombres == "GARANTE UNO"  # type: ignore[union-attr]
     assert respuesta.prestamos[0].informacion_deudor is None
+
+
+def test_item_historico_sin_gasto_conserva_valores_base() -> None:
+    item = RecaudacionAcumuladaService._construir_item(
+        numero="0001",
+        inicio={},
+        fin={
+            "NumeroPrestamo": "0001",
+            "ValorParaEstarAlDia": 20,
+            "ValorHastaCuotaActual": 120,
+            "ValorCancelarTotal": 980,
+        },
+        detalle=DetalleCuotaPrestamo(
+            numero_prestamo="0001",
+            cobro_hasta_cuota=100,
+        ),
+        total_recuperado=0,
+        fecha_ultimo_pago=None,
+    )
+
+    assert item.cobro_para_bajar_una_cuota == 100
+    assert item.pendiente_pago == 20
+    assert item.pendiente_pago_mas_cuota_por_vencer == 120
+    assert item.total_a_cancelar == 980
 
 
 def test_servicio_rechaza_fecha_futura() -> None:
@@ -322,6 +351,7 @@ def test_endpoint_usa_bearer_y_no_expone_paginacion() -> None:
         "total_recuperado",
         "pendiente_pago",
         "pendiente_pago_mas_cuota_por_vencer",
+        "total_a_cancelar",
         "informacion_deudor",
         "garante_1",
         "garante_2",

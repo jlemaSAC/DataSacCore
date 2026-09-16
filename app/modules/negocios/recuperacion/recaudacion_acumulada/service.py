@@ -169,6 +169,7 @@ class RecaudacionAcumuladaService:
         saldo_actual = _a_float(fin.get("SaldoCapital"))
         provision_anterior = _a_float(inicio.get("ProvisionRequerida"))
         provision_actual = _a_float(fin.get("ProvisionRequerida"))
+        gasto_cobranza = _a_float(fin.get("GastoCobranza"))
         cancelado = _es_cancelado(fin)
 
         informacion_deudor = None
@@ -212,7 +213,9 @@ class RecaudacionAcumuladaService:
             variacion_saldo_capital=round(saldo_actual - saldo_anterior, 2),
             numero_cuota_actual_no_pagada=detalle.numero_cuota_actual_no_pagada,
             numero_cuota_siguiente=detalle.numero_cuota_siguiente,
-            cobro_para_bajar_una_cuota=round(detalle.cobro_hasta_cuota, 2),
+            cobro_para_bajar_una_cuota=round(
+                detalle.cobro_hasta_cuota + gasto_cobranza, 2
+            ),
             cuotas_pendientes=detalle.cuotas_pendientes,
             cuotas_pagadas=detalle.cuotas_pagadas,
             total_cuotas=detalle.total_cuotas or _a_int(fin.get("Plazo")),
@@ -231,9 +234,14 @@ class RecaudacionAcumuladaService:
             variacion_provisiones=round(provision_actual - provision_anterior, 2),
             dia_ultimo_pago=fecha_ultimo_pago,
             total_recuperado=round(total_recuperado, 2),
-            pendiente_pago=round(_a_float(fin.get("ValorParaEstarAlDia")), 2),
+            pendiente_pago=round(
+                _a_float(fin.get("ValorParaEstarAlDia")) + gasto_cobranza, 2
+            ),
             pendiente_pago_mas_cuota_por_vencer=round(
-                _a_float(fin.get("ValorHastaCuotaActual")), 2
+                _a_float(fin.get("ValorHastaCuotaActual")) + gasto_cobranza, 2
+            ),
+            total_a_cancelar=round(
+                _a_float(fin.get("ValorCancelarTotal")) + gasto_cobranza, 2
             ),
             informacion_deudor=informacion_deudor,
             garante_1=garante_1,

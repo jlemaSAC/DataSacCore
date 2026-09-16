@@ -37,6 +37,8 @@ PROYECCION_SITUACION = {
     "ProvisionRequerida": 1,
     "ValorParaEstarAlDia": 1,
     "ValorHastaCuotaActual": 1,
+    "ValorCancelarTotal": 1,
+    "GastoCobranza": 1,
     "Plazo": 1,
     "G1_Identificacion": 1,
     "G1_Nombres": 1,

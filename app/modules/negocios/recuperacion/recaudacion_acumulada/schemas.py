@@ -115,6 +115,7 @@ class PrestamoRecaudadoAcumulado(BaseModel):
     total_recuperado: float
     pendiente_pago: float
     pendiente_pago_mas_cuota_por_vencer: float
+    total_a_cancelar: float
 
     informacion_deudor: InformacionPersonaRecaudacion | None = None
     garante_1: GaranteRecaudacion | None = None

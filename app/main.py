@@ -1,8 +1,9 @@
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from time import perf_counter
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pymongo.errors import PyMongoError
@@ -23,6 +24,8 @@ from app.routers import health
 
 logger = logging.getLogger("uvicorn.error")
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
+# El middleware de la aplicacion registra cada solicitud con mas contexto.
+logging.getLogger("uvicorn.access").disabled = True
 
 
 def verify_database_on_startup() -> None:
@@ -101,11 +104,47 @@ def add_gzip_middleware(fastapi_app: FastAPI) -> None:
     fastapi_app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
+def add_request_logging_middleware(fastapi_app: FastAPI) -> None:
+    """Registra la informacion operativa de cada solicitud sin exponer tokens."""
+
+    @fastapi_app.middleware("http")
+    async def log_request(request: Request, call_next): # type: ignore
+        started_at = perf_counter()
+        client_ip = request.client.host if request.client is not None else "-"
+        http_version = request.scope.get("http_version", "-")
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception(
+                "HTTP client_ip=%s http_version=%s codigo_usuario=%s method=%s path=%s status_code=500 duration_ms=%d",
+                client_ip,
+                http_version,
+                getattr(request.state, "codigo_usuario", "-"),
+                request.method,
+                request.url.path,
+                round((perf_counter() - started_at) * 1000),
+            )
+            raise
+
+        logger.info(
+            "HTTP client_ip=%s http_version=%s codigo_usuario=%s method=%s path=%s status_code=%d duration_ms=%d",
+            client_ip,
+            http_version,
+            getattr(request.state, "codigo_usuario", "-"),
+            request.method,
+            request.url.path,
+            response.status_code,
+            round((perf_counter() - started_at) * 1000),
+        )
+        return response
+
+
 settings = get_app_settings()
 app = FastAPI(title=settings.name, version=settings.version, lifespan=lifespan)
 
 add_cors_middleware(app, settings)
 add_gzip_middleware(app)
+add_request_logging_middleware(app)
 
 app.include_router(health.router)
 app.include_router(auth_router)
