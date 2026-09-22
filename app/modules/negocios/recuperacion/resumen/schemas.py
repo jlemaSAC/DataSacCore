@@ -10,6 +10,13 @@ class InputResumenRecuperacion(BaseModel):
     agencias: list[str] = Field(min_length=1, examples=[["MATRIZ", "CUENCA"]])
     fecha_inicio: date = Field(examples=["2026-08-01"])
     fecha_fin: date = Field(examples=["2026-08-31"])
+    incluir_cubos_filtro: bool = Field(
+        default=False,
+        description=(
+            "Incluye los cubos para el filtrado local por asesor y cargo. "
+            "Debe solicitarse solo después de aplicar esos filtros."
+        ),
+    )
 
     @field_validator("agencias", mode="after")
     @classmethod
@@ -95,6 +102,50 @@ class ResumenRecuperacionResponse(BaseModel):
     cubos_filtro: list[CuboFiltroRecuperacion]
     desglose_cobros: list[DesgloseCobroRecuperacion]
     agrupaciones: AgrupacionesResumenRecuperacion
+
+
+class InputResumenActualRecuperacion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fecha_inicio: date = Field(description="Primera fecha incluida.")
+    fecha_fin: date = Field(description="Última fecha incluida.")
+    agencias: list[str] = Field(
+        default_factory=list,
+        description="Agencias por nombre. Una lista vacía consulta el consolidado.",
+    )
+
+    @field_validator("agencias", mode="after")
+    @classmethod
+    def normalizar_agencias(cls, valores: list[str]) -> list[str]:
+        return InputResumenRecuperacion.normalizar_listas(valores)
+
+    @model_validator(mode="after")
+    def validar_rango(self) -> "InputResumenActualRecuperacion":
+        if self.fecha_fin < self.fecha_inicio:
+            raise ValueError("fecha_fin no puede ser menor que fecha_inicio.")
+        if (self.fecha_inicio.year, self.fecha_inicio.month) != (
+            self.fecha_fin.year,
+            self.fecha_fin.month,
+        ):
+            raise ValueError("fecha_inicio y fecha_fin deben pertenecer al mismo mes.")
+        return self
+
+
+class RangoResumenActualRecuperacion(BaseModel):
+    fecha_inicio: date
+    fecha_fin: date
+    recuperacion_total: float
+    recuperacion_por_tipo: dict[str, float]
+
+
+class ResumenActualRecuperacionResponse(BaseModel):
+    fecha_inicio: date
+    fecha_fin: date
+    consolidado: bool
+    agencias: list[str]
+    actual: RangoResumenActualRecuperacion
+    mes_anterior: RangoResumenActualRecuperacion
+    anio_anterior: RangoResumenActualRecuperacion
 
 
 DimensionDetalleRecuperacion = Literal[

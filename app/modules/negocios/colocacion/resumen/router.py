@@ -6,7 +6,9 @@ from app.modules.negocios.colocacion.resumen.dependencies import get_resumen_col
 from app.modules.negocios.colocacion.resumen.schemas import (
     DetalleResumenColocacionResponse,
     InputDetalleResumenColocacion,
+    InputResumenActualColocacion,
     InputResumenColocacion,
+    ResumenActualColocacionResponse,
     ResumenColocacionResponse,
 )
 from app.modules.negocios.colocacion.resumen.service import ResumenColocacionService
@@ -26,6 +28,19 @@ def obtener_resumen_colocacion(
     service: ResumenColocacionService = Depends(get_resumen_colocacion_service),
 ) -> ResumenColocacionResponse:
     return service.obtener_resumen(input_data=body, auth_context=auth_context)
+
+
+@router.post(
+    "/resumen-actual",
+    response_model=ResumenActualColocacionResponse,
+    summary="Comparar el resumen de colocación para un rango",
+)
+def obtener_resumen_actual_colocacion(
+    body: InputResumenActualColocacion,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: ResumenColocacionService = Depends(get_resumen_colocacion_service),
+) -> ResumenActualColocacionResponse:
+    return service.obtener_resumen_actual(input_data=body, auth_context=auth_context)
 
 
 @router.post(

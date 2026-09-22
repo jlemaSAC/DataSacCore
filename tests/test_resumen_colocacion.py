@@ -16,6 +16,7 @@ from app.modules.auth.schemas import AuthContext, UsuarioTokenPayload
 from app.modules.negocios.colocacion.resumen.dependencies import get_resumen_colocacion_service
 from app.modules.negocios.colocacion.resumen.schemas import (
     InputDetalleResumenColocacion,
+    InputResumenActualColocacion,
     InputResumenColocacion,
 )
 from app.modules.negocios.colocacion.resumen.service import ResumenColocacionService
@@ -78,6 +79,7 @@ class FakeColocacionHistoricoService:
             (date(2026, 8, 15), date(2026, 8, 25)): agrupacion(10, 1000.0),
             (date(2026, 7, 1), date(2026, 7, 31)): agrupacion(30, 3000.0),
             (date(2026, 7, 15), date(2026, 7, 25)): agrupacion(8, 800.0),
+            (date(2025, 1, 1), date(2025, 12, 31)): agrupacion(40, 4000.0),
             (date(2026, 8, 1), date(2026, 8, 25)): agrupacion(20, 2000.0),
             (date(2026, 7, 1), date(2026, 7, 25)): agrupacion(15, 1500.0),
         }
@@ -197,6 +199,78 @@ def test_servicio_rechaza_fecha_final_posterior_a_fecha_del_sistema() -> None:
         )
 
     assert error.value.status_code == 400
+
+
+def test_resumen_actual_colocacion_usa_promedios_simples_y_periodos_completos() -> None:
+    historico = FakeColocacionHistoricoService()
+    service = ResumenColocacionService(historico)  # type: ignore[arg-type]
+
+    respuesta = service.obtener_resumen_actual(
+        InputResumenActualColocacion(
+            fecha_inicio=date(2026, 8, 15),
+            fecha_fin=date(2026, 8, 25),
+            agencias=[],
+        ),
+        auth_context(),
+    )
+
+    assert historico.llamadas == [
+        (date(2026, 1, 1), date(2026, 8, 25), date(2026, 8, 31), []),
+        (date(2026, 8, 15), date(2026, 8, 25), date(2026, 8, 31), []),
+        (date(2026, 7, 1), date(2026, 7, 31), date(2026, 8, 31), []),
+        (date(2025, 1, 1), date(2025, 12, 31), date(2026, 8, 31), []),
+    ]
+    assert respuesta.consolidado is True
+    assert respuesta.acumulado_anual.fecha_inicio == date(2026, 1, 1)
+    assert respuesta.acumulado_anual.fecha_fin == date(2026, 8, 25)
+    assert [fila.model_dump() for fila in respuesta.colocacion_por_agencia] == [
+        {
+            "agencia": "MATRIZ",
+            "monto_colocado": 1000.0,
+            "numero_operaciones": 10,
+            "monto_promedio": 100.0,
+        },
+    ]
+    assert respuesta.actual.tasa_promedio_colocacion == 16
+    assert respuesta.actual.tasa_real_promedio_colocacion == 17
+    assert respuesta.actual.monto_promedio == 100
+    assert respuesta.mes_anterior.colocacion_general == 3000
+    assert respuesta.mes_anterior.monto_promedio == 100
+    assert respuesta.mes_anterior.fecha_inicio == date(2026, 7, 1)
+    assert respuesta.mes_anterior.fecha_fin == date(2026, 7, 31)
+    assert respuesta.anio_anterior.fecha_inicio == date(2025, 1, 1)
+    assert respuesta.anio_anterior.fecha_fin == date(2025, 12, 31)
+    assert respuesta.anio_anterior.numero_operaciones == 40
+
+
+def test_endpoint_resumen_actual_colocacion_retorna_comparativo_por_rango() -> None:
+    service = ResumenColocacionService(FakeColocacionHistoricoService())  # type: ignore[arg-type]
+    app.dependency_overrides[get_current_auth_context] = auth_context
+    app.dependency_overrides[get_resumen_colocacion_service] = lambda: service
+    try:
+        response = client.post(
+            "/negocios/colocacion/resumen-actual",
+            json={"fecha_inicio": "2026-08-15", "fecha_fin": "2026-08-25"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["consolidado"] is True
+    assert body["actual"]["colocacion_general"] == 1000
+    assert body["colocacion_por_agencia"] == [
+        {
+            "agencia": "MATRIZ",
+            "monto_colocado": 1000.0,
+            "numero_operaciones": 10,
+            "monto_promedio": 100.0,
+        }
+    ]
+    assert body["actual"]["monto_promedio"] == 100
+    assert body["actual"]["tasa_promedio_colocacion"] == 16
+    assert body["actual"]["tasa_real_promedio_colocacion"] == 17
+    assert body["actual"]["numero_operaciones"] == 10
 
 
 @pytest.mark.parametrize("modelo", [InputResumenColocacion, InputDetalleResumenColocacion])

@@ -52,6 +52,17 @@ DIMENSIONES_RESUMEN_NEGOCIOS = (
     "tipo_cobro",
     "abogado",
 )
+TIPOS_COBRO_RESUMEN = (
+    "CAPITAL",
+    "INTERES",
+    "INTERES_MORA",
+    "SEGURO",
+    "CASTIGO",
+    "COBRANZA",
+    "JUDICIAL",
+    "DIFERIDO",
+    "OTROS",
+)
 
 
 def _expresion_numero(campo: str) -> dict[str, Any]:
@@ -229,6 +240,7 @@ class MongoRecuperacionHistoricoRepository:
         fecha_actual: date,
         agencias: list[str],
         incluir_desglose_cobros: bool = False,
+        incluir_cubos_filtro: bool = False,
     ) -> ResultadoResumenRecuperacion:
         """Agrega todas las dimensiones del resumen sin materializar movimientos."""
         desde = fecha_desde.strftime("%Y%m%d")
@@ -262,6 +274,7 @@ class MongoRecuperacionHistoricoRepository:
                 actual,
                 agencias,
                 incluir_desglose_cobros,
+                incluir_cubos_filtro,
             )
             documento = next(iter(collection.aggregate(pipeline, allowDiskUse=True)), None) or {}
             asesores_disponibles.update(
@@ -360,6 +373,79 @@ class MongoRecuperacionHistoricoRepository:
             cubos_filtro=cubos_filtro,
             desglose_cobros=list(desglose_cobros.values()),
         )
+
+    def obtener_totales_por_tipo_cobro(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_actual: date,
+        agencias: list[str],
+    ) -> dict[str, float]:
+        """Agrega solo los nueve rubros, sin consultar Situacion Crediticia."""
+        desde = fecha_desde.strftime("%Y%m%d")
+        hasta = fecha_hasta.strftime("%Y%m%d")
+        actual = fecha_actual.strftime("%Y%m%d")
+        historica_hasta = min(
+            hasta,
+            (fecha_actual - timedelta(days=1)).strftime("%Y%m%d"),
+        )
+        consultas: list[tuple[Collection[MongoDocument], str, str]] = []
+        if desde <= historica_hasta:
+            consultas.append((self.collection, desde, historica_hasta))
+        if desde <= actual <= hasta:
+            consultas.append((self.actual_collection, actual, actual))
+
+        totales: dict[str, float] = {tipo: 0.0 for tipo in TIPOS_COBRO_RESUMEN}
+        for collection, consulta_desde, consulta_hasta in consultas:
+            pipeline = self._construir_pipeline_totales_por_tipo_cobro(
+                consulta_desde,
+                consulta_hasta,
+                agencias,
+            )
+            for fila in collection.aggregate(pipeline, allowDiskUse=True):
+                tipo = str(fila.get("_id") or "OTROS").strip().upper()
+                if tipo in totales:
+                    totales[tipo] += float(fila.get("valor") or 0.0)
+        return totales
+
+    @staticmethod
+    def _construir_pipeline_totales_por_tipo_cobro(
+        fecha_desde: str,
+        fecha_hasta: str,
+        agencias: list[str],
+    ) -> list[dict[str, Any]]:
+        pipeline: list[dict[str, Any]] = [
+            {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
+            {
+                "$project": {
+                    "numero": {
+                        "$trim": {
+                            "input": {
+                                "$convert": {
+                                    "input": {"$ifNull": ["$NUMERO_PRESTAMO", "$NumeroPrestamo"]},
+                                    "to": "string",
+                                    "onError": "",
+                                    "onNull": "",
+                                }
+                            }
+                        }
+                    },
+                    "agencia": _texto_mongo("$AGENCIA"),
+                    "cobros": _cobros(),
+                }
+            },
+            {"$match": {"numero": {"$ne": ""}}},
+            *_match_lista("agencia", agencias),
+            {"$unwind": "$cobros"},
+            {"$match": {"cobros.valor": {"$ne": 0}}},
+            {
+                "$group": {
+                    "_id": "$cobros.tipo_cobro",
+                    "valor": {"$sum": "$cobros.valor"},
+                }
+            },
+        ]
+        return pipeline
 
     def obtener_detalle_resumen_negocios(
         self,
@@ -574,6 +660,7 @@ class MongoRecuperacionHistoricoRepository:
         fecha_actual: str,
         agencias: list[str],
         incluir_desglose_cobros: bool = False,
+        incluir_cubos_filtro: bool = False,
     ) -> list[dict[str, Any]]:
         pipeline: list[dict[str, Any]] = [
             {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
@@ -683,13 +770,17 @@ class MongoRecuperacionHistoricoRepository:
                             if incluir_desglose_cobros
                             else {}
                         ),
-                        **{
-                            f"filtro_{dimension}": _pipeline_cubo_filtro(
-                                dimension,
-                                incluir_agencia=dimension == "asesor",
-                            )
-                            for dimension in DIMENSIONES_RESUMEN_NEGOCIOS
-                        },
+                        **(
+                            {
+                                f"filtro_{dimension}": _pipeline_cubo_filtro(
+                                    dimension,
+                                    incluir_agencia=dimension == "asesor",
+                                )
+                                for dimension in DIMENSIONES_RESUMEN_NEGOCIOS
+                            }
+                            if incluir_cubos_filtro
+                            else {}
+                        ),
                     }
                 },
             ]
