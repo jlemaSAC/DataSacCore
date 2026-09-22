@@ -21,7 +21,10 @@ from app.modules.negocios.recuperacion.resumen.schemas import (
     FilaAgrupacionRecuperacion,
     FilaDetalleRecuperacion,
     InputDetalleResumenRecuperacion,
+    InputResumenActualRecuperacion,
     InputResumenRecuperacion,
+    RangoResumenActualRecuperacion,
+    ResumenActualRecuperacionResponse,
     ResumenRecuperacionResponse,
     TotalesPaginaDetalleRecuperacion,
 )
@@ -40,6 +43,17 @@ TIPOS_DIMENSION = (
     "condicion",
     "tipo_cobro",
     "abogado",
+)
+TIPOS_COBRO_RESUMEN_ACTUAL = (
+    "CAPITAL",
+    "INTERES",
+    "INTERES_MORA",
+    "SEGURO",
+    "CASTIGO",
+    "COBRANZA",
+    "JUDICIAL",
+    "DIFERIDO",
+    "OTROS",
 )
 
 
@@ -99,6 +113,7 @@ class ResumenRecuperacionService:
                 input_data.agencias,
                 periodos,
                 fecha_hoy,
+                incluir_cubos_filtro=input_data.incluir_cubos_filtro,
             )
             return ResumenRecuperacionResponse(
                 fecha_inicio=periodos.actual_inicio,
@@ -129,6 +144,74 @@ class ResumenRecuperacionService:
             raise HTTPException(
                 status_code=500,
                 detail="Error consultando resumen de recuperacion.",
+            ) from exc
+
+    def obtener_resumen_actual(
+        self,
+        input_data: InputResumenActualRecuperacion,
+        auth_context: AuthContext,
+    ) -> ResumenActualRecuperacionResponse:
+        fecha_sistema = auth_context.usuario.fecha_sistema
+        fecha_hoy = (
+            fecha_sistema.date()
+            if isinstance(fecha_sistema, datetime)
+            else fecha_sistema
+        )
+        if input_data.fecha_fin > fecha_hoy:
+            raise HTTPException(
+                status_code=400,
+                detail="fecha_fin no puede ser posterior a la fecha del sistema.",
+        )
+
+        try:
+            mes_anterior_inicio, mes_anterior_fin = _rango_mes_anterior(
+                input_data.fecha_inicio
+            )
+            anio_anterior_inicio, anio_anterior_fin = _rango_anio_anterior(
+                input_data.fecha_inicio
+            )
+            rangos = (
+                ("actual", input_data.fecha_inicio, input_data.fecha_fin),
+                (
+                    "mes_anterior",
+                    mes_anterior_inicio,
+                    mes_anterior_fin,
+                ),
+                (
+                    "anio_anterior",
+                    anio_anterior_inicio,
+                    anio_anterior_fin,
+                ),
+            )
+            resumenes = {
+                nombre: _resumir_rango_actual_recuperacion(
+                    fecha_inicio,
+                    fecha_fin,
+                    self.recuperacion_historico_service.obtener_totales_por_tipo_cobro(
+                        fecha_inicio,
+                        fecha_fin,
+                        fecha_hoy,
+                        input_data.agencias,
+                    ),
+                )
+                for nombre, fecha_inicio, fecha_fin in rangos
+            }
+            return ResumenActualRecuperacionResponse(
+                fecha_inicio=input_data.fecha_inicio,
+                fecha_fin=input_data.fecha_fin,
+                consolidado=not input_data.agencias,
+                agencias=input_data.agencias,
+                actual=resumenes["actual"],
+                mes_anterior=resumenes["mes_anterior"],
+                anio_anterior=resumenes["anio_anterior"],
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Error consultando resumen actual de recuperacion")
+            raise HTTPException(
+                status_code=500,
+                detail="Error consultando resumen actual de recuperacion.",
             ) from exc
 
     def obtener_detalle(
@@ -258,6 +341,8 @@ class ResumenRecuperacionService:
         agencias: list[str],
         periodos: PeriodosComparacionRecuperacion,
         fecha_hoy: date,
+        *,
+        incluir_cubos_filtro: bool = False,
     ) -> tuple[
         dict[str, dict[tuple[str | None, str], _ComparativoRecuperacion]],
         set[str],
@@ -289,23 +374,25 @@ class ResumenRecuperacionService:
                     fecha_hoy,
                     agencias,
                     incluir_desglose_cobros=nombre == "actual",
+                    incluir_cubos_filtro=incluir_cubos_filtro,
                 )
             )
             asesores_disponibles.update(resultado.asesores_disponibles)
             cargos_disponibles.update(resultado.cargos_disponibles)
-            cubos_filtro.extend(
-                CuboFiltroRecuperacion(
-                    periodo=nombre,
-                    tipo_dimension=cubo.tipo_dimension,
-                    dimension=cubo.dimension,
-                    agencia=cubo.agencia,
-                    asesor=cubo.asesor,
-                    cargo=cubo.cargo,
-                    numero_operaciones=cubo.numero_operaciones,
-                    monto_recuperado=round(cubo.monto_recuperado, 2),
+            if incluir_cubos_filtro:
+                cubos_filtro.extend(
+                    CuboFiltroRecuperacion(
+                        periodo=nombre,
+                        tipo_dimension=cubo.tipo_dimension,
+                        dimension=cubo.dimension,
+                        agencia=cubo.agencia,
+                        asesor=cubo.asesor,
+                        cargo=cubo.cargo,
+                        numero_operaciones=cubo.numero_operaciones,
+                        monto_recuperado=round(cubo.monto_recuperado, 2),
+                    )
+                    for cubo in resultado.cubos_filtro
                 )
-                for cubo in resultado.cubos_filtro
-            )
             if nombre == "actual":
                 desglose_cobros.extend(
                     DesgloseCobroRecuperacion(
@@ -403,3 +490,37 @@ def _mover_mes(fecha: date, cantidad_meses: int) -> date:
     anio, mes_base_cero = divmod(indice_mes, 12)
     mes = mes_base_cero + 1
     return date(anio, mes, min(fecha.day, calendar.monthrange(anio, mes)[1]))
+
+
+def _rango_mes_anterior(fecha: date) -> tuple[date, date]:
+    fecha_fin = fecha.replace(day=1) - timedelta(days=1)
+    return fecha_fin.replace(day=1), fecha_fin
+
+
+def _rango_anio_anterior(fecha: date) -> tuple[date, date]:
+    anio = fecha.year - 1
+    return date(anio, 1, 1), date(anio, 12, 31)
+
+
+def _resumir_rango_actual_recuperacion(
+    fecha_inicio: date,
+    fecha_fin: date,
+    totales_por_tipo: dict[str, float],
+) -> RangoResumenActualRecuperacion:
+    montos_por_tipo = {tipo: 0.0 for tipo in TIPOS_COBRO_RESUMEN_ACTUAL}
+    for tipo, monto in totales_por_tipo.items():
+        if tipo in montos_por_tipo:
+            montos_por_tipo[tipo] += monto
+    return RangoResumenActualRecuperacion(
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        recuperacion_total=round(sum(montos_por_tipo.values()), 2),
+        recuperacion_por_tipo={
+            tipo: round(monto, 2) for tipo, monto in montos_por_tipo.items()
+        },
+    )
+
+
+def _mover_anio(fecha: date, cantidad_anios: int) -> date:
+    anio = fecha.year + cantidad_anios
+    return date(anio, fecha.month, min(fecha.day, calendar.monthrange(anio, fecha.month)[1]))

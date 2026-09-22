@@ -1,7 +1,9 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.modules.prestamos.normalizadores import normalizar_texto
 
 
 class InputResumenColocacion(BaseModel):
@@ -75,6 +77,88 @@ class ResumenColocacionResponse(BaseModel):
     asesores_disponibles: list[str]
     filas_filtro: list[FilaComparativaColocacion]
     agrupaciones: AgrupacionesResumenColocacion
+
+
+class InputResumenActualColocacion(BaseModel):
+    """Filtro del comparativo por rango; sin agencias representa el consolidado."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fecha_inicio: date = Field(description="Primera fecha incluida.")
+    fecha_fin: date = Field(description="Última fecha incluida.")
+    agencias: list[str] = Field(
+        default_factory=list,
+        description="Agencias por nombre. Una lista vacía consulta el consolidado.",
+    )
+
+    @field_validator("agencias")
+    @classmethod
+    def normalizar_agencias(cls, valores: list[str]) -> list[str]:
+        return list(
+            dict.fromkeys(
+                agencia
+                for valor in valores
+                if (agencia := normalizar_texto(valor))
+            )
+        )
+
+    @model_validator(mode="after")
+    def validar_rango(self) -> "InputResumenActualColocacion":
+        if self.fecha_fin < self.fecha_inicio:
+            raise ValueError("fecha_fin no puede ser menor que fecha_inicio.")
+        if (self.fecha_inicio.year, self.fecha_inicio.month) != (
+            self.fecha_fin.year,
+            self.fecha_fin.month,
+        ):
+            raise ValueError("fecha_inicio y fecha_fin deben pertenecer al mismo mes.")
+        return self
+
+
+class RangoResumenActualColocacion(BaseModel):
+    fecha_inicio: date
+    fecha_fin: date
+    colocacion_general: float = Field(
+        description="Suma de DeudaInicial de las operaciones adjudicadas en el rango."
+    )
+    monto_promedio: float = Field(
+        description="Monto promedio colocado por operación en el rango."
+    )
+    tasa_promedio_colocacion: float | None = Field(
+        description="Promedio simple de TasaNominal por operación con tasa válida."
+    )
+    tasa_real_promedio_colocacion: float | None = Field(
+        description="Promedio simple de TasaAnual/TEA por operación con tasa válida."
+    )
+    numero_operaciones: int
+
+
+class ColocacionPorAgencia(BaseModel):
+    agencia: str
+    monto_colocado: float = Field(
+        description="Suma de DeudaInicial de la agencia en el rango seleccionado."
+    )
+    numero_operaciones: int = Field(
+        description="Número de operaciones de la agencia en el rango seleccionado."
+    )
+    monto_promedio: float = Field(
+        description="Monto promedio colocado por operación de la agencia."
+    )
+
+
+class ResumenActualColocacionResponse(BaseModel):
+    fecha_inicio: date
+    fecha_fin: date
+    consolidado: bool
+    agencias: list[str]
+    colocacion_por_agencia: list[ColocacionPorAgencia] = Field(
+        description="Montos de todas las agencias del rango seleccionado, sin aplicar el filtro de agencias."
+    )
+    acumulado_anual: RangoResumenActualColocacion = Field(
+        description="Colocación acumulada desde el 1 de enero hasta la fecha fin seleccionada."
+    )
+    actual: RangoResumenActualColocacion
+    mes_anterior: RangoResumenActualColocacion
+    anio_anterior: RangoResumenActualColocacion
 
 
 DimensionDetalleColocacion = Literal[

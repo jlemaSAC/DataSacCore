@@ -7,6 +7,7 @@ from math import floor
 from fastapi import HTTPException
 
 from app.modules.analytic.colocacion.colocacion_historico.domain import (
+    ColocacionAgrupada,
     DimensionesColocacion,
 )
 from app.modules.analytic.colocacion.colocacion_historico.service import (
@@ -19,8 +20,12 @@ from app.modules.negocios.colocacion.resumen.schemas import (
     FilaAgrupacionColocacion,
     FilaDetalleColocacion,
     FilaComparativaColocacion,
+    ColocacionPorAgencia,
     InputDetalleResumenColocacion,
+    InputResumenActualColocacion,
     InputResumenColocacion,
+    RangoResumenActualColocacion,
+    ResumenActualColocacionResponse,
     ResumenColocacionResponse,
 )
 
@@ -101,6 +106,99 @@ class ResumenColocacionService:
             raise HTTPException(
                 status_code=500,
                 detail="Error consultando resumen de colocacion.",
+            ) from exc
+
+    def obtener_resumen_actual(
+        self,
+        input_data: InputResumenActualColocacion,
+        auth_context: AuthContext,
+    ) -> ResumenActualColocacionResponse:
+        fecha_hoy = _fecha_sistema(auth_context)
+        if input_data.fecha_fin > fecha_hoy:
+            raise HTTPException(
+                status_code=400,
+                detail="fecha_fin no puede ser posterior a la fecha del sistema.",
+        )
+
+        try:
+            mes_anterior_inicio, mes_anterior_fin = _rango_mes_anterior(
+                input_data.fecha_inicio
+            )
+            anio_anterior_inicio, anio_anterior_fin = _rango_anio_anterior(
+                input_data.fecha_inicio
+            )
+            rangos = (
+                ("actual", input_data.fecha_inicio, input_data.fecha_fin),
+                (
+                    "mes_anterior",
+                    mes_anterior_inicio,
+                    mes_anterior_fin,
+                ),
+                (
+                    "anio_anterior",
+                    anio_anterior_inicio,
+                    anio_anterior_fin,
+                ),
+            )
+            acumulado_anual_inicio = date(input_data.fecha_fin.year, 1, 1)
+            acumulado_anual_agrupaciones = (
+                self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
+                    acumulado_anual_inicio,
+                    input_data.fecha_fin,
+                    fecha_hoy,
+                    input_data.agencias,
+                )
+            )
+            agrupaciones_por_rango = {
+                nombre: self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
+                    fecha_inicio,
+                    fecha_fin,
+                    fecha_hoy,
+                    input_data.agencias,
+                )
+                for nombre, fecha_inicio, fecha_fin in rangos
+            }
+            resumenes = {
+                nombre: _resumir_rango_actual_colocacion(fecha_inicio, fecha_fin, agrupaciones)
+                for (nombre, fecha_inicio, fecha_fin), agrupaciones in zip(
+                    rangos, agrupaciones_por_rango.values(), strict=True
+                )
+            }
+            agrupaciones_todas_agencias = (
+                agrupaciones_por_rango["actual"]
+                if not input_data.agencias
+                else self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
+                    input_data.fecha_inicio,
+                    input_data.fecha_fin,
+                    fecha_hoy,
+                    [],
+                )
+            )
+            colocacion_por_agencia = _resumir_colocacion_por_agencia(
+                agrupaciones_todas_agencias,
+            )
+            return ResumenActualColocacionResponse(
+                fecha_inicio=input_data.fecha_inicio,
+                fecha_fin=input_data.fecha_fin,
+                consolidado=not input_data.agencias,
+                agencias=input_data.agencias,
+                colocacion_por_agencia=colocacion_por_agencia,
+                acumulado_anual=_resumir_rango_actual_colocacion(
+                    acumulado_anual_inicio,
+                    input_data.fecha_fin,
+                    acumulado_anual_agrupaciones,
+                ),
+                actual=resumenes["actual"],
+                mes_anterior=resumenes["mes_anterior"],
+                anio_anterior=resumenes["anio_anterior"],
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Error consultando resumen actual de colocacion")
+            raise HTTPException(
+                status_code=500,
+                detail="Error consultando resumen actual de colocacion.",
             ) from exc
 
     def obtener_detalle(
@@ -387,5 +485,104 @@ def _mover_mes(fecha: date, cantidad_meses: int) -> date:
     return date(anio, mes, min(fecha.day, calendar.monthrange(anio, mes)[1]))
 
 
+def _rango_mes_anterior(fecha: date) -> tuple[date, date]:
+    fecha_fin = fecha.replace(day=1) - timedelta(days=1)
+    return fecha_fin.replace(day=1), fecha_fin
+
+
+def _rango_anio_anterior(fecha: date) -> tuple[date, date]:
+    anio = fecha.year - 1
+    return date(anio, 1, 1), date(anio, 12, 31)
+
+
 def _monto(valor: float) -> float:
     return round(valor, 2)
+
+
+def _resumir_rango_actual_colocacion(
+    fecha_inicio: date,
+    fecha_fin: date,
+    agrupaciones: dict[DimensionesColocacion, ColocacionAgrupada],
+) -> RangoResumenActualColocacion:
+    filas = list(agrupaciones.values())
+    numero_operaciones = sum(fila.operaciones for fila in filas)
+    suma_tasa_nominal = sum(
+        fila.dimensiones.tasa_valor * fila.operaciones
+        for fila in filas
+        if fila.dimensiones.tasa_valor is not None
+    )
+    operaciones_tasa_nominal = sum(
+        fila.operaciones
+        for fila in filas
+        if fila.dimensiones.tasa_valor is not None
+    )
+    suma_tasa_real = sum(
+        fila.dimensiones.tasa_real_valor * fila.operaciones
+        for fila in filas
+        if fila.dimensiones.tasa_real_valor is not None
+    )
+    operaciones_tasa_real = sum(
+        fila.operaciones
+        for fila in filas
+        if fila.dimensiones.tasa_real_valor is not None
+    )
+    tasa_nominal = (
+        suma_tasa_nominal / operaciones_tasa_nominal
+        if operaciones_tasa_nominal
+        else None
+    )
+    tasa_real = (
+        suma_tasa_real / operaciones_tasa_real
+        if operaciones_tasa_real
+        else None
+    )
+    colocacion_general = sum(fila.saldo_inicial for fila in filas)
+    return RangoResumenActualColocacion(
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        colocacion_general=round(colocacion_general, 2),
+        monto_promedio=round(colocacion_general / numero_operaciones, 2) if numero_operaciones else 0.0,
+        tasa_promedio_colocacion=(
+            round(tasa_nominal, 4) if tasa_nominal is not None else None
+        ),
+        tasa_real_promedio_colocacion=(round(tasa_real, 4) if tasa_real is not None else None),
+        numero_operaciones=numero_operaciones,
+    )
+
+
+def _resumir_colocacion_por_agencia(
+    agrupaciones: dict[DimensionesColocacion, ColocacionAgrupada],
+) -> list[ColocacionPorAgencia]:
+    totales = _totales_por_agencia(agrupaciones)
+    agencias = sorted(totales, key=str.casefold)
+    resultado: list[ColocacionPorAgencia] = []
+    for agencia in agencias:
+        monto, operaciones = totales.get(agencia, (0.0, 0))
+        resultado.append(
+            ColocacionPorAgencia(
+                agencia=agencia,
+                monto_colocado=round(monto, 2),
+                numero_operaciones=operaciones,
+                monto_promedio=round(monto / operaciones, 2) if operaciones else 0.0,
+            )
+        )
+    return resultado
+
+
+def _totales_por_agencia(
+    agrupaciones: dict[DimensionesColocacion, ColocacionAgrupada],
+) -> dict[str, tuple[float, int]]:
+    totales: dict[str, tuple[float, int]] = {}
+    for fila in agrupaciones.values():
+        agencia = fila.dimensiones.agencia.strip() or "SIN DATOS"
+        monto_actual, operaciones_actuales = totales.get(agencia, (0.0, 0))
+        totales[agencia] = (
+            monto_actual + fila.saldo_inicial,
+            operaciones_actuales + fila.operaciones,
+        )
+    return totales
+
+
+def _mover_anio(fecha: date, cantidad_anios: int) -> date:
+    anio = fecha.year + cantidad_anios
+    return date(anio, fecha.month, min(fecha.day, calendar.monthrange(anio, fecha.month)[1]))

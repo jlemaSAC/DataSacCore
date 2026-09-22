@@ -68,6 +68,7 @@ class RecuperacionHistoricoService:
         fecha_hoy: date,
         agencias: list[str],
         incluir_desglose_cobros: bool = False,
+        incluir_cubos_filtro: bool = False,
     ) -> ResultadoResumenRecuperacion:
         """Hecho agregado para Negocios, conservando la consulta dentro de Analítica."""
         return self.mongo_repository.obtener_resumen_negocios(
@@ -76,6 +77,22 @@ class RecuperacionHistoricoService:
             fecha_hoy,
             agencias,
             incluir_desglose_cobros,
+            incluir_cubos_filtro,
+        )
+
+    def obtener_totales_por_tipo_cobro(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_actual: date,
+        agencias: list[str],
+    ) -> dict[str, float]:
+        """Obtiene solo los totales de cobro, sin dimensiones ni estados del préstamo."""
+        return self.mongo_repository.obtener_totales_por_tipo_cobro(
+            fecha_desde,
+            fecha_hasta,
+            fecha_actual,
+            agencias,
         )
 
     def obtener_detalle_resumen_por_rango(

@@ -25,6 +25,7 @@ from app.modules.negocios.recuperacion.resumen.dependencies import (
 from app.modules.negocios.recuperacion.resumen.domain import DatosOperativosRecuperacion
 from app.modules.negocios.recuperacion.resumen.schemas import (
     InputDetalleResumenRecuperacion,
+    InputResumenActualRecuperacion,
     InputResumenRecuperacion,
 )
 from app.modules.negocios.recuperacion.resumen.repositories.sql_detalle_recuperacion_repository import (
@@ -62,6 +63,39 @@ def auth_context(fecha_sistema: date = date(2026, 8, 31)) -> AuthContext:
 class FakeRecuperacionHistoricoService:
     def __init__(self) -> None:
         self.llamadas: list[tuple] = []
+        self.llamadas_totales: list[tuple] = []
+
+    def obtener_totales_por_tipo_cobro(
+        self,
+        fecha_inicio,
+        fecha_fin,
+        fecha_hoy,
+        agencias,
+    ) -> dict[str, float]:
+        self.llamadas_totales.append(
+            (fecha_inicio, fecha_fin, fecha_hoy, agencias)
+        )
+        valores = {
+            (date(2026, 8, 15), date(2026, 8, 25)): 1000.0,
+            (date(2026, 7, 1), date(2026, 7, 31)): 3000.0,
+            (date(2025, 1, 1), date(2025, 12, 31)): 4000.0,
+        }
+        return {
+            "CAPITAL": valores.get((fecha_inicio, fecha_fin), 0.0),
+            **{
+                tipo: 0.0
+                for tipo in (
+                    "INTERES",
+                    "INTERES_MORA",
+                    "SEGURO",
+                    "CASTIGO",
+                    "COBRANZA",
+                    "JUDICIAL",
+                    "DIFERIDO",
+                    "OTROS",
+                )
+            },
+        }
 
     def obtener_agrupaciones_resumen_por_rango(
         self,
@@ -70,6 +104,7 @@ class FakeRecuperacionHistoricoService:
         fecha_hoy,
         agencias,
         incluir_desglose_cobros=False,
+        incluir_cubos_filtro=False,
     ) -> ResultadoResumenRecuperacion:
         self.llamadas.append(
             (
@@ -78,14 +113,16 @@ class FakeRecuperacionHistoricoService:
                 fecha_hoy,
                 agencias,
                 incluir_desglose_cobros,
+                incluir_cubos_filtro,
             )
         )
         valores = {
             (date(2026, 8, 15), date(2026, 8, 25)): (10, 1000.0),
             (date(2026, 7, 1), date(2026, 7, 31)): (30, 3000.0),
             (date(2026, 7, 15), date(2026, 7, 25)): (8, 800.0),
+            (date(2025, 1, 1), date(2025, 12, 31)): (40, 4000.0),
         }
-        operaciones, monto = valores[(fecha_inicio, fecha_fin)]
+        operaciones, monto = valores.get((fecha_inicio, fecha_fin), (0, 0.0))
         return ResultadoResumenRecuperacion(
             agrupaciones={
                 dimension: [
@@ -196,6 +233,7 @@ def test_servicio_construye_comparativo_y_todas_las_dimensiones() -> None:
             date(2026, 8, 31),
             ["MATRIZ"],
             True,
+            False,
         ),
         (
             date(2026, 7, 1),
@@ -203,12 +241,14 @@ def test_servicio_construye_comparativo_y_todas_las_dimensiones() -> None:
             date(2026, 8, 31),
             ["MATRIZ"],
             False,
+            False,
         ),
         (
             date(2026, 7, 15),
             date(2026, 7, 25),
             date(2026, 8, 31),
             ["MATRIZ"],
+            False,
             False,
         ),
     ]
@@ -227,13 +267,77 @@ def test_servicio_construye_comparativo_y_todas_las_dimensiones() -> None:
     assert respuesta.agrupaciones.por_abogado[0].dimension == "ESTUDIO JURIDICO"
     assert respuesta.asesores_disponibles == ["ANA ASESORA"]
     assert respuesta.cargos_disponibles == ["GESTOR DE COBRANZAS"]
+    assert respuesta.cubos_filtro == []
+    assert respuesta.desglose_cobros[0].tipo_cobro == "CAPITAL"
+    assert respuesta.desglose_cobros[0].numero_rubros == 7
+
+
+def test_servicio_incluye_cubos_solo_cuando_se_solicitan() -> None:
+    historico = FakeRecuperacionHistoricoService()
+    service = ResumenRecuperacionService(historico)  # type: ignore[arg-type]
+
+    respuesta = service.obtener_resumen(
+        InputResumenRecuperacion(
+            agencias=["MATRIZ"],
+            fecha_inicio=date(2026, 8, 15),
+            fecha_fin=date(2026, 8, 25),
+            incluir_cubos_filtro=True,
+        ),
+        auth_context(),
+    )
+
     assert {cubo.periodo for cubo in respuesta.cubos_filtro} == {
         "actual",
         "anterior",
         "mismo_rango_anterior",
     }
-    assert respuesta.desglose_cobros[0].tipo_cobro == "CAPITAL"
-    assert respuesta.desglose_cobros[0].numero_rubros == 7
+    assert all(llamada[-1] is True for llamada in historico.llamadas)
+
+
+def test_resumen_actual_recuperacion_devuelve_total_y_tipos_por_periodos_completos() -> None:
+    historico = FakeRecuperacionHistoricoService()
+    service = ResumenRecuperacionService(historico)  # type: ignore[arg-type]
+
+    respuesta = service.obtener_resumen_actual(
+        InputResumenActualRecuperacion(
+            fecha_inicio=date(2026, 8, 15),
+            fecha_fin=date(2026, 8, 25),
+        ),
+        auth_context(),
+    )
+
+    assert historico.llamadas_totales == [
+        (date(2026, 8, 15), date(2026, 8, 25), date(2026, 8, 31), []),
+        (date(2026, 7, 1), date(2026, 7, 31), date(2026, 8, 31), []),
+        (date(2025, 1, 1), date(2025, 12, 31), date(2026, 8, 31), []),
+    ]
+    assert respuesta.consolidado is True
+    assert respuesta.actual.recuperacion_total == 1000
+    assert respuesta.actual.recuperacion_por_tipo["CAPITAL"] == 1000
+    assert respuesta.mes_anterior.recuperacion_total == 3000
+    assert respuesta.mes_anterior.fecha_inicio == date(2026, 7, 1)
+    assert respuesta.mes_anterior.fecha_fin == date(2026, 7, 31)
+    assert respuesta.anio_anterior.fecha_inicio == date(2025, 1, 1)
+    assert respuesta.anio_anterior.fecha_fin == date(2025, 12, 31)
+    assert respuesta.anio_anterior.recuperacion_total == 4000
+
+
+def test_endpoint_resumen_actual_recuperacion_retorna_comparativo_por_rango() -> None:
+    service = ResumenRecuperacionService(FakeRecuperacionHistoricoService())  # type: ignore[arg-type]
+    app.dependency_overrides[get_current_auth_context] = auth_context
+    app.dependency_overrides[get_resumen_recuperacion_service] = lambda: service
+    try:
+        response = client.post(
+            "/negocios/recuperacion/resumen-actual",
+            json={"fecha_inicio": "2026-08-15", "fecha_fin": "2026-08-25"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["consolidado"] is True
+    assert body["actual"]["recuperacion_total"] == 1000
 
 
 def test_servicio_rechaza_fecha_posterior_a_fecha_sistema() -> None:
@@ -295,6 +399,7 @@ def test_endpoint_entrega_hechos_para_filtrar_en_frontend() -> None:
                 "agencias": ["MATRIZ"],
                 "fecha_inicio": "2026-08-15",
                 "fecha_fin": "2026-08-25",
+                "incluir_cubos_filtro": True,
             },
         )
     finally:
@@ -450,7 +555,8 @@ def test_repositorio_agrupa_dimensiones_en_un_solo_facet() -> None:
         date(2026, 8, 25),
         date(2026, 8, 31),
         ["MATRIZ"],
-        True,
+        incluir_desglose_cobros=True,
+        incluir_cubos_filtro=True,
     )
 
     assert resultado.agrupaciones["agencia"][0].monto_recuperado == 125.5
@@ -470,6 +576,25 @@ def test_repositorio_agrupa_dimensiones_en_un_solo_facet() -> None:
     assert historico.pipeline[0] == {
         "$match": {"fecha_corte": {"$gte": "20260801", "$lte": "20260825"}}
     }
+
+
+def test_repositorio_totales_por_tipo_no_hace_lookup_de_situacion() -> None:
+    historico = FakeCollection({"_id": "CAPITAL", "valor": 125.5})
+    repository = MongoRecuperacionHistoricoRepository(
+        FakeDatabase(historico, FakeCollection())  # type: ignore[arg-type]
+    )
+
+    resultado = repository.obtener_totales_por_tipo_cobro(
+        date(2026, 8, 1),
+        date(2026, 8, 25),
+        date(2026, 8, 31),
+        ["MATRIZ"],
+    )
+
+    assert resultado["CAPITAL"] == 125.5
+    assert resultado["INTERES"] == 0.0
+    assert all("$lookup" not in etapa for etapa in historico.pipeline)
+    assert {"$match": {"agencia": {"$in": ["MATRIZ"]}}} in historico.pipeline
 
 
 def test_repositorio_detalle_une_hoy_y_pagina_despues_de_filtrar() -> None:

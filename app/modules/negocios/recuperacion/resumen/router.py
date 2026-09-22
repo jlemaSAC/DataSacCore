@@ -9,7 +9,9 @@ from app.modules.negocios.recuperacion.resumen.dependencies import (
 from app.modules.negocios.recuperacion.resumen.schemas import (
     DetalleResumenRecuperacionResponse,
     InputDetalleResumenRecuperacion,
+    InputResumenActualRecuperacion,
     InputResumenRecuperacion,
+    ResumenActualRecuperacionResponse,
     ResumenRecuperacionResponse,
 )
 from app.modules.negocios.recuperacion.resumen.service import ResumenRecuperacionService
@@ -29,6 +31,19 @@ def obtener_resumen_recuperacion(
     service: ResumenRecuperacionService = Depends(get_resumen_recuperacion_service),
 ) -> ResumenRecuperacionResponse:
     return service.obtener_resumen(input_data=body, auth_context=auth_context)
+
+
+@router.post(
+    "/resumen-actual",
+    response_model=ResumenActualRecuperacionResponse,
+    summary="Comparar el resumen de recuperación para un rango",
+)
+def obtener_resumen_actual_recuperacion(
+    body: InputResumenActualRecuperacion,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: ResumenRecuperacionService = Depends(get_resumen_recuperacion_service),
+) -> ResumenActualRecuperacionResponse:
+    return service.obtener_resumen_actual(input_data=body, auth_context=auth_context)
 
 
 @router.post(
