@@ -26,6 +26,14 @@ class MatrizTransicionRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class MatrizTransicionPrestamosRequest(MatrizTransicionRequest):
+    calificacion_anterior: str = Field(
+        min_length=1,
+        description="Calificación de origen; use NA para préstamos nuevos.",
+    )
+    calificacion_nueva: str = Field(min_length=1, description="Calificación de destino.")
+
+
 class MatrizTransicionResponse(BaseModel):
     categorias: list[str]
     conteos: dict[str, dict[str, int]]

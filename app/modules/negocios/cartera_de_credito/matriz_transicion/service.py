@@ -7,8 +7,17 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.modules.negocios.cartera_de_credito.matriz_transicion.schemas import (
+    MatrizTransicionPrestamosRequest,
     MatrizTransicionRequest,
     MatrizTransicionResponse,
+)
+from app.modules.negocios.recuperacion.recaudacion_acumulada.domain import (
+    DetalleCuotaPrestamo,
+)
+from app.modules.negocios.recuperacion.recaudacion_acumulada.schemas import (
+    GaranteRecaudacion,
+    InformacionPersonaRecaudacion,
+    PrestamoRecaudadoAcumulado,
 )
 
 
@@ -53,6 +62,26 @@ def _normalizar(value: Any) -> str:
     return str(value).strip().upper() if value is not None else ""
 
 
+def _normalizar_calificacion(value: Any) -> str:
+    return _normalizar(value).replace("-", "").replace(" ", "")
+
+
+def _variantes_calificacion(value: str) -> list[str]:
+    original = _normalizar(value)
+    sin_separadores = _normalizar_calificacion(value)
+    if (
+        len(sin_separadores) == 2
+        and sin_separadores[0].isalpha()
+        and sin_separadores[1].isdigit()
+    ):
+        return list(
+            dict.fromkeys(
+                (original, sin_separadores, f"{sin_separadores[0]}-{sin_separadores[1]}")
+            )
+        )
+    return [original]
+
+
 def _a_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -61,9 +90,50 @@ def _a_bool(value: Any) -> bool:
     return _normalizar(value) in {"1", "TRUE", "T", "SI", "SÍ", "S", "YES", "Y"}
 
 
+def _to_int(value: Any) -> int:
+    try:
+        return int(_to_float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _to_optional_int(value: Any) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return int(_to_float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _texto(value: Any, default: str = "") -> str:
+    texto = str(value or "").strip()
+    return texto or default
+
+
+def _a_fecha(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    texto = value.strip()
+    for formato in ("%Y-%m-%d", "%Y%m%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(texto, formato).date()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(texto.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
 class MatrizTransicionService:
-    def __init__(self, mongo_repository: Any) -> None:
+    def __init__(self, mongo_repository: Any, sql_repository: Any | None = None) -> None:
         self.mongo_repository = mongo_repository
+        self.sql_repository = sql_repository
 
     def obtener(
         self,
@@ -71,15 +141,95 @@ class MatrizTransicionService:
         *,
         hoy: date | None = None,
     ) -> MatrizTransicionResponse:
+        (
+            anterior,
+            nuevo,
+            fecha_anterior,
+            fecha_nuevo,
+            fuente_nuevo,
+        ) = self._obtener_cortes(request, hoy=hoy)
+        return self._construir_matriz(
+            anterior=anterior,
+            nuevo=nuevo,
+            request=request,
+            fecha_anterior=fecha_anterior,
+            fecha_nuevo=fecha_nuevo,
+            fuente_nuevo=fuente_nuevo,
+        )
+
+    def obtener_prestamos(
+        self,
+        request: MatrizTransicionPrestamosRequest,
+        *,
+        hoy: date | None = None,
+    ) -> list[PrestamoRecaudadoAcumulado]:
+        """Devuelve los préstamos de una transición y su detalle de cuotas."""
+        if self.sql_repository is None:
+            raise RuntimeError("El servicio de detalle de cuotas no está configurado.")
+        anterior, nuevo, _, _, _ = self._obtener_cortes(
+            request,
+            hoy=hoy,
+            calificacion_nueva=_variantes_calificacion(request.calificacion_nueva),
+        )
+        anterior_por_prestamo = self._indexar(
+            anterior,
+            lado="anterior",
+            request=request,
+        )
+        nuevo_por_prestamo = self._indexar(nuevo, lado="nuevo", request=request)
+        calificacion_anterior = _normalizar_calificacion(request.calificacion_anterior)
+        calificacion_nueva = _normalizar_calificacion(request.calificacion_nueva)
+
+        seleccionados: list[tuple[str, dict[str, Any] | None, dict[str, Any]]] = []
+        for numero, actual in nuevo_por_prestamo.items():
+            if _normalizar_calificacion(actual["calificacion"]) != calificacion_nueva:
+                continue
+            previo = anterior_por_prestamo.get(numero)
+            if calificacion_anterior == "NA":
+                if previo is None:
+                    seleccionados.append((numero, None, actual["documento"]))
+            elif (
+                previo
+                and _normalizar_calificacion(previo["calificacion"])
+                == calificacion_anterior
+            ):
+                seleccionados.append((numero, previo["documento"], actual["documento"]))
+
+        detalles = self.sql_repository.obtener_detalles(
+            [
+                {
+                    "numero_prestamo": numero,
+                    "provision_actual": self._valor_metrica(actual, "ProvisionRequerida"),
+                    "saldo_actual": self._valor_metrica(actual, "SaldoCapital"),
+                }
+                for numero, _, actual in seleccionados
+            ]
+        )
+        return [
+            self._construir_prestamo(
+                numero=numero,
+                anterior=previo,
+                nuevo=actual,
+                detalle=detalles.get(numero),
+            )
+            for numero, previo, actual in sorted(seleccionados, key=lambda item: item[0])
+        ]
+
+    def _obtener_cortes(
+        self,
+        request: MatrizTransicionRequest,
+        *,
+        hoy: date | None,
+        calificacion_nueva: str | list[str] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str, str, str]:
         fecha_anterior = request.fecha_corte_anterior.date()
         fecha_fin = request.fecha_corte_nuevo.date()
-
-        hoy = hoy or datetime.now().date()
         fecha_anterior_str = _fecha_corte(fecha_anterior)
         fecha_fin_str = _fecha_corte(fecha_fin)
         filtros_nuevo = self._filtros_nuevo(request)
+        filtros_nuevo["calificacion"] = calificacion_nueva
 
-        if fecha_fin == hoy:
+        if fecha_fin == (hoy or datetime.now().date()):
             nuevo = self.mongo_repository.obtener_actual_filtrado(**filtros_nuevo)
             fuente_nuevo = "SituacionCrediticiaActual"
         else:
@@ -99,15 +249,7 @@ class MatrizTransicionService:
             fecha_anterior_str,
             numeros_prestamo,
         )
-
-        return self._construir_matriz(
-            anterior=anterior,
-            nuevo=nuevo,
-            request=request,
-            fecha_anterior=fecha_anterior_str,
-            fecha_nuevo=fecha_fin_str,
-            fuente_nuevo=fuente_nuevo,
-        )
+        return anterior, nuevo, fecha_anterior_str, fecha_fin_str, fuente_nuevo
 
     @staticmethod
     def _filtros_nuevo(request: MatrizTransicionRequest) -> dict[str, Any]:
@@ -209,6 +351,169 @@ class MatrizTransicionService:
             fecha_corte_nuevo=fecha_nuevo,
             fuente_corte_nuevo=fuente_nuevo,
         )
+
+    def _construir_prestamo(
+        self,
+        *,
+        numero: str,
+        anterior: dict[str, Any] | None,
+        nuevo: dict[str, Any],
+        detalle: DetalleCuotaPrestamo | None,
+    ) -> PrestamoRecaudadoAcumulado:
+        anterior = anterior or {}
+        detalle = detalle or DetalleCuotaPrestamo(numero_prestamo=numero)
+        personal = (
+            nuevo if nuevo.get("Nombres") or nuevo.get("NombreCliente") else anterior
+        )
+        dias_anterior = _to_int(anterior.get("DiasVencidos"))
+        dias_actual = _to_int(nuevo.get("DiasVencidos"))
+        saldo_anterior = _to_float(anterior.get("SaldoCapital"))
+        saldo_actual = _to_float(nuevo.get("SaldoCapital"))
+        provision_anterior = self._valor_metrica(anterior, "ProvisionRequerida")
+        provision_actual = self._valor_metrica(nuevo, "ProvisionRequerida")
+        gasto_cobranza = _to_float(nuevo.get("GastoCobranza"))
+        cancelado = self._es_cancelado(nuevo)
+
+        informacion_deudor = None
+        garante_1 = None
+        garante_2 = None
+        if not cancelado:
+            informacion_deudor = InformacionPersonaRecaudacion(
+                identificacion=_texto(
+                    personal.get("Identificacion"),
+                    detalle.identificacion,
+                ),
+                provincia=_texto(personal.get("Provincia"), detalle.provincia),
+                canton=_texto(personal.get("Canton"), detalle.canton),
+                parroquia=_texto(personal.get("Parroquia"), detalle.parroquia),
+                direccion=_texto(personal.get("Direccion"), detalle.direccion),
+                telefonos=_texto(personal.get("Telefonos"), detalle.telefonos),
+            )
+            garante_1 = self._construir_garante(personal, "G1_", detalle.garante_1)
+            garante_2 = self._construir_garante(personal, "G2_", detalle.garante_2)
+
+        provision_con_cobro = self._calcular_provision_con_cobro(
+            detalle=detalle,
+            provision_actual=provision_actual,
+            saldo_actual=saldo_actual,
+        )
+
+        return PrestamoRecaudadoAcumulado(
+            socio=_to_optional_int(
+                personal.get("Cliente", personal.get("NumeroCliente"))
+            ) or detalle.socio,
+            agencia=_texto(nuevo.get("Agencia")),
+            numero_prestamo=numero,
+            codigo_usuario_asignado=_texto(
+                nuevo.get(
+                    "CodigoAsesor",
+                    nuevo.get("CodigoUsuario", nuevo.get("CODIGOUSUARIO")),
+                )
+            ),
+            nombre_usuario_asignado=_texto(
+                nuevo.get("NombreAsesor", nuevo.get("NombreCompleto")), "SIN ASESOR"
+            ),
+            nombre=_texto(
+                personal.get("Nombres", personal.get("NombreCliente")),
+                detalle.nombre,
+            ),
+            estado_anterior=_texto(anterior.get("EstadoPrestamo"), "NO EXISTIA"),
+            estado_actual=_texto(nuevo.get("EstadoPrestamo"), "SIN DATOS"),
+            calificacion_anterior=_texto(anterior.get("Calificacion"), "NO EXISTIA"),
+            calificacion_actual=_texto(nuevo.get("Calificacion"), "SIN DATOS"),
+            dias_mora_anterior=dias_anterior,
+            dias_mora_actual=dias_actual,
+            variacion_dias_mora=dias_actual - dias_anterior,
+            saldo_capital_anterior=round(saldo_anterior, 2),
+            saldo_capital_actual=round(saldo_actual, 2),
+            variacion_saldo_capital=round(saldo_actual - saldo_anterior, 2),
+            numero_cuota_actual_no_pagada=detalle.numero_cuota_actual_no_pagada,
+            numero_cuota_siguiente=detalle.numero_cuota_siguiente,
+            cobro_para_bajar_una_cuota=round(
+                detalle.cobro_hasta_cuota + gasto_cobranza,
+                2,
+            ),
+            cuotas_pendientes=detalle.cuotas_pendientes,
+            cuotas_pagadas=detalle.cuotas_pagadas,
+            total_cuotas=detalle.total_cuotas or _to_int(nuevo.get("Plazo")),
+            calificacion_con_cobro_una_cuota=_texto(
+                detalle.calificacion_con_cobro_una_cuota,
+                "A-1",
+            ),
+            dias_mora_con_cobro_una_cuota=detalle.dias_mora_con_cobro_una_cuota,
+            saldo_capital_con_cobro_una_cuota=round(
+                detalle.saldo_capital_con_cobro_una_cuota,
+                2,
+            ),
+            provision_con_cobro_una_cuota=provision_con_cobro,
+            provision_cierre_mes=round(provision_anterior, 2),
+            provision_actual=round(provision_actual, 2),
+            variacion_provisiones=round(provision_actual - provision_anterior, 2),
+            dia_ultimo_pago=_a_fecha(
+                nuevo.get("FechaUltimoPago", nuevo.get("UltimoPago"))
+            ),
+            total_recuperado=0.0,
+            pendiente_pago=round(
+                _to_float(nuevo.get("ValorParaEstarAlDia")) + gasto_cobranza,
+                2,
+            ),
+            pendiente_pago_mas_cuota_por_vencer=round(
+                _to_float(nuevo.get("ValorHastaCuotaActual")) + gasto_cobranza, 2
+            ),
+            total_a_cancelar=round(
+                _to_float(nuevo.get("ValorCancelarTotal")) + gasto_cobranza,
+                2,
+            ),
+            informacion_deudor=informacion_deudor,
+            garante_1=garante_1,
+            garante_2=garante_2,
+        )
+
+    @staticmethod
+    def _construir_garante(
+        document: dict[str, Any],
+        prefijo: str,
+        fallback: dict[str, str] | None,
+    ) -> GaranteRecaudacion | None:
+        fallback = fallback or {}
+        nombres = _texto(document.get(f"{prefijo}Nombres"), fallback.get("nombres", ""))
+        identificacion = _texto(
+            document.get(f"{prefijo}Identificacion"),
+            fallback.get("identificacion", ""),
+        )
+        if not nombres and not identificacion:
+            return None
+        return GaranteRecaudacion(
+            nombres=nombres,
+            identificacion=identificacion,
+            provincia=_texto(document.get(f"{prefijo}Provincia"), fallback.get("provincia", "")),
+            canton=_texto(document.get(f"{prefijo}Canton"), fallback.get("canton", "")),
+            parroquia=_texto(document.get(f"{prefijo}Parroquia"), fallback.get("parroquia", "")),
+            direccion=_texto(document.get(f"{prefijo}Direccion"), fallback.get("direccion", "")),
+            telefonos=_texto(document.get(f"{prefijo}Telefonos"), fallback.get("telefonos", "")),
+        )
+
+    @staticmethod
+    def _calcular_provision_con_cobro(
+        *,
+        detalle: DetalleCuotaPrestamo,
+        provision_actual: float,
+        saldo_actual: float,
+    ) -> float:
+        saldo_simulado = max(detalle.saldo_capital_con_cobro_una_cuota, 0.0)
+        if saldo_simulado == 0:
+            return 0.0
+        if detalle.es_porcentaje_fijo is True:
+            porcentaje = detalle.porcentaje_fijo or 0.0
+        elif detalle.es_porcentaje_fijo is not None:
+            porcentaje = (provision_actual / saldo_actual * 100) if saldo_actual > 0 else 0.0
+            if detalle.porcentaje_minimo is not None:
+                porcentaje = max(porcentaje, detalle.porcentaje_minimo)
+            if detalle.porcentaje_maximo not in (None, 0):
+                porcentaje = min(porcentaje, detalle.porcentaje_maximo)
+        else:
+            porcentaje = (provision_actual / saldo_actual * 100) if saldo_actual > 0 else 0.0
+        return round(saldo_simulado * porcentaje / 100, 2)
 
     def _indexar(
         self,

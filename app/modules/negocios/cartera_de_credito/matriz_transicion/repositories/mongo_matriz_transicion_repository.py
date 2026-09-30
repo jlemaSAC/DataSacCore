@@ -49,6 +49,35 @@ class MongoMatrizTransicionRepository:
         "ValorParaEstarAlDia": 1,
         "ValorHastaCuotaActual": 1,
         "ValorCancelarTotal": 1,
+        "GastoCobranza": 1,
+        "Cliente": 1,
+        "NumeroCliente": 1,
+        "Nombres": 1,
+        "NombreCliente": 1,
+        "Identificacion": 1,
+        "Provincia": 1,
+        "Canton": 1,
+        "Parroquia": 1,
+        "Direccion": 1,
+        "Telefonos": 1,
+        "G1_Identificacion": 1,
+        "G1_Nombres": 1,
+        "G1_Provincia": 1,
+        "G1_Canton": 1,
+        "G1_Parroquia": 1,
+        "G1_Direccion": 1,
+        "G1_Telefonos": 1,
+        "G2_Identificacion": 1,
+        "G2_Nombres": 1,
+        "G2_Provincia": 1,
+        "G2_Canton": 1,
+        "G2_Parroquia": 1,
+        "G2_Direccion": 1,
+        "G2_Telefonos": 1,
+        "DiasVencidos": 1,
+        "Plazo": 1,
+        "UltimoPago": 1,
+        "FechaUltimoPago": 1,
         "as_of": 1,
         "updated_at": 1,
         "data_version": 1,
@@ -66,6 +95,7 @@ class MongoMatrizTransicionRepository:
         cargos: list[str],
         estados: list[str],
         asesores: list[str],
+        calificacion: str | list[str] | None = None,
     ) -> list[MongoDocument]:
         """Lee el estado operativo, aplicando los filtros del corte nuevo en Mongo."""
         filtro = self._construir_filtro_nuevo(
@@ -74,6 +104,7 @@ class MongoMatrizTransicionRepository:
             cargos=cargos,
             estados=estados,
             asesores=asesores,
+            calificacion=calificacion,
             es_actual=True,
         )
         return list(self.actual.find(filtro, projection=self.projection))
@@ -87,6 +118,7 @@ class MongoMatrizTransicionRepository:
         cargos: list[str],
         estados: list[str],
         asesores: list[str],
+        calificacion: str | list[str] | None = None,
     ) -> list[MongoDocument]:
         """Lee un corte histórico final, filtrándolo antes de enviarlo al servicio."""
         filtro = self._construir_filtro_nuevo(
@@ -95,6 +127,7 @@ class MongoMatrizTransicionRepository:
             cargos=cargos,
             estados=estados,
             asesores=asesores,
+            calificacion=calificacion,
             es_actual=False,
         )
         filtro["fecha_corte"] = fecha_corte
@@ -133,6 +166,7 @@ class MongoMatrizTransicionRepository:
         cargos: list[str],
         estados: list[str],
         asesores: list[str],
+        calificacion: str | list[str] | None,
         es_actual: bool,
     ) -> MongoDocument:
         condiciones: list[MongoDocument] = []
@@ -170,6 +204,13 @@ class MongoMatrizTransicionRepository:
                     ]
                 }
             )
+        if calificacion:
+            valores_calificacion = (
+                list(dict.fromkeys(calificacion))
+                if isinstance(calificacion, list)
+                else [calificacion]
+            )
+            condiciones.append({"Calificacion": {"$in": valores_calificacion}})
         if not condiciones:
             return {}
         return {"$and": condiciones}
