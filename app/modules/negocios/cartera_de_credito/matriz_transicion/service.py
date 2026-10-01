@@ -7,6 +7,9 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.modules.negocios.cartera_de_credito.matriz_transicion.schemas import (
+    MatrizTransicionAsesorFiltro,
+    MatrizTransicionFiltrosRequest,
+    MatrizTransicionFiltrosResponse,
     MatrizTransicionPrestamosRequest,
     MatrizTransicionRequest,
     MatrizTransicionResponse,
@@ -157,6 +160,75 @@ class MatrizTransicionService:
             fuente_nuevo=fuente_nuevo,
         )
 
+    def obtener_filtros(
+        self,
+        request: MatrizTransicionFiltrosRequest,
+        *,
+        hoy: date | None = None,
+    ) -> MatrizTransicionFiltrosResponse:
+        """Obtiene los catálogos disponibles en el mismo origen del corte nuevo."""
+        fecha_corte = request.fecha_corte
+        fecha_corte_str = _fecha_corte(fecha_corte)
+        agencias = self._valores_filtro(request.agencia)
+
+        if fecha_corte == (hoy or datetime.now().date()):
+            documentos = self.mongo_repository.obtener_catalogo_actual(agencias=agencias)
+            fuente = "SituacionCrediticiaActual"
+        else:
+            documentos = self.mongo_repository.obtener_catalogo_historico(
+                fecha_corte_str,
+                agencias=agencias,
+            )
+            fuente = "SituacionCrediticia"
+
+        asesores: dict[tuple[str, str, str, str], MatrizTransicionAsesorFiltro] = {}
+        cargos: set[str] = set()
+        estados: set[str] = set()
+        for documento in documentos:
+            codigo = self._primer_texto(
+                documento,
+                "CodigoAsesor",
+                "CodigoUsuario",
+                "CODIGOUSUARIO",
+            )
+            nombre = self._primer_texto(documento, "NombreAsesor", "NombreCompleto")
+            cargo = self._primer_texto(documento, "CargoAsesor")
+            agencia = self._primer_texto(documento, "Agencia")
+            estado = self._primer_texto(
+                documento,
+                "EstadoPrestamo",
+                "CodigoEstadoPrestamo",
+                "CodigoEstado",
+            )
+
+            if cargo:
+                cargos.add(cargo)
+            if estado:
+                estados.add(estado)
+            if codigo or nombre:
+                item = MatrizTransicionAsesorFiltro(
+                    codigo=codigo,
+                    nombre=nombre,
+                    cargo=cargo,
+                    agencia=agencia,
+                )
+                asesores[(codigo, nombre, cargo, agencia)] = item
+
+        return MatrizTransicionFiltrosResponse(
+            fecha_corte=fecha_corte_str,
+            fuente=fuente,
+            asesores=sorted(
+                asesores.values(),
+                key=lambda item: (
+                    item.agencia.casefold(),
+                    item.nombre.casefold(),
+                    item.codigo.casefold(),
+                ),
+            ),
+            cargos=sorted(cargos, key=str.casefold),
+            estados_prestamo=sorted(estados, key=str.casefold),
+        )
+
     def obtener_prestamos(
         self,
         request: MatrizTransicionPrestamosRequest,
@@ -170,6 +242,7 @@ class MatrizTransicionService:
             request,
             hoy=hoy,
             calificacion_nueva=_variantes_calificacion(request.calificacion_nueva),
+            incluir_detalle=True,
         )
         anterior_por_prestamo = self._indexar(
             anterior,
@@ -221,6 +294,7 @@ class MatrizTransicionService:
         *,
         hoy: date | None,
         calificacion_nueva: str | list[str] | None = None,
+        incluir_detalle: bool = False,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str, str, str]:
         fecha_anterior = request.fecha_corte_anterior.date()
         fecha_fin = request.fecha_corte_nuevo.date()
@@ -230,12 +304,16 @@ class MatrizTransicionService:
         filtros_nuevo["calificacion"] = calificacion_nueva
 
         if fecha_fin == (hoy or datetime.now().date()):
-            nuevo = self.mongo_repository.obtener_actual_filtrado(**filtros_nuevo)
+            nuevo = self.mongo_repository.obtener_actual_filtrado(
+                **filtros_nuevo,
+                incluir_detalle=incluir_detalle,
+            )
             fuente_nuevo = "SituacionCrediticiaActual"
         else:
             nuevo = self.mongo_repository.obtener_historico_filtrado(
                 fecha_fin_str,
                 **filtros_nuevo,
+                incluir_detalle=incluir_detalle,
             )
             fuente_nuevo = "SituacionCrediticia"
         numeros_prestamo = sorted(
@@ -248,24 +326,46 @@ class MatrizTransicionService:
         anterior = self.mongo_repository.obtener_anterior_por_prestamos(
             fecha_anterior_str,
             numeros_prestamo,
+            incluir_detalle=incluir_detalle,
         )
+        prestamos_cancelados_anterior = {
+            str(document.get("NumeroPrestamo") or "").strip()
+            for document in anterior
+            if self._es_cancelado(document)
+        }
+        if prestamos_cancelados_anterior:
+            nuevo = [
+                document
+                for document in nuevo
+                if str(document.get("NumeroPrestamo") or "").strip()
+                not in prestamos_cancelados_anterior
+            ]
         return anterior, nuevo, fecha_anterior_str, fecha_fin_str, fuente_nuevo
 
     @staticmethod
     def _filtros_nuevo(request: MatrizTransicionRequest) -> dict[str, Any]:
-        def valores(value: str | list[str] | None) -> list[str]:
-            if value is None:
-                return []
-            items = value if isinstance(value, list) else [value]
-            return [str(item).strip() for item in items if str(item).strip()]
-
         return {
-            "agencias": valores(request.agencia),
+            "agencias": MatrizTransicionService._valores_filtro(request.agencia),
             "diferido": request.diferido,
-            "cargos": valores(request.cargo),
-            "estados": valores(request.estado_prestamo),
-            "asesores": valores(request.asesores),
+            "cargos": MatrizTransicionService._valores_filtro(request.cargo),
+            "estados": MatrizTransicionService._valores_filtro(request.estado_prestamo),
+            "asesores": MatrizTransicionService._valores_filtro(request.asesores),
         }
+
+    @staticmethod
+    def _valores_filtro(value: str | list[str] | None) -> list[str]:
+        if value is None:
+            return []
+        items = value if isinstance(value, list) else [value]
+        return [str(item).strip() for item in items if str(item).strip()]
+
+    @staticmethod
+    def _primer_texto(documento: dict[str, Any], *campos: str) -> str:
+        for campo in campos:
+            valor = _texto(documento.get(campo))
+            if valor:
+                return valor
+        return ""
 
     def _construir_matriz(
         self,

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.modules.negocios.cartera_de_credito.matriz_transicion.schemas import (
+    MatrizTransicionFiltrosRequest,
     MatrizTransicionPrestamosRequest,
     MatrizTransicionRequest,
 )
@@ -71,6 +72,8 @@ class FakeMongoRepository:
         self,
         fecha_corte: str,
         numeros_prestamo: list[str],
+        *,
+        incluir_detalle: bool = True,
     ) -> list[dict]:
         self.fechas_historicas.append(fecha_corte)
         self.prestamos_anterior_solicitados = numeros_prestamo
@@ -78,6 +81,22 @@ class FakeMongoRepository:
             document
             for document in self.historicos.get(fecha_corte, [])
             if document["NumeroPrestamo"] in numeros_prestamo
+        ]
+
+    def obtener_catalogo_actual(self, *, agencias: list[str]) -> list[dict]:
+        self.actual_consultado = True
+        return [
+            document
+            for document in self.actuales
+            if not agencias or document.get("Agencia") in agencias
+        ]
+
+    def obtener_catalogo_historico(self, fecha_corte: str, *, agencias: list[str]) -> list[dict]:
+        self.fechas_historicas.append(fecha_corte)
+        return [
+            document
+            for document in self.historicos.get(fecha_corte, [])
+            if not agencias or document.get("Agencia") in agencias
         ]
 
 
@@ -167,6 +186,68 @@ def test_usa_historico_cuando_el_corte_final_no_es_hoy() -> None:
     assert mongo.actual_consultado is False
     assert response.fuente_corte_nuevo == "SituacionCrediticia"
     assert response.conteos["A"]["B"] == 1
+
+
+def test_obtener_filtros_usa_el_corte_historico_y_filtra_por_agencia() -> None:
+    historicos = {
+        "20260925": [
+            _document("100", 100, "A", agencia="CENTRO", asesor="USR-1", estado="VIGENTE"),
+            {
+                **_document("200", 200, "B", agencia="CENTRO", asesor="USR-2", estado="VENCIDO"),
+                "NombreAsesor": "Asesor Dos",
+                "CargoAsesor": "JEFE DE AGENCIA",
+            },
+            _document("300", 300, "C", agencia="NORTE", asesor="USR-3", estado="CANCELADO"),
+        ]
+    }
+    service, mongo = _service(historicos, [])
+
+    response = service.obtener_filtros(
+        MatrizTransicionFiltrosRequest(
+            fecha_corte=datetime(2026, 9, 25),
+            Agencia=["CENTRO"],
+        ),
+        hoy=datetime(2026, 9, 30).date(),
+    )
+
+    assert mongo.fechas_historicas == ["20260925"]
+    assert mongo.actual_consultado is False
+    assert response.fecha_corte == "20260925"
+    assert response.fuente == "SituacionCrediticia"
+    assert response.cargos == ["ASESOR DE NEGOCIOS", "JEFE DE AGENCIA"]
+    assert response.estados_prestamo == ["VENCIDO", "VIGENTE"]
+    assert [(item.codigo, item.nombre, item.agencia) for item in response.asesores] == [
+        ("USR-2", "Asesor Dos", "CENTRO"),
+        ("USR-1", "Asesor Uno", "CENTRO"),
+    ]
+
+
+def test_obtener_filtros_usa_la_coleccion_actual_para_el_corte_de_hoy() -> None:
+    actuales = [
+        _document("100", 100, "A", asesor="USR-1", estado="VIGENTE"),
+        {
+            **_document("200", 200, "B", asesor="USR-1", estado="VIGENTE"),
+            "CodigoAsesor": "",
+            "CodigoUsuario": "USR-2",
+            "NombreAsesor": "Asesor Dos",
+        },
+    ]
+    service, mongo = _service({}, actuales)
+
+    response = service.obtener_filtros(
+        MatrizTransicionFiltrosRequest(fecha_corte=datetime(2026, 9, 30)),
+        hoy=datetime(2026, 9, 30).date(),
+    )
+
+    assert mongo.actual_consultado is True
+    assert mongo.fechas_historicas == []
+    assert response.fuente == "SituacionCrediticiaActual"
+    assert response.cargos == ["ASESOR DE NEGOCIOS"]
+    assert response.estados_prestamo == ["VIGENTE"]
+    assert [(item.codigo, item.nombre) for item in response.asesores] == [
+        ("USR-2", "Asesor Dos"),
+        ("USR-1", "Asesor Uno"),
+    ]
 
 
 def test_aplica_filtro_de_agencia_por_nombre_solo_al_corte_nuevo() -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -32,6 +32,34 @@ class MatrizTransicionPrestamosRequest(MatrizTransicionRequest):
         description="Calificación de origen; use NA para préstamos nuevos.",
     )
     calificacion_nueva: str = Field(min_length=1, description="Calificación de destino.")
+
+
+class MatrizTransicionFiltrosRequest(BaseModel):
+    """Corte y agencias para obtener los catálogos disponibles de la matriz."""
+
+    fecha_corte: date = Field(description="Corte que determina los valores disponibles.")
+    agencia: FiltroAgencia | None = Field(
+        default=None,
+        alias="Agencia",
+        description="Nombre o nombres de agencia; vacío consulta todas.",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MatrizTransicionAsesorFiltro(BaseModel):
+    codigo: str
+    nombre: str
+    cargo: str
+    agencia: str
+
+
+class MatrizTransicionFiltrosResponse(BaseModel):
+    fecha_corte: str
+    fuente: str
+    asesores: list[MatrizTransicionAsesorFiltro]
+    cargos: list[str]
+    estados_prestamo: list[str]
 
 
 class MatrizTransicionResponse(BaseModel):

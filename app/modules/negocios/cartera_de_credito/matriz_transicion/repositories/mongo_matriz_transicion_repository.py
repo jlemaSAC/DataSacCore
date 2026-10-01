@@ -83,6 +83,53 @@ class MongoMatrizTransicionRepository:
         "data_version": 1,
     }
 
+    matriz_projection = {
+        "_id": 0,
+        "NumeroPrestamo": 1,
+        "Calificacion": 1,
+        "EstadoPrestamo": 1,
+        "CodigoEstadoPrestamo": 1,
+        "CodigoEstado": 1,
+        "Agencia": 1,
+        "IdAgencia": 1,
+        "id_agencia": 1,
+        "CodigoAsesor": 1,
+        "CodigoUsuario": 1,
+        "CODIGOUSUARIO": 1,
+        "NombreAsesor": 1,
+        "NombreCompleto": 1,
+        "CargoAsesor": 1,
+        "ESDIFERIDO": 1,
+        "EsDiferido": 1,
+        "Diferido": 1,
+        "EsCancelado": 1,
+        "SaldoCapital": 1,
+        "ProvisionRequerida": 1,
+        "ProvisionConstituida": 1,
+        "ProvisionConsituida": 1,
+        "ExigibleCapital": 1,
+        "ExigibleInteres": 1,
+        "ExigibleMora": 1,
+        "ExigibleOtros": 1,
+        "ValorParaEstarAlDia": 1,
+        "ValorHastaCuotaActual": 1,
+        "ValorCancelarTotal": 1,
+    }
+
+    catalog_projection = {
+        "_id": 0,
+        "Agencia": 1,
+        "CodigoAsesor": 1,
+        "CodigoUsuario": 1,
+        "CODIGOUSUARIO": 1,
+        "NombreAsesor": 1,
+        "NombreCompleto": 1,
+        "CargoAsesor": 1,
+        "EstadoPrestamo": 1,
+        "CodigoEstadoPrestamo": 1,
+        "CodigoEstado": 1,
+    }
+
     def __init__(self, mongo_db: Database[MongoDocument]) -> None:
         self.historico: Collection[MongoDocument] = mongo_db[self.historico_collection_name]
         self.actual: Collection[MongoDocument] = mongo_db[self.actual_collection_name]
@@ -96,6 +143,7 @@ class MongoMatrizTransicionRepository:
         estados: list[str],
         asesores: list[str],
         calificacion: str | list[str] | None = None,
+        incluir_detalle: bool = True,
     ) -> list[MongoDocument]:
         """Lee el estado operativo, aplicando los filtros del corte nuevo en Mongo."""
         filtro = self._construir_filtro_nuevo(
@@ -107,7 +155,8 @@ class MongoMatrizTransicionRepository:
             calificacion=calificacion,
             es_actual=True,
         )
-        return list(self.actual.find(filtro, projection=self.projection))
+        projection = self.projection if incluir_detalle else self.matriz_projection
+        return list(self.actual.find(filtro, projection=projection))
 
     def obtener_historico_filtrado(
         self,
@@ -119,6 +168,7 @@ class MongoMatrizTransicionRepository:
         estados: list[str],
         asesores: list[str],
         calificacion: str | list[str] | None = None,
+        incluir_detalle: bool = True,
     ) -> list[MongoDocument]:
         """Lee un corte histórico final, filtrándolo antes de enviarlo al servicio."""
         filtro = self._construir_filtro_nuevo(
@@ -131,7 +181,8 @@ class MongoMatrizTransicionRepository:
             es_actual=False,
         )
         filtro["fecha_corte"] = fecha_corte
-        cursor = self.historico.find(filtro, projection=self.projection).hint("fecha_corte_1")
+        projection = self.projection if incluir_detalle else self.matriz_projection
+        cursor = self.historico.find(filtro, projection=projection).hint("fecha_corte_1")
         return list(cursor)
 
     def obtener_anterior_por_prestamos(
@@ -140,12 +191,14 @@ class MongoMatrizTransicionRepository:
         numeros_prestamo: list[str],
         *,
         chunk_size: int = 5_000,
+        incluir_detalle: bool = True,
     ) -> list[MongoDocument]:
         """Recupera únicamente el universo previo necesario para las transiciones."""
         if not numeros_prestamo:
             return []
 
         documentos: list[MongoDocument] = []
+        projection = self.projection if incluir_detalle else self.matriz_projection
         for inicio in range(0, len(numeros_prestamo), chunk_size):
             numeros = numeros_prestamo[inicio : inicio + chunk_size]
             cursor = self.historico.find(
@@ -153,10 +206,32 @@ class MongoMatrizTransicionRepository:
                     "fecha_corte": fecha_corte,
                     "NumeroPrestamo": {"$in": numeros},
                 },
-                projection=self.projection,
+                projection=projection,
             ).hint("idx_situacion_fecha_prestamo")
             documentos.extend(cursor)
         return documentos
+
+    def obtener_catalogo_actual(self, *, agencias: list[str]) -> list[MongoDocument]:
+        """Lee los campos necesarios para los filtros del corte operativo."""
+        filtro = self._filtro_agencias(agencias)
+        return list(self.actual.find(filtro, projection=self.catalog_projection))
+
+    def obtener_catalogo_historico(
+        self,
+        fecha_corte: str,
+        *,
+        agencias: list[str],
+    ) -> list[MongoDocument]:
+        """Lee los campos necesarios para los filtros de un corte histórico."""
+        filtro = {"fecha_corte": fecha_corte, **self._filtro_agencias(agencias)}
+        cursor = self.historico.find(filtro, projection=self.catalog_projection).hint(
+            "fecha_corte_1"
+        )
+        return list(cursor)
+
+    @staticmethod
+    def _filtro_agencias(agencias: list[str]) -> MongoDocument:
+        return {"Agencia": {"$in": agencias}} if agencias else {}
 
     @staticmethod
     def _construir_filtro_nuevo(

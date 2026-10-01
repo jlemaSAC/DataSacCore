@@ -7,6 +7,8 @@ from app.modules.negocios.cartera_de_credito.matriz_transicion.dependencies impo
     get_matriz_transicion_service,
 )
 from app.modules.negocios.cartera_de_credito.matriz_transicion.schemas import (
+    MatrizTransicionFiltrosRequest,
+    MatrizTransicionFiltrosResponse,
     MatrizTransicionPrestamosRequest,
     MatrizTransicionRequest,
     MatrizTransicionResponse,
@@ -18,6 +20,20 @@ from app.modules.negocios.cartera_de_credito.matriz_transicion.service import Ma
 
 
 router = APIRouter(prefix="/cartera-de-credito", tags=["Negocios - Cartera de credito"])
+
+
+@router.post(
+    "/matriz-transicion/filtros",
+    response_model=MatrizTransicionFiltrosResponse,
+    summary="Catálogos de filtros disponibles para un corte de matriz de transición",
+)
+def obtener_filtros_matriz_transicion(
+    request: MatrizTransicionFiltrosRequest,
+    _: AuthContext = Depends(get_current_auth_context),
+    service: MatrizTransicionService = Depends(get_matriz_transicion_service),
+) -> MatrizTransicionFiltrosResponse:
+    """Devuelve asesores, cargos y estados encontrados en el corte indicado."""
+    return service.obtener_filtros(request)
 
 
 @router.post(
