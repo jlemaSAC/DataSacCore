@@ -145,6 +145,17 @@ class ColocacionPorAgencia(BaseModel):
     )
 
 
+class PrestamoAdjudicadoResponse(BaseModel):
+    producto: str = Field(
+        description="Calificación contable o producto, según la fuente histórica."
+    )
+    valor: float = Field(description="DeudaInicial de la operación adjudicada.")
+    agencia: str
+    tipo_prestamo: str
+    asesor: str
+    fecha_adjudicacion: date
+
+
 class ResumenActualColocacionResponse(BaseModel):
     fecha_inicio: date
     fecha_fin: date
@@ -159,6 +170,21 @@ class ResumenActualColocacionResponse(BaseModel):
     actual: RangoResumenActualColocacion
     mes_anterior: RangoResumenActualColocacion
     anio_anterior: RangoResumenActualColocacion
+
+
+class ResumenActualColocacionConAdjudicadosResponse(BaseModel):
+    fecha_inicio: date
+    fecha_fin: date
+    consolidado: bool
+    agencias: list[str]
+    acumulado_anual: RangoResumenActualColocacion
+    actual: RangoResumenActualColocacion
+    mes_anterior: RangoResumenActualColocacion
+    anio_anterior: RangoResumenActualColocacion
+    prestamos_adjudicados: list[PrestamoAdjudicadoResponse] = Field(
+        default_factory=list,
+        description="Préstamos adjudicados del rango actual, sin paginación.",
+    )
 
 
 DimensionDetalleColocacion = Literal[

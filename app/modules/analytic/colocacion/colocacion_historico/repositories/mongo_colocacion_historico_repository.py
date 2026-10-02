@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pymongo.collection import Collection
@@ -10,7 +10,9 @@ from app.modules.analytic.colocacion.colocacion_historico.domain import (
     DetalleColocacion,
     DimensionFiltroColocacion,
     DimensionesColocacion,
+    PrestamoAdjudicado,
     ResultadoDetalleColocacion,
+    TotalesResumenColocacion,
 )
 
 
@@ -270,6 +272,199 @@ class MongoColocacionHistoricoRepository:
             agencias,
             CAMPOS_DIMENSION_RESUMEN,
         )
+
+    def obtener_prestamos_adjudicados_resumen(
+        self,
+        cortes: list[CorteMensual],
+        agencias: list[str] | None = None,
+    ) -> list[PrestamoAdjudicado]:
+        """Obtiene el detalle no paginado de las adjudicaciones de los cortes."""
+        if not cortes:
+            return []
+
+        rangos = [
+            {
+                "fecha_corte": corte.fecha_corte,
+                "FechaAdjudicacion": {
+                    "$gte": corte.fecha_inicio.isoformat(),
+                    "$lte": corte.fecha_fin.isoformat(),
+                },
+            }
+            for corte in cortes
+        ]
+        filtros: dict[str, Any] = {
+            "EstadoPrestamo": {"$ne": "CANCELADO"},
+            "$or": rangos,
+        }
+        if agencias:
+            filtros["$expr"] = {
+                "$in": [
+                    _texto_normalizado("Agencia"),
+                    [agencia.strip().upper() for agencia in agencias],
+                ]
+            }
+
+        pipeline: list[dict[str, Any]] = [
+            {"$match": filtros},
+            {
+                "$project": {
+                    "numero_operacion": _texto_normalizado("NumeroPrestamo"),
+                    "producto": _texto_normalizado("Producto"),
+                    "valor": {
+                        "$convert": {
+                            "input": "$DeudaInicial",
+                            "to": "double",
+                            "onError": 0,
+                            "onNull": 0,
+                        }
+                    },
+                    "agencia": _texto_normalizado("Agencia"),
+                    "tipo_prestamo": _texto_normalizado("TipoPrestamo"),
+                    "asesor": _texto_normalizado("NombreAsesor", "CodigoAsesor"),
+                    "fecha_adjudicacion": {
+                        "$convert": {
+                            "input": "$FechaAdjudicacion",
+                            "to": "date",
+                            "onError": None,
+                            "onNull": None,
+                        }
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "numero_operacion": "$numero_operacion",
+                        "agencia": "$agencia",
+                        "valor": "$valor",
+                        "fecha_adjudicacion": "$fecha_adjudicacion",
+                    },
+                    "prestamo": {"$first": "$$ROOT"},
+                }
+            },
+            {"$replaceRoot": {"newRoot": "$prestamo"}},
+            {"$sort": {"agencia": 1, "fecha_adjudicacion": 1, "numero_operacion": 1}},
+        ]
+        return [
+            _prestamo_adjudicado_desde_documento(documento)
+            for documento in self.collection.aggregate(
+                pipeline,
+                hint="fecha_corte_1",
+                allowDiskUse=True,
+            )
+        ]
+
+    def obtener_totales_resumen_por_rangos(
+        self,
+        cortes_por_rango: dict[str, list[CorteMensual]],
+        agencias: list[str] | None = None,
+    ) -> dict[str, TotalesResumenColocacion]:
+        """Calcula varios rangos en una sola agregación, sin cubo dimensional."""
+        totales = {
+            nombre: TotalesResumenColocacion()
+            for nombre in cortes_por_rango
+        }
+        rangos_por_nombre = {
+            nombre: [
+                {
+                    "fecha_corte": corte.fecha_corte,
+                    "FechaAdjudicacion": {
+                        "$gte": corte.fecha_inicio.isoformat(),
+                        "$lte": corte.fecha_fin.isoformat(),
+                    },
+                }
+                for corte in cortes
+            ]
+            for nombre, cortes in cortes_por_rango.items()
+        }
+        rangos_todos = [
+            rango
+            for rangos in rangos_por_nombre.values()
+            for rango in rangos
+        ]
+        if not rangos_todos:
+            return totales
+
+        filtros: dict[str, Any] = {
+            "EstadoPrestamo": {"$ne": "CANCELADO"},
+            "$or": rangos_todos,
+        }
+        if agencias:
+            filtros["$expr"] = {
+                "$in": [
+                    _texto_normalizado("Agencia"),
+                    [agencia.strip().upper() for agencia in agencias],
+                ]
+            }
+
+        def etapas_totales(rangos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            if not rangos:
+                return [{"$limit": 0}]
+            tasa_nominal = _numero_valido("TasaNominal")
+            tasa_real = _numero_valido("TasaAnual")
+            return [
+                {"$match": {"$or": rangos}},
+                {
+                    "$project": {
+                        "deuda_inicial": {
+                            "$convert": {
+                                "input": "$DeudaInicial",
+                                "to": "double",
+                                "onError": 0,
+                                "onNull": 0,
+                            }
+                        },
+                        "tasa_nominal": tasa_nominal,
+                        "tasa_real": tasa_real,
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "operaciones": {"$sum": 1},
+                        "saldo_inicial": {"$sum": "$deuda_inicial"},
+                        "suma_tasa_nominal": {"$sum": {"$ifNull": ["$tasa_nominal", 0]}},
+                        "operaciones_tasa_nominal": {
+                            "$sum": {"$cond": [{"$ne": ["$tasa_nominal", None]}, 1, 0]}
+                        },
+                        "suma_tasa_real": {"$sum": {"$ifNull": ["$tasa_real", 0]}},
+                        "operaciones_tasa_real": {
+                            "$sum": {"$cond": [{"$ne": ["$tasa_real", None]}, 1, 0]}
+                        },
+                    }
+                },
+            ]
+
+        resultado = next(
+            iter(
+                self.collection.aggregate(
+                    [
+                        {"$match": filtros},
+                        {
+                            "$facet": {
+                                nombre: etapas_totales(rangos)
+                                for nombre, rangos in rangos_por_nombre.items()
+                            }
+                        },
+                    ],
+                    hint="fecha_corte_1",
+                    allowDiskUse=True,
+                )
+            ),
+            {},
+        )
+        for nombre in totales:
+            filas = resultado.get(nombre) or []
+            fila = filas[0] if filas else {}
+            totales[nombre] = TotalesResumenColocacion(
+                operaciones=int(fila.get("operaciones") or 0),
+                saldo_inicial=float(fila.get("saldo_inicial") or 0.0),
+                suma_tasa_nominal=float(fila.get("suma_tasa_nominal") or 0.0),
+                operaciones_tasa_nominal=int(fila.get("operaciones_tasa_nominal") or 0),
+                suma_tasa_real=float(fila.get("suma_tasa_real") or 0.0),
+                operaciones_tasa_real=int(fila.get("operaciones_tasa_real") or 0),
+            )
+        return totales
 
     def obtener_detalles_resumen(
         self,
@@ -615,4 +810,23 @@ def _detalle_desde_documento(row: MongoDocument) -> DetalleColocacion:
         tasa_nominal=_numero_detalle(row.get("tasa_nominal")),
         tasa_real=_numero_detalle(row.get("tasa_real")),
         monto_colocado=float(row.get("monto_colocado") or 0.0),
+    )
+
+
+def _prestamo_adjudicado_desde_documento(row: MongoDocument) -> PrestamoAdjudicado:
+    fecha_adjudicacion = row.get("fecha_adjudicacion")
+    if isinstance(fecha_adjudicacion, datetime):
+        fecha = fecha_adjudicacion.date()
+    elif isinstance(fecha_adjudicacion, date):
+        fecha = fecha_adjudicacion
+    else:
+        raise ValueError("FechaAdjudicacion inválida en el histórico de colocación.")
+    return PrestamoAdjudicado(
+        numero_operacion=str(row.get("numero_operacion") or "SIN DATOS"),
+        producto=str(row.get("producto") or "SIN DATOS"),
+        valor=float(row.get("valor") or 0.0),
+        agencia=str(row.get("agencia") or "SIN DATOS"),
+        tipo_prestamo=str(row.get("tipo_prestamo") or "SIN DATOS"),
+        asesor=str(row.get("asesor") or "SIN DATOS"),
+        fecha_adjudicacion=fecha,
     )

@@ -10,7 +10,9 @@ from app.modules.analytic.colocacion.colocacion_historico.domain import (
     DetalleColocacion,
     DimensionFiltroColocacion,
     DimensionesColocacion,
+    PrestamoAdjudicado,
     ResultadoDetalleColocacion,
+    TotalesResumenColocacion,
 )
 from app.modules.analytic.colocacion.colocacion_historico.repositories.mongo_colocacion_historico_repository import (
     CorteMensual,
@@ -67,6 +69,33 @@ def _sin_duplicados_detalle(detalles: list[DetalleColocacion]) -> list[DetalleCo
         )
         unicos.setdefault(clave, detalle)
     return list(unicos.values())
+
+
+def _sin_duplicados_prestamos_adjudicados(
+    prestamos: list[PrestamoAdjudicado],
+) -> list[PrestamoAdjudicado]:
+    unicos: dict[tuple[str, str, float, date], PrestamoAdjudicado] = {}
+    for prestamo in prestamos:
+        clave = (
+            prestamo.numero_operacion,
+            prestamo.agencia,
+            prestamo.valor,
+            prestamo.fecha_adjudicacion,
+        )
+        unicos.setdefault(clave, prestamo)
+    return list(unicos.values())
+
+
+def _sumar_totales_resumen(
+    destino: TotalesResumenColocacion,
+    origen: TotalesResumenColocacion,
+) -> None:
+    destino.operaciones += origen.operaciones
+    destino.saldo_inicial += origen.saldo_inicial
+    destino.suma_tasa_nominal += origen.suma_tasa_nominal
+    destino.operaciones_tasa_nominal += origen.operaciones_tasa_nominal
+    destino.suma_tasa_real += origen.suma_tasa_real
+    destino.operaciones_tasa_real += origen.operaciones_tasa_real
 
 
 class ColocacionHistoricoService:
@@ -213,6 +242,70 @@ class ColocacionHistoricoService:
                 )
             )
         return self._consolidar(agrupaciones)
+
+    def obtener_prestamos_adjudicados_resumen_por_rango(
+        self,
+        fecha_desde: date,
+        fecha_hasta: date,
+        fecha_hoy: date,
+        agencias: list[str],
+    ) -> list[PrestamoAdjudicado]:
+        """Obtiene el detalle completo del corte híbrido para Negocios."""
+        segmentos = self._segmentar_rango(fecha_desde, fecha_hasta)
+        cortes = self._construir_cortes_por_rango(segmentos, fecha_hoy)
+        prestamos = self.mongo_repository.obtener_prestamos_adjudicados_resumen(
+            cortes,
+            agencias,
+        )
+        if fecha_desde <= fecha_hoy <= fecha_hasta:
+            prestamos.extend(
+                self.sql_repository.obtener_prestamos_adjudicados_resumen(
+                    datetime.combine(fecha_hoy, time.min),
+                    datetime.combine(fecha_hoy, time.max),
+                    agencias,
+                )
+            )
+        return sorted(
+            _sin_duplicados_prestamos_adjudicados(prestamos),
+            key=lambda prestamo: (
+                prestamo.agencia.casefold(),
+                prestamo.fecha_adjudicacion,
+                prestamo.numero_operacion,
+            ),
+        )
+
+    def obtener_totales_resumen_por_rangos(
+        self,
+        rangos: dict[str, tuple[date, date]],
+        fecha_hoy: date,
+        agencias: list[str],
+    ) -> dict[str, TotalesResumenColocacion]:
+        """Obtiene los indicadores de varios rangos con un corte híbrido mínimo."""
+        cortes_por_rango = {
+            nombre: self._construir_cortes_por_rango(
+                self._segmentar_rango(fecha_inicio, fecha_fin),
+                fecha_hoy,
+            )
+            for nombre, (fecha_inicio, fecha_fin) in rangos.items()
+        }
+        totales = self.mongo_repository.obtener_totales_resumen_por_rangos(
+            cortes_por_rango,
+            agencias,
+        )
+        nombres_con_dia_actual = [
+            nombre
+            for nombre, (fecha_inicio, fecha_fin) in rangos.items()
+            if fecha_inicio <= fecha_hoy <= fecha_fin
+        ]
+        if nombres_con_dia_actual:
+            totales_sql = self.sql_repository.obtener_totales_resumen(
+                datetime.combine(fecha_hoy, time.min),
+                datetime.combine(fecha_hoy, time.max),
+                agencias,
+            )
+            for nombre in nombres_con_dia_actual:
+                _sumar_totales_resumen(totales[nombre], totales_sql)
+        return totales
 
     def obtener_detalles_resumen_por_rango(
         self,

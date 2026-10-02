@@ -28,7 +28,9 @@ from app.modules.analytic.colocacion.colocacion_historico.domain import (
     DetalleColocacion,
     DimensionFiltroColocacion,
     DimensionesColocacion,
+    PrestamoAdjudicado,
     ResultadoDetalleColocacion,
+    TotalesResumenColocacion,
 )
 
 
@@ -189,6 +191,137 @@ class SqlColocacionHistoricoRepository:
                 )
             )
         return resultado
+
+    def obtener_totales_resumen(
+        self,
+        fecha_inicio: datetime,
+        fecha_fin: datetime,
+        agencias: list[str] | None = None,
+    ) -> TotalesResumenColocacion:
+        """Calcula los indicadores de Negocios sin agrupar por dimensiones."""
+        tasa_valor = case(
+            (Prestamo.tasa.is_(None), None),
+            (Prestamo.tasa < 0, None),
+            else_=Prestamo.tasa,
+        )
+        tasa_real_valor = case(
+            (Prestamo.tea.is_(None), None),
+            (Prestamo.tea < 0, None),
+            else_=Prestamo.tea,
+        )
+        filtros_agencia = []
+        if agencias:
+            filtros_agencia.append(
+                func.upper(func.ltrim(func.rtrim(Agencia.nombre))).in_(
+                    [agencia.strip().upper() for agencia in agencias]
+                )
+            )
+
+        base = (
+            select(
+                Prestamo.id.label("id_prestamo"),
+                Prestamo.deuda_inicial.label("deuda_inicial"),
+                tasa_valor.label("tasa_valor"),
+                tasa_real_valor.label("tasa_real_valor"),
+            )
+            .select_from(Prestamo)
+            .join(PrestamoCliente, PrestamoCliente.id_prestamo == Prestamo.id)
+            .join(EstadoPrestamo, EstadoPrestamo.codigo == Prestamo.codigo_estado)
+            .join(Agencia, Agencia.id == Prestamo.id_agencia)
+            .where(PrestamoCliente.activo == 1)
+            .where(PrestamoCliente.es_principal == 1)
+            .where(EstadoPrestamo.nombre != "CANCELADO")
+            .where(Prestamo.fecha_adjudicacion >= fecha_inicio)
+            .where(Prestamo.fecha_adjudicacion <= fecha_fin)
+            .where(*filtros_agencia)
+            .distinct()
+            .subquery()
+        )
+        resultado = self.db.execute(
+            select(
+                func.count(base.c.id_prestamo).label("operaciones"),
+                func.coalesce(func.sum(base.c.deuda_inicial), 0).label("saldo_inicial"),
+                func.coalesce(func.sum(base.c.tasa_valor), 0).label("suma_tasa_nominal"),
+                func.sum(case((base.c.tasa_valor.is_not(None), 1), else_=0)).label(
+                    "operaciones_tasa_nominal"
+                ),
+                func.coalesce(func.sum(base.c.tasa_real_valor), 0).label("suma_tasa_real"),
+                func.sum(case((base.c.tasa_real_valor.is_not(None), 1), else_=0)).label(
+                    "operaciones_tasa_real"
+                ),
+            )
+        ).one()
+        return TotalesResumenColocacion(
+            operaciones=int(resultado.operaciones or 0),
+            saldo_inicial=float(resultado.saldo_inicial or 0.0),
+            suma_tasa_nominal=float(resultado.suma_tasa_nominal or 0.0),
+            operaciones_tasa_nominal=int(resultado.operaciones_tasa_nominal or 0),
+            suma_tasa_real=float(resultado.suma_tasa_real or 0.0),
+            operaciones_tasa_real=int(resultado.operaciones_tasa_real or 0),
+        )
+
+    def obtener_prestamos_adjudicados_resumen(
+        self,
+        fecha_inicio: datetime,
+        fecha_fin: datetime,
+        agencias: list[str] | None = None,
+    ) -> list[PrestamoAdjudicado]:
+        """Devuelve las operaciones adjudicadas para el detalle de Negocios."""
+        filtros_agencia = []
+        if agencias:
+            filtros_agencia.append(
+                func.upper(func.ltrim(func.rtrim(Agencia.nombre))).in_(
+                    [agencia.strip().upper() for agencia in agencias]
+                )
+            )
+
+        statement = (
+            select(
+                Prestamo.numero.label("numero_operacion"),
+                CalificacionContable.nombre.label("producto"),
+                Prestamo.deuda_inicial.label("valor"),
+                Agencia.nombre.label("agencia"),
+                TipoPrestamo.nombre.label("tipo_prestamo"),
+                func.coalesce(Usuario.nombre, Prestamo.codigo_usuario).label("asesor"),
+                Prestamo.fecha_adjudicacion.label("fecha_adjudicacion"),
+            )
+            .select_from(Prestamo)
+            .join(PrestamoCliente, PrestamoCliente.id_prestamo == Prestamo.id)
+            .join(EstadoPrestamo, EstadoPrestamo.codigo == Prestamo.codigo_estado)
+            .join(Agencia, Agencia.id == Prestamo.id_agencia)
+            .outerjoin(Usuario, Usuario.usuario == Prestamo.codigo_usuario)
+            .outerjoin(
+                SubcalificacionContable,
+                SubcalificacionContable.codigo == Prestamo.codigo_subcalificacion_contable,
+            )
+            .outerjoin(
+                CalificacionContable,
+                CalificacionContable.codigo == SubcalificacionContable.codigo_calificacion_contable,
+            )
+            .outerjoin(TipoPrestamo, TipoPrestamo.codigo == Prestamo.codigo_tipo_prestamo)
+            .where(PrestamoCliente.activo == 1)
+            .where(PrestamoCliente.es_principal == 1)
+            .where(EstadoPrestamo.nombre != "CANCELADO")
+            .where(Prestamo.fecha_adjudicacion >= fecha_inicio)
+            .where(Prestamo.fecha_adjudicacion <= fecha_fin)
+            .where(*filtros_agencia)
+            .distinct()
+            .order_by(Agencia.nombre, Prestamo.fecha_adjudicacion, Prestamo.numero)
+        )
+        return [
+            PrestamoAdjudicado(
+                numero_operacion=_normalizar(row.numero_operacion),
+                producto=_normalizar(row.producto),
+                valor=float(row.valor or 0.0),
+                agencia=_normalizar(row.agencia),
+                tipo_prestamo=_normalizar(row.tipo_prestamo),
+                asesor=_normalizar(row.asesor),
+                fecha_adjudicacion=row.fecha_adjudicacion.date()
+                if isinstance(row.fecha_adjudicacion, datetime)
+                else row.fecha_adjudicacion,
+            )
+            for row in self.db.execute(statement)
+        ]
 
     def obtener_detalles_resumen(
         self,

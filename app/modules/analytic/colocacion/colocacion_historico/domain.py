@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal
 
 
@@ -47,6 +48,18 @@ class ColocacionAgrupada:
     saldo_inicial: float
 
 
+@dataclass
+class TotalesResumenColocacion:
+    """Acumulados mínimos para construir el resumen de Negocios."""
+
+    operaciones: int = 0
+    saldo_inicial: float = 0.0
+    suma_tasa_nominal: float = 0.0
+    operaciones_tasa_nominal: int = 0
+    suma_tasa_real: float = 0.0
+    operaciones_tasa_real: int = 0
+
+
 @dataclass(frozen=True)
 class DetalleColocacion:
     numero_cliente: str
@@ -61,6 +74,19 @@ class DetalleColocacion:
     tasa_nominal: float | None
     tasa_real: float | None
     monto_colocado: float
+
+
+@dataclass(frozen=True)
+class PrestamoAdjudicado:
+    """Detalle de una operación adjudicada para los tableros de Negocios."""
+
+    numero_operacion: str
+    producto: str
+    valor: float
+    agencia: str
+    tipo_prestamo: str
+    asesor: str
+    fecha_adjudicacion: date
 
 
 @dataclass(frozen=True)

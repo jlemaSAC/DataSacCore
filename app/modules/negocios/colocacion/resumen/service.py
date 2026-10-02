@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from app.modules.analytic.colocacion.colocacion_historico.domain import (
     ColocacionAgrupada,
     DimensionesColocacion,
+    TotalesResumenColocacion,
 )
 from app.modules.analytic.colocacion.colocacion_historico.service import (
     ColocacionHistoricoService,
@@ -24,7 +25,9 @@ from app.modules.negocios.colocacion.resumen.schemas import (
     InputDetalleResumenColocacion,
     InputResumenActualColocacion,
     InputResumenColocacion,
+    PrestamoAdjudicadoResponse,
     RangoResumenActualColocacion,
+    ResumenActualColocacionConAdjudicadosResponse,
     ResumenActualColocacionResponse,
     ResumenColocacionResponse,
 )
@@ -112,6 +115,8 @@ class ResumenColocacionService:
         self,
         input_data: InputResumenActualColocacion,
         auth_context: AuthContext,
+        *,
+        incluir_colocacion_por_agencia: bool = True,
     ) -> ResumenActualColocacionResponse:
         fecha_hoy = _fecha_sistema(auth_context)
         if input_data.fecha_fin > fecha_hoy:
@@ -127,70 +132,66 @@ class ResumenColocacionService:
             anio_anterior_inicio, anio_anterior_fin = _rango_anio_anterior(
                 input_data.fecha_inicio
             )
-            rangos = (
-                ("actual", input_data.fecha_inicio, input_data.fecha_fin),
-                (
-                    "mes_anterior",
-                    mes_anterior_inicio,
-                    mes_anterior_fin,
-                ),
-                (
-                    "anio_anterior",
-                    anio_anterior_inicio,
-                    anio_anterior_fin,
-                ),
-            )
             acumulado_anual_inicio = date(input_data.fecha_fin.year, 1, 1)
-            acumulado_anual_agrupaciones = (
-                self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
-                    acumulado_anual_inicio,
-                    input_data.fecha_fin,
+            rangos = {
+                "acumulado_anual": (acumulado_anual_inicio, input_data.fecha_fin),
+                "actual": (input_data.fecha_inicio, input_data.fecha_fin),
+                "mes_anterior": (mes_anterior_inicio, mes_anterior_fin),
+                "anio_anterior": (anio_anterior_inicio, anio_anterior_fin),
+            }
+            totales_por_rango = (
+                self.colocacion_historico_service.obtener_totales_resumen_por_rangos(
+                    rangos,
                     fecha_hoy,
                     input_data.agencias,
                 )
             )
-            agrupaciones_por_rango = {
-                nombre: self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
-                    fecha_inicio,
-                    fecha_fin,
-                    fecha_hoy,
-                    input_data.agencias,
+            colocacion_por_agencia: list[ColocacionPorAgencia] = []
+            if incluir_colocacion_por_agencia:
+                agrupaciones_todas_agencias = (
+                    self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
+                        input_data.fecha_inicio,
+                        input_data.fecha_fin,
+                        fecha_hoy,
+                        input_data.agencias,
+                    )
+                    if not input_data.agencias
+                    else self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
+                        input_data.fecha_inicio,
+                        input_data.fecha_fin,
+                        fecha_hoy,
+                        [],
+                    )
                 )
-                for nombre, fecha_inicio, fecha_fin in rangos
-            }
-            resumenes = {
-                nombre: _resumir_rango_actual_colocacion(fecha_inicio, fecha_fin, agrupaciones)
-                for (nombre, fecha_inicio, fecha_fin), agrupaciones in zip(
-                    rangos, agrupaciones_por_rango.values(), strict=True
+                colocacion_por_agencia = _resumir_colocacion_por_agencia(
+                    agrupaciones_todas_agencias,
                 )
-            }
-            agrupaciones_todas_agencias = (
-                agrupaciones_por_rango["actual"]
-                if not input_data.agencias
-                else self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
-                    input_data.fecha_inicio,
-                    input_data.fecha_fin,
-                    fecha_hoy,
-                    [],
-                )
-            )
-            colocacion_por_agencia = _resumir_colocacion_por_agencia(
-                agrupaciones_todas_agencias,
-            )
             return ResumenActualColocacionResponse(
                 fecha_inicio=input_data.fecha_inicio,
                 fecha_fin=input_data.fecha_fin,
                 consolidado=not input_data.agencias,
                 agencias=input_data.agencias,
                 colocacion_por_agencia=colocacion_por_agencia,
-                acumulado_anual=_resumir_rango_actual_colocacion(
+                acumulado_anual=_resumir_totales_rango_actual_colocacion(
                     acumulado_anual_inicio,
                     input_data.fecha_fin,
-                    acumulado_anual_agrupaciones,
+                    totales_por_rango["acumulado_anual"],
                 ),
-                actual=resumenes["actual"],
-                mes_anterior=resumenes["mes_anterior"],
-                anio_anterior=resumenes["anio_anterior"],
+                actual=_resumir_totales_rango_actual_colocacion(
+                    input_data.fecha_inicio,
+                    input_data.fecha_fin,
+                    totales_por_rango["actual"],
+                ),
+                mes_anterior=_resumir_totales_rango_actual_colocacion(
+                    mes_anterior_inicio,
+                    mes_anterior_fin,
+                    totales_por_rango["mes_anterior"],
+                ),
+                anio_anterior=_resumir_totales_rango_actual_colocacion(
+                    anio_anterior_inicio,
+                    anio_anterior_fin,
+                    totales_por_rango["anio_anterior"],
+                ),
             )
         except HTTPException:
             raise
@@ -199,6 +200,49 @@ class ResumenColocacionService:
             raise HTTPException(
                 status_code=500,
                 detail="Error consultando resumen actual de colocacion.",
+            ) from exc
+
+    def obtener_resumen_actual_con_adjudicados(
+        self,
+        input_data: InputResumenActualColocacion,
+        auth_context: AuthContext,
+    ) -> ResumenActualColocacionConAdjudicadosResponse:
+        """Extiende el resumen actual con el detalle no paginado por agencia."""
+        resumen = self.obtener_resumen_actual(
+            input_data,
+            auth_context,
+            incluir_colocacion_por_agencia=False,
+        )
+        try:
+            prestamos = (
+                self.colocacion_historico_service.obtener_prestamos_adjudicados_resumen_por_rango(
+                    input_data.fecha_inicio,
+                    input_data.fecha_fin,
+                    _fecha_sistema(auth_context),
+                    input_data.agencias,
+                )
+            )
+            return ResumenActualColocacionConAdjudicadosResponse(
+                **resumen.model_dump(exclude={"colocacion_por_agencia"}),
+                prestamos_adjudicados=[
+                    PrestamoAdjudicadoResponse(
+                        producto=prestamo.producto,
+                        valor=_monto(prestamo.valor),
+                        agencia=prestamo.agencia,
+                        tipo_prestamo=prestamo.tipo_prestamo,
+                        asesor=prestamo.asesor,
+                        fecha_adjudicacion=prestamo.fecha_adjudicacion,
+                    )
+                    for prestamo in prestamos
+                ],
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Error consultando préstamos adjudicados de colocación")
+            raise HTTPException(
+                status_code=500,
+                detail="Error consultando préstamos adjudicados de colocación.",
             ) from exc
 
     def obtener_detalle(
@@ -547,6 +591,40 @@ def _resumir_rango_actual_colocacion(
         ),
         tasa_real_promedio_colocacion=(round(tasa_real, 4) if tasa_real is not None else None),
         numero_operaciones=numero_operaciones,
+    )
+
+
+def _resumir_totales_rango_actual_colocacion(
+    fecha_inicio: date,
+    fecha_fin: date,
+    totales: TotalesResumenColocacion,
+) -> RangoResumenActualColocacion:
+    tasa_nominal = (
+        totales.suma_tasa_nominal / totales.operaciones_tasa_nominal
+        if totales.operaciones_tasa_nominal
+        else None
+    )
+    tasa_real = (
+        totales.suma_tasa_real / totales.operaciones_tasa_real
+        if totales.operaciones_tasa_real
+        else None
+    )
+    return RangoResumenActualColocacion(
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        colocacion_general=_monto(totales.saldo_inicial),
+        monto_promedio=(
+            _monto(totales.saldo_inicial / totales.operaciones)
+            if totales.operaciones
+            else 0.0
+        ),
+        tasa_promedio_colocacion=(
+            round(tasa_nominal, 4) if tasa_nominal is not None else None
+        ),
+        tasa_real_promedio_colocacion=(
+            round(tasa_real, 4) if tasa_real is not None else None
+        ),
+        numero_operaciones=totales.operaciones,
     )
 
 
