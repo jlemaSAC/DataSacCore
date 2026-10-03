@@ -13,22 +13,19 @@ from app.modules.analytic.recuperacion.recuperacion_historico.service import (
     RecuperacionHistoricoService,
 )
 from app.modules.auth.schemas import AuthContext
-from app.modules.negocios.recuperacion.resumen.schemas import (
-    AgrupacionesResumenRecuperacion,
+from app.modules.negocios.recuperacion.evaluacion_recuperacion.schemas import (
+    AgrupacionesEvaluacionRecuperacion,
     CuboFiltroRecuperacion,
     DesgloseCobroRecuperacion,
-    DetalleResumenRecuperacionResponse,
+    DetalleEvaluacionRecuperacionResponse,
     FilaAgrupacionRecuperacion,
     FilaDetalleRecuperacion,
-    InputDetalleResumenRecuperacion,
-    InputResumenActualRecuperacion,
-    InputResumenRecuperacion,
-    RangoResumenActualRecuperacion,
-    ResumenActualRecuperacionResponse,
-    ResumenRecuperacionResponse,
+    InputDetalleEvaluacionRecuperacion,
+    InputEvaluacionRecuperacion,
+    EvaluacionRecuperacionResponse,
     TotalesPaginaDetalleRecuperacion,
 )
-from app.modules.negocios.recuperacion.resumen.repositories.sql_detalle_recuperacion_repository import (
+from app.modules.negocios.recuperacion.evaluacion_recuperacion.repositories.sql_detalle_recuperacion_repository import (
     SqlDetalleRecuperacionRepository,
 )
 
@@ -43,17 +40,6 @@ TIPOS_DIMENSION = (
     "condicion",
     "tipo_cobro",
     "abogado",
-)
-TIPOS_COBRO_RESUMEN_ACTUAL = (
-    "CAPITAL",
-    "INTERES",
-    "INTERES_MORA",
-    "SEGURO",
-    "CASTIGO",
-    "COBRANZA",
-    "JUDICIAL",
-    "DIFERIDO",
-    "OTROS",
 )
 
 
@@ -79,7 +65,7 @@ class _ComparativoRecuperacion:
     monto_mismo_rango_mes_anterior: float = 0.0
 
 
-class ResumenRecuperacionService:
+class EvaluacionRecuperacionService:
     def __init__(
         self,
         recuperacion_historico_service: RecuperacionHistoricoService,
@@ -88,11 +74,11 @@ class ResumenRecuperacionService:
         self.recuperacion_historico_service = recuperacion_historico_service
         self.detalle_sql_repository = detalle_sql_repository
 
-    def obtener_resumen(
+    def obtener_evaluacion(
         self,
-        input_data: InputResumenRecuperacion,
+        input_data: InputEvaluacionRecuperacion,
         auth_context: AuthContext,
-    ) -> ResumenRecuperacionResponse:
+    ) -> EvaluacionRecuperacionResponse:
         fecha_sistema = auth_context.usuario.fecha_sistema
         fecha_hoy = fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
         if input_data.fecha_fin > fecha_hoy:
@@ -115,7 +101,7 @@ class ResumenRecuperacionService:
                 fecha_hoy,
                 incluir_cubos_filtro=input_data.incluir_cubos_filtro,
             )
-            return ResumenRecuperacionResponse(
+            return EvaluacionRecuperacionResponse(
                 fecha_inicio=periodos.actual_inicio,
                 fecha_fin=periodos.actual_fin,
                 fecha_inicio_periodo_anterior=periodos.anterior_inicio,
@@ -126,7 +112,7 @@ class ResumenRecuperacionService:
                 cargos_disponibles=sorted(cargos_disponibles, key=str.casefold),
                 cubos_filtro=cubos_filtro,
                 desglose_cobros=desglose_cobros,
-                agrupaciones=AgrupacionesResumenRecuperacion(
+                agrupaciones=AgrupacionesEvaluacionRecuperacion(
                     por_agencia=_filas(comparativos["agencia"]),
                     por_asesor=_filas(comparativos["asesor"]),
                     por_cargo=_filas(comparativos["cargo"]),
@@ -140,85 +126,17 @@ class ResumenRecuperacionService:
         except HTTPException:
             raise
         except Exception as exc:
-            logger.exception("Error consultando resumen de recuperacion")
+            logger.exception("Error consultando evaluacion de recuperacion")
             raise HTTPException(
                 status_code=500,
-                detail="Error consultando resumen de recuperacion.",
-            ) from exc
-
-    def obtener_resumen_actual(
-        self,
-        input_data: InputResumenActualRecuperacion,
-        auth_context: AuthContext,
-    ) -> ResumenActualRecuperacionResponse:
-        fecha_sistema = auth_context.usuario.fecha_sistema
-        fecha_hoy = (
-            fecha_sistema.date()
-            if isinstance(fecha_sistema, datetime)
-            else fecha_sistema
-        )
-        if input_data.fecha_fin > fecha_hoy:
-            raise HTTPException(
-                status_code=400,
-                detail="fecha_fin no puede ser posterior a la fecha del sistema.",
-        )
-
-        try:
-            mes_anterior_inicio, mes_anterior_fin = _rango_mes_anterior(
-                input_data.fecha_inicio
-            )
-            anio_anterior_inicio, anio_anterior_fin = _rango_anio_anterior(
-                input_data.fecha_inicio
-            )
-            rangos = (
-                ("actual", input_data.fecha_inicio, input_data.fecha_fin),
-                (
-                    "mes_anterior",
-                    mes_anterior_inicio,
-                    mes_anterior_fin,
-                ),
-                (
-                    "anio_anterior",
-                    anio_anterior_inicio,
-                    anio_anterior_fin,
-                ),
-            )
-            resumenes = {
-                nombre: _resumir_rango_actual_recuperacion(
-                    fecha_inicio,
-                    fecha_fin,
-                    self.recuperacion_historico_service.obtener_totales_por_tipo_cobro(
-                        fecha_inicio,
-                        fecha_fin,
-                        fecha_hoy,
-                        input_data.agencias,
-                    ),
-                )
-                for nombre, fecha_inicio, fecha_fin in rangos
-            }
-            return ResumenActualRecuperacionResponse(
-                fecha_inicio=input_data.fecha_inicio,
-                fecha_fin=input_data.fecha_fin,
-                consolidado=not input_data.agencias,
-                agencias=input_data.agencias,
-                actual=resumenes["actual"],
-                mes_anterior=resumenes["mes_anterior"],
-                anio_anterior=resumenes["anio_anterior"],
-            )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.exception("Error consultando resumen actual de recuperacion")
-            raise HTTPException(
-                status_code=500,
-                detail="Error consultando resumen actual de recuperacion.",
+                detail="Error consultando evaluacion de recuperacion.",
             ) from exc
 
     def obtener_detalle(
         self,
-        input_data: InputDetalleResumenRecuperacion,
+        input_data: InputDetalleEvaluacionRecuperacion,
         auth_context: AuthContext,
-    ) -> DetalleResumenRecuperacionResponse:
+    ) -> DetalleEvaluacionRecuperacionResponse:
         fecha_sistema = auth_context.usuario.fecha_sistema
         fecha_hoy = fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
         if input_data.fecha_fin > fecha_hoy:
@@ -301,7 +219,7 @@ class ResumenRecuperacionService:
                 (resultado.total_registros + input_data.tamano_pagina - 1)
                 // input_data.tamano_pagina
             )
-            return DetalleResumenRecuperacionResponse(
+            return DetalleEvaluacionRecuperacionResponse(
                 fecha_inicio=input_data.fecha_inicio,
                 fecha_fin=input_data.fecha_fin,
                 dimension=input_data.dimension,
@@ -490,35 +408,6 @@ def _mover_mes(fecha: date, cantidad_meses: int) -> date:
     anio, mes_base_cero = divmod(indice_mes, 12)
     mes = mes_base_cero + 1
     return date(anio, mes, min(fecha.day, calendar.monthrange(anio, mes)[1]))
-
-
-def _rango_mes_anterior(fecha: date) -> tuple[date, date]:
-    fecha_fin = fecha.replace(day=1) - timedelta(days=1)
-    return fecha_fin.replace(day=1), fecha_fin
-
-
-def _rango_anio_anterior(fecha: date) -> tuple[date, date]:
-    anio = fecha.year - 1
-    return date(anio, 1, 1), date(anio, 12, 31)
-
-
-def _resumir_rango_actual_recuperacion(
-    fecha_inicio: date,
-    fecha_fin: date,
-    totales_por_tipo: dict[str, float],
-) -> RangoResumenActualRecuperacion:
-    montos_por_tipo = {tipo: 0.0 for tipo in TIPOS_COBRO_RESUMEN_ACTUAL}
-    for tipo, monto in totales_por_tipo.items():
-        if tipo in montos_por_tipo:
-            montos_por_tipo[tipo] += monto
-    return RangoResumenActualRecuperacion(
-        fecha_inicio=fecha_inicio,
-        fecha_fin=fecha_fin,
-        recuperacion_total=round(sum(montos_por_tipo.values()), 2),
-        recuperacion_por_tipo={
-            tipo: round(monto, 2) for tipo, monto in montos_por_tipo.items()
-        },
-    )
 
 
 def _mover_anio(fecha: date, cantidad_anios: int) -> date:

@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class InputResumenRecuperacion(BaseModel):
+class InputEvaluacionRecuperacion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agencias: list[str] = Field(min_length=1, examples=[["MATRIZ", "CUENCA"]])
@@ -33,7 +33,7 @@ class InputResumenRecuperacion(BaseModel):
         return normalizados
 
     @model_validator(mode="after")
-    def validar_rango(self) -> "InputResumenRecuperacion":
+    def validar_rango(self) -> "InputEvaluacionRecuperacion":
         if self.fecha_fin < self.fecha_inicio:
             raise ValueError("fecha_fin no puede ser menor que fecha_inicio.")
         if (self.fecha_inicio.year, self.fecha_inicio.month) != (
@@ -57,7 +57,7 @@ class FilaAgrupacionRecuperacion(BaseModel):
     variacion_valor: float
 
 
-class AgrupacionesResumenRecuperacion(BaseModel):
+class AgrupacionesEvaluacionRecuperacion(BaseModel):
     por_agencia: list[FilaAgrupacionRecuperacion] = Field(default_factory=list)
     por_asesor: list[FilaAgrupacionRecuperacion] = Field(default_factory=list)
     por_cargo: list[FilaAgrupacionRecuperacion] = Field(default_factory=list)
@@ -90,7 +90,7 @@ class DesgloseCobroRecuperacion(BaseModel):
     monto_recuperado: float
 
 
-class ResumenRecuperacionResponse(BaseModel):
+class EvaluacionRecuperacionResponse(BaseModel):
     fecha_inicio: date
     fecha_fin: date
     fecha_inicio_periodo_anterior: date
@@ -101,51 +101,7 @@ class ResumenRecuperacionResponse(BaseModel):
     cargos_disponibles: list[str]
     cubos_filtro: list[CuboFiltroRecuperacion]
     desglose_cobros: list[DesgloseCobroRecuperacion]
-    agrupaciones: AgrupacionesResumenRecuperacion
-
-
-class InputResumenActualRecuperacion(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    fecha_inicio: date = Field(description="Primera fecha incluida.")
-    fecha_fin: date = Field(description="Última fecha incluida.")
-    agencias: list[str] = Field(
-        default_factory=list,
-        description="Agencias por nombre. Una lista vacía consulta el consolidado.",
-    )
-
-    @field_validator("agencias", mode="after")
-    @classmethod
-    def normalizar_agencias(cls, valores: list[str]) -> list[str]:
-        return InputResumenRecuperacion.normalizar_listas(valores)
-
-    @model_validator(mode="after")
-    def validar_rango(self) -> "InputResumenActualRecuperacion":
-        if self.fecha_fin < self.fecha_inicio:
-            raise ValueError("fecha_fin no puede ser menor que fecha_inicio.")
-        if (self.fecha_inicio.year, self.fecha_inicio.month) != (
-            self.fecha_fin.year,
-            self.fecha_fin.month,
-        ):
-            raise ValueError("fecha_inicio y fecha_fin deben pertenecer al mismo mes.")
-        return self
-
-
-class RangoResumenActualRecuperacion(BaseModel):
-    fecha_inicio: date
-    fecha_fin: date
-    recuperacion_total: float
-    recuperacion_por_tipo: dict[str, float]
-
-
-class ResumenActualRecuperacionResponse(BaseModel):
-    fecha_inicio: date
-    fecha_fin: date
-    consolidado: bool
-    agencias: list[str]
-    actual: RangoResumenActualRecuperacion
-    mes_anterior: RangoResumenActualRecuperacion
-    anio_anterior: RangoResumenActualRecuperacion
+    agrupaciones: AgrupacionesEvaluacionRecuperacion
 
 
 DimensionDetalleRecuperacion = Literal[
@@ -160,7 +116,7 @@ DimensionDetalleRecuperacion = Literal[
 ]
 
 
-class InputDetalleResumenRecuperacion(InputResumenRecuperacion):
+class InputDetalleEvaluacionRecuperacion(InputEvaluacionRecuperacion):
     dimension: DimensionDetalleRecuperacion
     valor_dimension: str = Field(min_length=1, examples=["MATRIZ"])
     asesores: list[str] = Field(default_factory=list)
@@ -179,7 +135,7 @@ class InputDetalleResumenRecuperacion(InputResumenRecuperacion):
     @field_validator("asesores", "cargos", mode="after")
     @classmethod
     def normalizar_filtros_locales(cls, valores: list[str]) -> list[str]:
-        return InputResumenRecuperacion.normalizar_listas(valores)
+        return InputEvaluacionRecuperacion.normalizar_listas(valores)
 
 
 class FilaDetalleRecuperacion(BaseModel):
@@ -207,7 +163,7 @@ class TotalesPaginaDetalleRecuperacion(BaseModel):
     total_cuotas: int
 
 
-class DetalleResumenRecuperacionResponse(BaseModel):
+class DetalleEvaluacionRecuperacionResponse(BaseModel):
     fecha_inicio: date
     fecha_fin: date
     dimension: DimensionDetalleRecuperacion
