@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.general.agencia_model import Agencia
 from app.models.general.calendario_sistema_model import CalendarioSistema
+from app.models.nomina.cargo_model import Cargo
 from app.models.nomina.empleado_model import Empleado
 from app.models.nomina.empleado_usuario_model import EmpleadoUsuario
 from app.models.seguridad.rol_model import Rol
@@ -20,6 +21,8 @@ class UsuarioLoginData(NamedTuple):
     usuario: str
     nombre: str
     identificacion: str | None
+    cargo: str | None
+    id_cargo: int | None
     id_agencia: int
     nombre_agencia: str | None
     activo: bool
@@ -35,6 +38,8 @@ class SqlAuthRepository:
                 Usuario.usuario.label("usuario"),
                 Usuario.nombre.label("nombre"),
                 Persona.identificacion.label("identificacion"),
+                Cargo.nombre.label("cargo"),
+                Empleado.id_cargo.label("id_cargo"),
                 Usuario.id_agencia.label("id_agencia"),
                 Agencia.nombre.label("nombre_agencia"),
                 Usuario.activo.label("activo"),
@@ -42,6 +47,7 @@ class SqlAuthRepository:
             .outerjoin(Agencia, Agencia.id == Usuario.id_agencia)
             .outerjoin(EmpleadoUsuario, EmpleadoUsuario.codigo_usuario == Usuario.usuario)
             .outerjoin(Empleado, Empleado.id == EmpleadoUsuario.id_empleado)
+            .outerjoin(Cargo, Cargo.id == Empleado.id_cargo)
             .outerjoin(Persona, Persona.id == Empleado.id_persona_natural)
             .filter(Usuario.usuario == codigo_usuario)
             .first()
@@ -53,6 +59,8 @@ class SqlAuthRepository:
             usuario=row.usuario,
             nombre=row.nombre,
             identificacion=row.identificacion,
+            cargo=row.cargo,
+            id_cargo=row.id_cargo,
             id_agencia=row.id_agencia,
             nombre_agencia=row.nombre_agencia,
             activo=row.activo,

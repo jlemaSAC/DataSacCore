@@ -82,7 +82,13 @@ def test_password_hash_matches_datasac_service_strategy() -> None:
 
 
 def test_jwt_token_service_creates_decodable_payload() -> None:
-    token = JwtTokenService().create_access_token(FakeUsuario(), date(2026, 6, 12), "Matriz")
+    token = JwtTokenService().create_access_token(
+        FakeUsuario(),
+        date(2026, 6, 12),
+        "Matriz",
+        cargo="ANALISTA",
+        id_cargo=12,
+    )
 
     payload = JwtTokenService().decode_access_token(token)
 
@@ -90,6 +96,8 @@ def test_jwt_token_service_creates_decodable_payload() -> None:
     assert payload.usuario == "John Doe"
     assert payload.id_agencia == 1
     assert payload.nombre_agencia == "Matriz"
+    assert payload.cargo == "ANALISTA"
+    assert payload.id_cargo == 12
     assert payload.fecha_sistema == date(2026, 6, 12)
 
 
