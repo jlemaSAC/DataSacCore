@@ -7,6 +7,9 @@ from app.modules.negocios.cartera_de_credito.resumen_actual.router import (
 from app.modules.negocios.cartera_de_credito.resumen_diario_asesores.router import (
     router as cartera_resumen_diario_asesores_router,
 )
+from app.modules.negocios.cartera_de_credito.cartera_improductiva.router import (
+    router as cartera_improductiva_router,
+)
 from app.modules.negocios.cartera_de_credito.situacion_crediticia_asesores.router import (
     router as situacion_crediticia_asesores_router,
 )
@@ -31,6 +34,7 @@ from app.modules.negocios.inicio.router import router as negocio_inicio_router
 router = APIRouter(prefix="/negocios")
 router.include_router(cartera_resumen_actual_router)
 router.include_router(cartera_resumen_diario_asesores_router)
+router.include_router(cartera_improductiva_router)
 router.include_router(situacion_crediticia_asesores_router)
 router.include_router(matriz_transicion_router)
 router.include_router(colocacion_resumen_router)

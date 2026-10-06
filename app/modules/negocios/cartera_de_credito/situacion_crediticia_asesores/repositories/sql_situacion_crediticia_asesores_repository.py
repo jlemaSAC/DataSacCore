@@ -58,7 +58,7 @@ class SqlSituacionCrediticiaAsesoresRepository:
                 Agencia.nombre.in_(agencias_normalizadas),
             Usuario.activo == True,
             Cargo.activo == True,
-                func.upper(Cargo.nombre).like("%GERENTE%OFICINA%"),
+                func.upper(Cargo.nombre) == "JEFE DE AGENCIA",
             )
             .order_by(
                 Agencia.nombre.asc(),

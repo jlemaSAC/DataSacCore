@@ -53,6 +53,11 @@ def _normalizar_agencia(value: Any) -> str | None:
     return agencia or None
 
 
+def _clave_agencia(value: Any) -> str | None:
+    agencia = _normalizar_agencia(value)
+    return agencia.casefold() if agencia else None
+
+
 def _normalizar_numero_prestamo(value: Any) -> str | None:
     if value is None:
         return None
@@ -383,15 +388,13 @@ class SituacionCrediticiaAsesoresService:
 
         agencias_respuesta = sorted(
             {
-                _normalizar_agencia(
-                    actual.get("AgenciaActual")
-                    or actual.get("AgenciaCierreMesAnterior")
+                agencia
+                for item in comparacion
+                for agencia in (
+                    _normalizar_agencia(item.get("AgenciaActual")),
+                    _normalizar_agencia(item.get("AgenciaCierreMesAnterior")),
                 )
-                for actual in comparacion
-                if _normalizar_agencia(
-                    actual.get("AgenciaActual")
-                    or actual.get("AgenciaCierreMesAnterior")
-                )
+                if agencia
             }
         )
         agencias_gerentes = self.sql_repository.obtener_gerentes_oficina(agencias_respuesta)

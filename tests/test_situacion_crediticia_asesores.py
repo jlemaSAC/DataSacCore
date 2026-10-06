@@ -76,7 +76,16 @@ class FakeSqlRepository:
 
     def obtener_gerentes_oficina(self, agencias: list[str]) -> list[dict]:
         assert agencias == ["CENTRO"]
-        return []
+        return [
+            {
+                "IdAgencia": 1,
+                "Agencia": agencia.lower(),
+                "CodigoUsuarioGerente": "JEFE",
+                "GerenteOficina": "Jefe de agencia",
+                "Cargo": "JEFE DE AGENCIA",
+            }
+            for agencia in agencias
+        ]
 
 
 def test_reasignacion_se_infiere_por_numero_de_prestamo() -> None:
