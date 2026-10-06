@@ -60,6 +60,8 @@ class FakeRepository:
         self.actual_solicitada: date | None = None
         self.agencias: list[str] = []
         self.filtrar_diferidos: bool | None = None
+        self.resumen_agencias_fecha: date | None = None
+        self.resumen_agencias_actual: bool | None = None
 
     def obtener_historico(
         self,
@@ -82,6 +84,29 @@ class FakeRepository:
         self.agencias = agencias
         self.filtrar_diferidos = filtrar_diferidos
         return totales(fecha_corte)
+
+    def obtener_por_agencia(
+        self,
+        fecha_corte: date,
+        filtrar_diferidos: bool | None,
+        *,
+        actual: bool,
+    ) -> dict[str, TotalesCartera]:
+        self.resumen_agencias_fecha = fecha_corte
+        self.resumen_agencias_actual = actual
+        self.filtrar_diferidos = filtrar_diferidos
+        return {
+            "AGENCIA A": totales(fecha_corte),
+            "AGENCIA B": TotalesCartera(
+                fecha_corte=fecha_corte,
+                operaciones=1,
+                saldo_capital=200,
+                capital_vigente=150,
+                capital_no_devenga=30,
+                capital_vencido=20,
+                provision_requerida=10,
+            ),
+        }
 
 
 class FakeCache:
@@ -201,6 +226,33 @@ def test_repositorio_actual_usa_snapshot_completo_y_provision_requerida() -> Non
     assert provision["$convert"]["input"] == "$ProvisionRequerida"
 
 
+def test_repositorio_por_agencia_ignora_filtro_de_agencias() -> None:
+    database = FakeMongoDatabase()
+    database.collections["SituacionCrediticia"].rows = [
+        {
+            "_id": "MATRIZ",
+            "operaciones": 2,
+            "saldo_capital": 1200,
+            "capital_no_devenga": 100,
+            "capital_vencido": 50,
+            "provision_requerida": 30,
+        }
+    ]
+    repository = MongoComparativoCarteraRepository(database)  # type: ignore[arg-type]
+
+    resultado = repository.obtener_por_agencia(
+        date(2026, 9, 16), False, actual=False
+    )
+
+    collection = database.collections["SituacionCrediticia"]
+    match = collection.pipeline[0]["$match"]
+    assert "Agencia" not in match
+    assert match["fecha_corte"] == "20260916"
+    assert match["ESDIFERIDO"]["$nin"]
+    assert resultado["MATRIZ"].saldo_capital == 1200
+    assert resultado["MATRIZ"].cartera_improductiva == 150
+
+
 def test_servicio_resuelve_comparaciones_en_una_consulta_historica() -> None:
     repository = FakeRepository()
     service = ComparativoCarteraService(repository)  # type: ignore[arg-type]
@@ -235,6 +287,16 @@ def test_servicio_resuelve_comparaciones_en_una_consulta_historica() -> None:
     assert response.resumen_morosidad.mes_anterior.dias_con_datos == 1
     assert response.resumen_morosidad.anio_anterior.fecha_desde == date(2025, 12, 31)
     assert response.resumen_morosidad.anio_anterior.dias_con_datos == 1
+    assert [item.agencia for item in response.resumen_por_agencia] == [
+        "AGENCIA A",
+        "AGENCIA B",
+    ]
+    assert response.resumen_por_agencia[0].saldo_capital == 1000
+    assert response.resumen_por_agencia[0].morosidad_porcentaje == 15
+    assert response.resumen_por_agencia[0].cartera_improductiva == 150
+    assert response.resumen_por_agencia[0].provision_requerida == 75
+    assert repository.resumen_agencias_fecha == date(2026, 9, 16)
+    assert repository.resumen_agencias_actual is False
     assert all(
         punto.mes_anterior is not None
         and punto.mes_anterior.fecha_corte == date(2026, 8, 31)
@@ -389,7 +451,11 @@ def test_endpoint_de_negocios_devuelve_resumen_actual_de_cartera() -> None:
     try:
         response = client.post(
             "/negocios/cartera-de-credito/resumen-actual",
-            json={"fecha_desde": "2026-09-16", "fecha_hasta": "2026-09-16"},
+            json={
+                "fecha_desde": "2026-09-16",
+                "fecha_hasta": "2026-09-16",
+                "agencias": ["MATRIZ"],
+            },
         )
     finally:
         app.dependency_overrides.pop(get_current_auth_context, None)
@@ -397,3 +463,9 @@ def test_endpoint_de_negocios_devuelve_resumen_actual_de_cartera() -> None:
 
     assert response.status_code == 200
     assert response.json()["puntos"][0]["actual"]["saldo_capital"] == 1000
+    resumen = response.json()["resumen_por_agencia"]
+    assert [item["agencia"] for item in resumen] == ["AGENCIA A", "AGENCIA B"]
+    assert resumen[0]["saldo_capital"] == 1000
+    assert resumen[0]["morosidad_porcentaje"] == 15
+    assert resumen[0]["cartera_improductiva"] == 150
+    assert resumen[0]["provision_requerida"] == 75

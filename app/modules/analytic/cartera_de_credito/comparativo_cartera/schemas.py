@@ -89,6 +89,14 @@ class ComparativoMorosidadRango(BaseModel):
     anio_anterior: ResumenMorosidadRango
 
 
+class ResumenCarteraAgencia(BaseModel):
+    agencia: str
+    saldo_capital: float
+    morosidad_porcentaje: float
+    cartera_improductiva: float
+    provision_requerida: float
+
+
 class ComparativoCarteraResponse(BaseModel):
     fecha_desde: date
     fecha_hasta: date
@@ -96,4 +104,5 @@ class ComparativoCarteraResponse(BaseModel):
     agencias: list[str]
     filtrar_diferidos: bool | None
     resumen_morosidad: ComparativoMorosidadRango
+    resumen_por_agencia: list[ResumenCarteraAgencia] = Field(default_factory=list)
     puntos: list[PuntoComparativoCartera]

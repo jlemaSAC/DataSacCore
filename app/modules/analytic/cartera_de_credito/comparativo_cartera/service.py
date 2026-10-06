@@ -19,6 +19,7 @@ from app.modules.analytic.cartera_de_credito.comparativo_cartera.schemas import 
     CorteComparativoCartera,
     InputComparativoCartera,
     PuntoComparativoCartera,
+    ResumenCarteraAgencia,
     ResumenMorosidadRango,
 )
 from app.modules.auth.schemas import AuthContext
@@ -103,6 +104,11 @@ class ComparativoCarteraService:
                         actual = actual_future.result()
                         if actual is not None:
                             totales[hoy] = actual
+            totales_por_agencia = self.repository.obtener_por_agencia(
+                input_data.fecha_hasta,
+                input_data.filtrar_diferidos,
+                actual=input_data.fecha_hasta == hoy,
+            )
         except Exception as exc:
             logger.exception(
                 "Error consultando comparativo de cartera entre %s y %s",
@@ -136,6 +142,20 @@ class ComparativoCarteraService:
                 mes_anterior=self._resumir_morosidad([corte_mes_anterior]),
                 anio_anterior=self._resumir_morosidad([corte_anio_anterior]),
             ),
+            resumen_por_agencia=[
+                ResumenCarteraAgencia(
+                    agencia=agencia,
+                    saldo_capital=round(agencia_totales.saldo_capital, 2),
+                    morosidad_porcentaje=round(agencia_totales.morosidad * 100, 2),
+                    cartera_improductiva=round(
+                        agencia_totales.cartera_improductiva, 2
+                    ),
+                    provision_requerida=round(
+                        agencia_totales.provision_requerida, 2
+                    ),
+                )
+                for agencia, agencia_totales in sorted(totales_por_agencia.items())
+            ],
             puntos=puntos,
         )
 
