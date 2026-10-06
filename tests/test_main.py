@@ -205,6 +205,8 @@ def test_login_response_does_not_include_menu() -> None:
                 "puede_ingresar": True,
                 "nombre": "John Doe",
                 "identificacion": "0102030405",
+                "cargo": "ANALISTA",
+                "id_cargo": 12,
                 "codigo": "jdoe",
                 "id_agencia": 1,
                 "nombre_agencia": "Matriz",
@@ -230,6 +232,8 @@ def test_login_response_does_not_include_menu() -> None:
     assert "menu" not in response.json()
     assert data_sac_web_response.status_code == 200
     assert "menu" not in data_sac_web_response.json()
+    assert data_sac_web_response.json()["cargo"] == "ANALISTA"
+    assert data_sac_web_response.json()["id_cargo"] == 12
 
 
 def test_app_settings_dev_allows_all_cors_origins(monkeypatch) -> None:

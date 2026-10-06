@@ -8,27 +8,29 @@ from app.modules.analytic.recuperacion.recuperacion_historico.dependencies impor
 from app.modules.analytic.recuperacion.recuperacion_historico.service import (
     RecuperacionHistoricoService,
 )
-from app.modules.negocios.recuperacion.resumen.service import ResumenRecuperacionService
-from app.modules.negocios.recuperacion.resumen.repositories.sql_detalle_recuperacion_repository import (
+from app.modules.negocios.recuperacion.evaluacion_recuperacion.service import (
+    EvaluacionRecuperacionService,
+)
+from app.modules.negocios.recuperacion.evaluacion_recuperacion.repositories.sql_detalle_recuperacion_repository import (
     SqlDetalleRecuperacionRepository,
 )
 
 
-def get_resumen_recuperacion_service(
+def get_evaluacion_recuperacion_service(
     recuperacion_historico_service: RecuperacionHistoricoService = Depends(
         get_recuperacion_historico_service
     ),
-) -> ResumenRecuperacionService:
-    return ResumenRecuperacionService(recuperacion_historico_service)
+) -> EvaluacionRecuperacionService:
+    return EvaluacionRecuperacionService(recuperacion_historico_service)
 
 
-def get_detalle_resumen_recuperacion_service(
+def get_detalle_evaluacion_recuperacion_service(
     recuperacion_historico_service: RecuperacionHistoricoService = Depends(
         get_recuperacion_historico_service
     ),
     db: Session = Depends(get_db),
-) -> ResumenRecuperacionService:
-    return ResumenRecuperacionService(
+) -> EvaluacionRecuperacionService:
+    return EvaluacionRecuperacionService(
         recuperacion_historico_service,
         SqlDetalleRecuperacionRepository(db),
     )

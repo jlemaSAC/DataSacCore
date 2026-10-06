@@ -1,694 +1,244 @@
 from datetime import date
+from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
+from bson.decimal128 import Decimal128
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.main import app
-from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
-    CuboFiltroRecuperacion,
-    DesgloseCobroRecuperacion,
-    DetalleRecuperacionAgrupado,
-    RecuperacionResumenAgrupada,
-    ResultadoDetalleRecuperacion,
-    ResultadoResumenRecuperacion,
-)
-from app.modules.analytic.recuperacion.recuperacion_historico.repositories.mongo_recuperacion_historico_repository import (
-    MongoRecuperacionHistoricoRepository,
-)
 from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.auth.schemas import AuthContext, UsuarioTokenPayload
-from app.modules.negocios.recuperacion.resumen.dependencies import (
-    get_detalle_resumen_recuperacion_service,
-    get_resumen_recuperacion_service,
-)
-from app.modules.negocios.recuperacion.resumen.domain import DatosOperativosRecuperacion
-from app.modules.negocios.recuperacion.resumen.schemas import (
-    InputDetalleResumenRecuperacion,
-    InputResumenActualRecuperacion,
-    InputResumenRecuperacion,
-)
-from app.modules.negocios.recuperacion.resumen.repositories.sql_detalle_recuperacion_repository import (
-    SqlDetalleRecuperacionRepository,
-)
-from app.modules.negocios.recuperacion.resumen.service import ResumenRecuperacionService
+from app.modules.negocios.recuperacion.resumen_recuperacion.dependencies import get_resumen_recuperacion_service
+from app.modules.negocios.recuperacion.resumen_recuperacion.domain import RecuperacionDiaria
+from app.modules.negocios.recuperacion.resumen_recuperacion.repositories.mongo_resumen_recuperacion_repository import MongoResumenRecuperacionRepository
+from app.modules.negocios.recuperacion.resumen_recuperacion.schemas import InputResumenRecuperacion
+from app.modules.negocios.recuperacion.resumen_recuperacion.service import ResumenRecuperacionService
 
 
-client = TestClient(app)
-DIMENSIONES = (
-    "agencia",
-    "asesor",
-    "cargo",
-    "tipo_prestamo",
-    "producto",
-    "condicion",
-    "tipo_cobro",
-    "abogado",
-)
+def contexto(hoy=date(2026, 10, 3)):
+    return AuthContext.from_token_payload("token", UsuarioTokenPayload(
+        sub="test", usuario="Test", id_agencia=2, nombre_agencia="Matriz", fecha_sistema=hoy,
+    ))
 
 
-def auth_context(fecha_sistema: date = date(2026, 8, 31)) -> AuthContext:
-    return AuthContext.from_token_payload(
-        "token",
-        UsuarioTokenPayload(
-            sub="jdoe",
-            usuario="John Doe",
-            id_agencia=2,
-            nombre_agencia="Matriz",
-            fecha_sistema=fecha_sistema,
-        ),
+class FakeRepository:
+    def __init__(self, filas=()):
+        self.filas = list(filas)
+        self.llamadas = []
+
+    def obtener_diario(self, rangos, hoy, agencias):
+        self.llamadas.append((rangos, hoy, agencias))
+        return self.filas
+
+
+def test_diario_comparativos_y_composicion_comparten_los_mismos_importes():
+    repo = FakeRepository([
+        RecuperacionDiaria(date(2026, 10, 1), {"CAPITAL": Decimal("100.10"), "INTERES": Decimal("20.20")}),
+        RecuperacionDiaria(date(2026, 10, 3), {"CAPITAL": Decimal("50.30"), "INTERES_MORA": Decimal("-1.10")}),
+        RecuperacionDiaria(date(2026, 9, 1), {"CAPITAL": Decimal("40")}),
+        RecuperacionDiaria(date(2026, 9, 4), {"CAPITAL": Decimal("999")}),
+        RecuperacionDiaria(date(2025, 10, 1), {"INTERES": Decimal("10")}),
+    ])
+    respuesta = ResumenRecuperacionService(repo).obtener_resumen(
+        InputResumenRecuperacion(fecha_inicio="2026-10-01", fecha_fin="2026-10-03", agencias=[" matriz ", "MATRIZ"]), contexto(),
     )
-
-
-class FakeRecuperacionHistoricoService:
-    def __init__(self) -> None:
-        self.llamadas: list[tuple] = []
-        self.llamadas_totales: list[tuple] = []
-
-    def obtener_totales_por_tipo_cobro(
-        self,
-        fecha_inicio,
-        fecha_fin,
-        fecha_hoy,
-        agencias,
-    ) -> dict[str, float]:
-        self.llamadas_totales.append(
-            (fecha_inicio, fecha_fin, fecha_hoy, agencias)
-        )
-        valores = {
-            (date(2026, 8, 15), date(2026, 8, 25)): 1000.0,
-            (date(2026, 7, 1), date(2026, 7, 31)): 3000.0,
-            (date(2025, 1, 1), date(2025, 12, 31)): 4000.0,
-        }
-        return {
-            "CAPITAL": valores.get((fecha_inicio, fecha_fin), 0.0),
-            **{
-                tipo: 0.0
-                for tipo in (
-                    "INTERES",
-                    "INTERES_MORA",
-                    "SEGURO",
-                    "CASTIGO",
-                    "COBRANZA",
-                    "JUDICIAL",
-                    "DIFERIDO",
-                    "OTROS",
-                )
-            },
-        }
-
-    def obtener_agrupaciones_resumen_por_rango(
-        self,
-        fecha_inicio,
-        fecha_fin,
-        fecha_hoy,
-        agencias,
-        incluir_desglose_cobros=False,
-        incluir_cubos_filtro=False,
-    ) -> ResultadoResumenRecuperacion:
-        self.llamadas.append(
-            (
-                fecha_inicio,
-                fecha_fin,
-                fecha_hoy,
-                agencias,
-                incluir_desglose_cobros,
-                incluir_cubos_filtro,
-            )
-        )
-        valores = {
-            (date(2026, 8, 15), date(2026, 8, 25)): (10, 1000.0),
-            (date(2026, 7, 1), date(2026, 7, 31)): (30, 3000.0),
-            (date(2026, 7, 15), date(2026, 7, 25)): (8, 800.0),
-            (date(2025, 1, 1), date(2025, 12, 31)): (40, 4000.0),
-        }
-        operaciones, monto = valores.get((fecha_inicio, fecha_fin), (0, 0.0))
-        return ResultadoResumenRecuperacion(
-            agrupaciones={
-                dimension: [
-                    RecuperacionResumenAgrupada(
-                        agencia="MATRIZ" if dimension == "asesor" else None,
-                        dimension={
-                            "agencia": "MATRIZ",
-                            "asesor": "ANA ASESORA",
-                            "cargo": "GESTOR DE COBRANZAS",
-                            "tipo_prestamo": "MICROCREDITO",
-                            "producto": "MICROCREDITO",
-                            "condicion": "NUEVO",
-                            "tipo_cobro": "CAPITAL",
-                            "abogado": "ESTUDIO JURIDICO",
-                        }[dimension],
-                        numero_operaciones=operaciones,
-                        monto_recuperado=monto,
-                    )
-                ]
-                for dimension in DIMENSIONES
-            },
-            asesores_disponibles={"ANA ASESORA"},
-            cargos_disponibles={"GESTOR DE COBRANZAS"},
-            cubos_filtro=[
-                CuboFiltroRecuperacion(
-                    tipo_dimension="agencia",
-                    dimension="MATRIZ",
-                    agencia=None,
-                    asesor="ANA ASESORA",
-                    cargo="GESTOR DE COBRANZAS",
-                    numero_operaciones=operaciones,
-                    monto_recuperado=monto,
-                )
-            ],
-            desglose_cobros=(
-                [
-                    DesgloseCobroRecuperacion(
-                        tipo_dimension="agencia",
-                        dimension="MATRIZ",
-                        agencia=None,
-                        asesor="ANA ASESORA",
-                        cargo="GESTOR DE COBRANZAS",
-                        tipo_cobro="CAPITAL",
-                        numero_rubros=7,
-                        monto_recuperado=700.0,
-                    )
-                ]
-                if incluir_desglose_cobros
-                else []
-            ),
-        )
-
-    def obtener_detalle_resumen_por_rango(self, **kwargs) -> ResultadoDetalleRecuperacion:
-        self.llamadas.append(("detalle", kwargs))
-        return ResultadoDetalleRecuperacion(
-            items=[
-                DetalleRecuperacionAgrupado(
-                    numero_prestamo="2026040208325",
-                    fecha_ultimo_cobro=date(2026, 8, 15),
-                    total_recuperado_periodo=2260.52,
-                )
-            ],
-            total_registros=21,
-            total_recuperado_periodo=5082383.30,
-        )
-
-
-class FakeDetalleSqlRepository:
-    def __init__(self) -> None:
-        self.numeros: list[str] = []
-
-    def obtener_datos_actuales(self, numeros_prestamo):
-        self.numeros = numeros_prestamo
-        return {
-            "2026040208325": DatosOperativosRecuperacion(
-                numero_prestamo="2026040208325",
-                socio=12,
-                nombre="TOALOMBO CHIMBORAZO JOSE SEGUNDO",
-                estado_prestamo="AL DIA",
-                calificacion_actual="A-1",
-                saldo_capital=17024.46,
-                pendiente_pago=0,
-                valor_al_dia_mas_cuota_actual=2214.21,
-                cuotas_pagadas=4,
-                total_cuotas=12,
-                es_diferido=False,
-            )
-        }
-
-
-def test_servicio_construye_comparativo_y_todas_las_dimensiones() -> None:
-    historico = FakeRecuperacionHistoricoService()
-    service = ResumenRecuperacionService(historico)  # type: ignore[arg-type]
-
-    respuesta = service.obtener_resumen(
-        InputResumenRecuperacion(
-            agencias=[" matriz ", "MATRIZ"],
-            fecha_inicio=date(2026, 8, 15),
-            fecha_fin=date(2026, 8, 25),
-        ),
-        auth_context(),
-    )
-
-    assert historico.llamadas == [
-        (
-            date(2026, 8, 15),
-            date(2026, 8, 25),
-            date(2026, 8, 31),
-            ["MATRIZ"],
-            True,
-            False,
-        ),
-        (
-            date(2026, 7, 1),
-            date(2026, 7, 31),
-            date(2026, 8, 31),
-            ["MATRIZ"],
-            False,
-            False,
-        ),
-        (
-            date(2026, 7, 15),
-            date(2026, 7, 25),
-            date(2026, 8, 31),
-            ["MATRIZ"],
-            False,
-            False,
-        ),
-    ]
-    fila = respuesta.agrupaciones.por_agencia[0]
-    assert fila.numero_operaciones == 10
-    assert fila.numero_operaciones_periodo_anterior == 30
-    assert fila.numero_operaciones_mismo_rango_mes_anterior == 8
-    assert fila.variacion_operaciones == 2
-    assert fila.monto_recuperado == 1000.0
-    assert fila.monto_recuperado_periodo_anterior == 3000.0
-    assert fila.monto_mismo_rango_mes_anterior == 800.0
-    assert fila.variacion_valor == 200.0
-    assert respuesta.agrupaciones.por_asesor[0].agencia == "MATRIZ"
-    assert respuesta.agrupaciones.por_cargo[0].dimension == "GESTOR DE COBRANZAS"
-    assert respuesta.agrupaciones.por_tipo_cobro[0].dimension == "CAPITAL"
-    assert respuesta.agrupaciones.por_abogado[0].dimension == "ESTUDIO JURIDICO"
-    assert respuesta.asesores_disponibles == ["ANA ASESORA"]
-    assert respuesta.cargos_disponibles == ["GESTOR DE COBRANZAS"]
-    assert respuesta.cubos_filtro == []
-    assert respuesta.desglose_cobros[0].tipo_cobro == "CAPITAL"
-    assert respuesta.desglose_cobros[0].numero_rubros == 7
-
-
-def test_servicio_incluye_cubos_solo_cuando_se_solicitan() -> None:
-    historico = FakeRecuperacionHistoricoService()
-    service = ResumenRecuperacionService(historico)  # type: ignore[arg-type]
-
-    respuesta = service.obtener_resumen(
-        InputResumenRecuperacion(
-            agencias=["MATRIZ"],
-            fecha_inicio=date(2026, 8, 15),
-            fecha_fin=date(2026, 8, 25),
-            incluir_cubos_filtro=True,
-        ),
-        auth_context(),
-    )
-
-    assert {cubo.periodo for cubo in respuesta.cubos_filtro} == {
-        "actual",
-        "anterior",
-        "mismo_rango_anterior",
-    }
-    assert all(llamada[-1] is True for llamada in historico.llamadas)
-
-
-def test_resumen_actual_recuperacion_devuelve_total_y_tipos_por_periodos_completos() -> None:
-    historico = FakeRecuperacionHistoricoService()
-    service = ResumenRecuperacionService(historico)  # type: ignore[arg-type]
-
-    respuesta = service.obtener_resumen_actual(
-        InputResumenActualRecuperacion(
-            fecha_inicio=date(2026, 8, 15),
-            fecha_fin=date(2026, 8, 25),
-        ),
-        auth_context(),
-    )
-
-    assert historico.llamadas_totales == [
-        (date(2026, 8, 15), date(2026, 8, 25), date(2026, 8, 31), []),
-        (date(2026, 7, 1), date(2026, 7, 31), date(2026, 8, 31), []),
-        (date(2025, 1, 1), date(2025, 12, 31), date(2026, 8, 31), []),
-    ]
-    assert respuesta.consolidado is True
-    assert respuesta.actual.recuperacion_total == 1000
-    assert respuesta.actual.recuperacion_por_tipo["CAPITAL"] == 1000
-    assert respuesta.mes_anterior.recuperacion_total == 3000
-    assert respuesta.mes_anterior.fecha_inicio == date(2026, 7, 1)
-    assert respuesta.mes_anterior.fecha_fin == date(2026, 7, 31)
+    assert len(repo.llamadas) == 1
+    assert respuesta.agencias == ["MATRIZ"]
+    assert not respuesta.consolidado
+    assert respuesta.actual.recuperacion_total == 169.50
+    assert sum(d.recuperacion_total for d in respuesta.diario) == pytest.approx(respuesta.actual.recuperacion_total)
+    for tipo, monto in respuesta.actual.recuperacion_por_tipo.items():
+        assert sum(d.recuperacion_por_tipo[tipo] for d in respuesta.diario) == pytest.approx(monto)
+    assert respuesta.diario[1].fecha == date(2026, 10, 2)
+    assert respuesta.diario[1].recuperacion_total == 0
+    assert respuesta.mes_anterior.recuperacion_total == 1039
+    assert respuesta.anio_anterior.recuperacion_total == 10
+    assert respuesta.mes_anterior.fecha_inicio == date(2026, 9, 1)
+    assert respuesta.mes_anterior.fecha_fin == date(2026, 9, 30)
     assert respuesta.anio_anterior.fecha_inicio == date(2025, 1, 1)
     assert respuesta.anio_anterior.fecha_fin == date(2025, 12, 31)
-    assert respuesta.anio_anterior.recuperacion_total == 4000
 
 
-def test_endpoint_resumen_actual_recuperacion_retorna_comparativo_por_rango() -> None:
-    service = ResumenRecuperacionService(FakeRecuperacionHistoricoService())  # type: ignore[arg-type]
-    app.dependency_overrides[get_current_auth_context] = auth_context
-    app.dependency_overrides[get_resumen_recuperacion_service] = lambda: service
-    try:
-        response = client.post(
-            "/negocios/recuperacion/resumen-actual",
-            json={"fecha_inicio": "2026-08-15", "fecha_fin": "2026-08-25"},
-        )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["consolidado"] is True
-    assert body["actual"]["recuperacion_total"] == 1000
-
-
-def test_servicio_rechaza_fecha_posterior_a_fecha_sistema() -> None:
-    service = ResumenRecuperacionService(FakeRecuperacionHistoricoService())  # type: ignore[arg-type]
-
-    with pytest.raises(HTTPException, match="fecha_fin no puede ser posterior") as error:
-        service.obtener_resumen(
-            InputResumenRecuperacion(
-                agencias=["MATRIZ"],
-                fecha_inicio=date(2026, 9, 1),
-                fecha_fin=date(2026, 9, 2),
-            ),
-            auth_context(),
-        )
-
-    assert error.value.status_code == 400
-
-
-def test_endpoint_retorna_resumen_con_autenticacion() -> None:
-    service = ResumenRecuperacionService(FakeRecuperacionHistoricoService())  # type: ignore[arg-type]
-    app.dependency_overrides[get_current_auth_context] = auth_context
-    app.dependency_overrides[get_resumen_recuperacion_service] = lambda: service
-    try:
-        response = client.post(
-            "/negocios/recuperacion/resumen",
-            json={
-                "agencias": ["MATRIZ"],
-                "fecha_inicio": "2026-08-15",
-                "fecha_fin": "2026-08-25",
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["fecha_inicio_periodo_anterior"] == "2026-07-01"
-    assert body["fecha_fin_mismo_rango_mes_anterior"] == "2026-07-25"
-    assert set(body["agrupaciones"]) == {
-        "por_agencia",
-        "por_asesor",
-        "por_cargo",
-        "por_tipo_prestamo",
-        "por_producto",
-        "por_condicion",
-        "por_tipo_cobro",
-        "por_abogado",
-    }
-
-
-def test_endpoint_entrega_hechos_para_filtrar_en_frontend() -> None:
-    service = ResumenRecuperacionService(FakeRecuperacionHistoricoService())  # type: ignore[arg-type]
-    app.dependency_overrides[get_current_auth_context] = auth_context
-    app.dependency_overrides[get_resumen_recuperacion_service] = lambda: service
-    try:
-        response = client.post(
-            "/negocios/recuperacion/resumen",
-            json={
-                "agencias": ["MATRIZ"],
-                "fecha_inicio": "2026-08-15",
-                "fecha_fin": "2026-08-25",
-                "incluir_cubos_filtro": True,
-            },
-        )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 200
-    assert response.json()["cargos_disponibles"] == ["GESTOR DE COBRANZAS"]
-    assert len(response.json()["cubos_filtro"]) == 3
-
-
-def test_servicio_detalle_pagina_en_mongo_y_enriquece_solo_la_pagina() -> None:
-    historico = FakeRecuperacionHistoricoService()
-    sql = FakeDetalleSqlRepository()
-    service = ResumenRecuperacionService(historico, sql)  # type: ignore[arg-type]
-
-    respuesta = service.obtener_detalle(
-        InputDetalleResumenRecuperacion(
-            agencias=["matriz"],
-            fecha_inicio=date(2026, 8, 1),
-            fecha_fin=date(2026, 8, 31),
-            dimension="agencia",
-            valor_dimension="matriz",
-            asesores=["ana asesora"],
-            cargos=["gestor de cobranzas"],
-            pagina=2,
-            tamano_pagina=20,
-        ),
-        auth_context(),
+@pytest.mark.parametrize("inicio,fin,mes_inicio,mes_fin,anio_fin", [
+    ("2026-03-29", "2026-03-31", date(2026, 2, 1), date(2026, 2, 28), date(2025, 12, 31)),
+    ("2024-03-29", "2024-03-31", date(2024, 2, 1), date(2024, 2, 29), date(2023, 12, 31)),
+    ("2025-02-28", "2025-02-28", date(2025, 1, 1), date(2025, 1, 31), date(2024, 12, 31)),
+    ("2026-01-01", "2026-01-03", date(2025, 12, 1), date(2025, 12, 31), date(2025, 12, 31)),
+])
+def test_periodos_completos_en_meses_cortos_bisiestos_y_cambio_de_anio(inicio, fin, mes_inicio, mes_fin, anio_fin):
+    respuesta = ResumenRecuperacionService(FakeRepository()).obtener_resumen(
+        InputResumenRecuperacion(fecha_inicio=inicio, fecha_fin=fin), contexto(),
     )
-
-    assert sql.numeros == ["2026040208325"]
-    assert historico.llamadas[-1][1]["offset"] == 20
-    assert historico.llamadas[-1][1]["limite"] == 20
-    assert historico.llamadas[-1][1]["asesores"] == ["ANA ASESORA"]
-    assert respuesta.total_registros == 21
-    assert respuesta.total_paginas == 2
-    assert respuesta.total_recuperado_mes == 5082383.30
-    assert respuesta.items[0].estado_prestamo == "AL DIA"
-    assert respuesta.items[0].total_recuperado_mes == 2260.52
-    assert respuesta.totales_pagina.saldo_capital == 17024.46
+    assert respuesta.consolidado
+    assert respuesta.mes_anterior.fecha_inicio == mes_inicio
+    assert respuesta.mes_anterior.fecha_fin == mes_fin
+    assert respuesta.anio_anterior.fecha_inicio == date(anio_fin.year, 1, 1)
+    assert respuesta.anio_anterior.fecha_fin == anio_fin
+    assert all(d.recuperacion_total == 0 for d in respuesta.diario)
 
 
-def test_endpoint_retorna_detalle_operativo_paginado() -> None:
-    service = ResumenRecuperacionService(
-        FakeRecuperacionHistoricoService(),  # type: ignore[arg-type]
-        FakeDetalleSqlRepository(),  # type: ignore[arg-type]
-    )
-    app.dependency_overrides[get_current_auth_context] = auth_context
-    app.dependency_overrides[get_detalle_resumen_recuperacion_service] = lambda: service
-    try:
-        response = client.post(
-            "/negocios/recuperacion/resumen/detalle",
-            json={
-                "agencias": ["MATRIZ"],
-                "fecha_inicio": "2026-08-01",
-                "fecha_fin": "2026-08-31",
-                "dimension": "producto",
-                "valor_dimension": "MICROCREDITO",
-                "pagina": 1,
-                "tamano_pagina": 100,
-            },
+def test_futuro_se_rechaza_sin_consultar_la_base():
+    repo = FakeRepository()
+    with pytest.raises(HTTPException) as exc:
+        ResumenRecuperacionService(repo).obtener_resumen(
+            InputResumenRecuperacion(fecha_inicio="2026-10-01", fecha_fin="2026-10-04"), contexto(),
         )
-    finally:
-        app.dependency_overrides.clear()
+    assert exc.value.status_code == 400
+    assert repo.llamadas == []
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["items"][0]["socio"] == 12
-    assert body["items"][0]["calificacion_actual"] == "A-1"
-    assert body["items"][0]["es_diferido"] is False
-    assert body["total_registros"] == 21
+
+@pytest.mark.parametrize("datos", [
+    {"fecha_inicio": "2026-09-30", "fecha_fin": "2026-10-01"},
+    {"fecha_inicio": "2026-10-03", "fecha_fin": "2026-10-01"},
+    {"fecha_inicio": "2026-10-01", "fecha_fin": "2026-10-03", "agencias": [" "]},
+])
+def test_contrato_rechaza_filtros_invalidos(datos):
+    with pytest.raises(ValidationError):
+        InputResumenRecuperacion(**datos)
 
 
 class FakeCollection:
-    def __init__(self, documento=None) -> None:
-        self.documento = documento
-        self.pipeline = None
+    def __init__(self, filas):
+        self.filas = filas
+        self.llamadas = []
 
-    def aggregate(self, pipeline, allowDiskUse=False):
-        self.pipeline = pipeline
-        assert allowDiskUse is True
-        return [self.documento] if self.documento else []
-
-
-class FakeDatabase:
-    def __init__(self, historico, actual) -> None:
-        self.historico = historico
-        self.actual = actual
-
-    def __getitem__(self, nombre):
-        if nombre == "RecuperacionCrediticia":
-            return self.historico
-        if nombre == "RecuperacionCrediticiaActual":
-            return self.actual
-        return FakeCollection()
+    def aggregate(self, pipeline, **opciones):
+        self.llamadas.append((pipeline, opciones))
+        return iter(self.filas)
 
 
-def test_repositorio_agrupa_dimensiones_en_un_solo_facet() -> None:
-    documento = {
-        "agencia": [
-            {
-                "dimension": "MATRIZ",
-                "numero_operaciones": 2,
-                "monto_recuperado": 125.5,
-            }
-        ],
-        "asesor": [
-            {
-                "agencia": "MATRIZ",
-                "dimension": "ANA ASESORA",
-                "numero_operaciones": 2,
-                "monto_recuperado": 125.5,
-            }
-        ],
-        "cargo": [],
-        "tipo_prestamo": [],
-        "producto": [],
-        "condicion": [],
-        "tipo_cobro": [],
-        "abogado": [],
-        "asesores_disponibles": [{"valor": "ANA ASESORA"}],
-        "cargos_disponibles": [{"valor": "GESTOR DE COBRANZAS"}],
-        "desglose_cobros": [
-            {
-                "tipo_dimension": "agencia",
-                "dimension": "MATRIZ",
-                "agencia": None,
-                "asesor": "ANA ASESORA",
-                "cargo": "GESTOR DE COBRANZAS",
-                "tipo_cobro": "CAPITAL",
-                "numero_rubros": 2,
-                "monto_recuperado": 125.5,
-            }
-        ],
-        "filtro_agencia": [
-            {
-                "dimension": "MATRIZ",
-                "asesor": "ANA ASESORA",
-                "cargo": "GESTOR DE COBRANZAS",
-                "numero_operaciones": 2,
-                "monto_recuperado": 125.5,
-            }
-        ],
-        **{f"filtro_{dimension}": [] for dimension in DIMENSIONES if dimension != "agencia"},
-    }
-    historico = FakeCollection(documento)
-    repository = MongoRecuperacionHistoricoRepository(
-        FakeDatabase(historico, FakeCollection())  # type: ignore[arg-type]
-    )
+def repositorio_con_filas():
+    historico = FakeCollection([{"_id": "20261001", "CAPITAL": Decimal128("12.34")}])
+    actual = FakeCollection([{"_id": "20261003", "INTERES": Decimal128("1.20")}])
+    colecciones = {"RecuperacionCrediticia": historico, "RecuperacionCrediticiaActual": actual}
+    return MongoResumenRecuperacionRepository(colecciones), historico, actual
 
-    resultado = repository.obtener_resumen_negocios(
-        date(2026, 8, 1),
-        date(2026, 8, 25),
-        date(2026, 8, 31),
-        ["MATRIZ"],
-        incluir_desglose_cobros=True,
-        incluir_cubos_filtro=True,
-    )
 
-    assert resultado.agrupaciones["agencia"][0].monto_recuperado == 125.5
-    assert resultado.agrupaciones["asesor"][0].agencia == "MATRIZ"
-    assert resultado.asesores_disponibles == {"ANA ASESORA"}
-    assert resultado.cargos_disponibles == {"GESTOR DE COBRANZAS"}
-    assert resultado.cubos_filtro[0].dimension == "MATRIZ"
-    assert resultado.desglose_cobros[0].numero_rubros == 2
-    facet = next(etapa["$facet"] for etapa in historico.pipeline if "$facet" in etapa)
-    assert set(facet) == {
-        *DIMENSIONES,
-        "asesores_disponibles",
-        "cargos_disponibles",
-        "desglose_cobros",
-        *(f"filtro_{dimension}" for dimension in DIMENSIONES),
-    }
-    assert historico.pipeline[0] == {
-        "$match": {"fecha_corte": {"$gte": "20260801", "$lte": "20260825"}}
+def test_repositorio_usa_dos_consultas_selectivas_sin_duplicar_hoy():
+    repo, historico, actual = repositorio_con_filas()
+    filas = repo.obtener_diario([
+        (date(2026, 10, 1), date(2026, 10, 3)),
+        (date(2026, 9, 1), date(2026, 9, 30)),
+        (date(2025, 1, 1), date(2025, 12, 31)),
+    ], date(2026, 10, 3), ["MATRIZ"])
+    assert len(historico.llamadas) == len(actual.llamadas) == 1
+    assert filas[0].montos["CAPITAL"] == Decimal("12.34")
+    assert filas[1].montos["INTERES"] == Decimal("1.20")
+    rangos = historico.llamadas[0][0][0]["$match"]["$or"]
+    assert rangos[-1]["fecha_corte"]["$lte"] == "20261002"
+    assert rangos == [
+        {"fecha_corte": {"$gte": "20250101", "$lte": "20251231"}},
+        {"fecha_corte": {"$gte": "20260901", "$lte": "20261002"}},
+    ]  # Se consultan únicamente los períodos solicitados, sin los meses intermedios.
+    assert actual.llamadas[0][0][0]["$match"] == {"fecha_corte": {"$gte": "20261003", "$lte": "20261003"}}
+    for collection in (historico, actual):
+        pipeline = collection.llamadas[0][0]
+        assert not any("$lookup" in etapa or "$unwind" in etapa for etapa in pipeline)
+
+
+def test_rango_cerrado_no_consulta_coleccion_actual_y_funde_intervalos_solapados():
+    repo, historico, actual = repositorio_con_filas()
+    repo.obtener_diario([(date(2026, 9, 1), date(2026, 9, 3)), (date(2026, 9, 2), date(2026, 9, 4))], date(2026, 10, 3), [])
+    assert actual.llamadas == []
+    assert historico.llamadas[0][0][0]["$match"] == {"fecha_corte": {"$gte": "20260901", "$lte": "20260904"}}
+
+
+def test_enero_consulta_diciembre_una_sola_vez_dentro_del_anio_anterior():
+    repo, historico, actual = repositorio_con_filas()
+    repo.obtener_diario([
+        (date(2026, 1, 1), date(2026, 1, 3)),
+        (date(2025, 12, 1), date(2025, 12, 31)),
+        (date(2025, 1, 1), date(2025, 12, 31)),
+    ], date(2026, 10, 3), [])
+    assert actual.llamadas == []
+    assert len(historico.llamadas) == 1
+    assert historico.llamadas[0][0][0]["$match"] == {
+        "fecha_corte": {"$gte": "20250101", "$lte": "20260103"}
     }
 
 
-def test_repositorio_totales_por_tipo_no_hace_lookup_de_situacion() -> None:
-    historico = FakeCollection({"_id": "CAPITAL", "valor": 125.5})
-    repository = MongoRecuperacionHistoricoRepository(
-        FakeDatabase(historico, FakeCollection())  # type: ignore[arg-type]
-    )
-
-    resultado = repository.obtener_totales_por_tipo_cobro(
-        date(2026, 8, 1),
-        date(2026, 8, 25),
-        date(2026, 8, 31),
-        ["MATRIZ"],
-    )
-
-    assert resultado["CAPITAL"] == 125.5
-    assert resultado["INTERES"] == 0.0
-    assert all("$lookup" not in etapa for etapa in historico.pipeline)
-    assert {"$match": {"agencia": {"$in": ["MATRIZ"]}}} in historico.pipeline
+def test_error_del_repositorio_devuelve_error_controlado():
+    def fallar(*args):
+        raise RuntimeError("Error interno de conexión")
+    with pytest.raises(HTTPException) as exc:
+        ResumenRecuperacionService(SimpleNamespace(obtener_diario=fallar)).obtener_resumen(
+            InputResumenRecuperacion(fecha_inicio="2026-10-01", fecha_fin="2026-10-03"), contexto(),
+        )
+    assert exc.value.status_code == 500
+    assert "conexión" not in exc.value.detail
 
 
-def test_repositorio_detalle_une_hoy_y_pagina_despues_de_filtrar() -> None:
-    documento = {
-        "estadisticas": [
-            {"total_registros": 1, "total_recuperado_periodo": 125.5}
-        ],
-        "items": [
-            {
-                "numero_prestamo": "2026040208325",
-                "fecha_ultimo_cobro": "20260831",
-                "total_recuperado_periodo": 125.5,
-            }
-        ],
-    }
-    historico = FakeCollection(documento)
-    repository = MongoRecuperacionHistoricoRepository(
-        FakeDatabase(historico, FakeCollection())  # type: ignore[arg-type]
-    )
-
-    resultado = repository.obtener_detalle_resumen_negocios(
-        fecha_desde=date(2026, 8, 1),
-        fecha_hasta=date(2026, 8, 31),
-        fecha_actual=date(2026, 8, 31),
-        agencias=["MATR"],
-        dimension="cargo",
-        valor_dimension="GESTOR DE COBRANZAS",
-        asesores=["ANA ASESORA"],
-        cargos=[],
-        offset=20,
-        limite=20,
-    )
-
-    assert resultado.total_registros == 1
-    assert resultado.items[0].fecha_ultimo_cobro == date(2026, 8, 31)
-    assert any("$unionWith" in etapa for etapa in historico.pipeline)
-    facet = next(etapa["$facet"] for etapa in historico.pipeline if "$facet" in etapa)
-    assert facet["items"][1:] == [
-        {"$skip": 20},
-        {"$limit": 20},
-        {
-            "$project": {
-                "_id": 0,
-                "numero_prestamo": "$_id",
-                "fecha_ultimo_cobro": 1,
-                "total_recuperado_periodo": 1,
-            }
-        },
-    ]
+def test_endpoint_con_bearer_devuelve_resumen_y_diario():
+    originales = app.dependency_overrides.copy()
+    app.dependency_overrides[get_current_auth_context] = contexto
+    app.dependency_overrides[get_resumen_recuperacion_service] = lambda: ResumenRecuperacionService(FakeRepository())
+    try:
+        client = TestClient(app)
+        response = client.post("/negocios/recuperacion/resumen", json={"fecha_inicio": "2026-10-01", "fecha_fin": "2026-10-03"}, headers={"Authorization": "Bearer token"})
+        assert response.status_code == 200
+        assert len(response.json()["diario"]) == 3
+        assert response.json()["anio_anterior"]["fecha_inicio"] == "2025-01-01"
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(originales)
 
 
-class FakeSqlResult:
-    def __init__(self, rows) -> None:
-        self.rows = rows
-
-    def mappings(self):
-        return self.rows
-
-
-class FakeSqlSession:
-    def __init__(self, rows) -> None:
-        self.rows = rows
-        self.params = None
-        self.statement = None
-
-    def execute(self, statement, params):
-        self.statement = statement
-        self.params = params
-        return FakeSqlResult(self.rows)
+@pytest.mark.parametrize("ruta", ["resumen", "resumen-actual"])
+def test_endpoint_requiere_autenticacion(ruta):
+    client = TestClient(app)
+    response = client.post(f"/negocios/recuperacion/{ruta}", json={"fecha_inicio": "2026-10-01", "fecha_fin": "2026-10-03"})
+    assert response.status_code in (401, 403)
 
 
-def test_repositorio_sql_consulta_solo_los_prestamos_de_la_pagina() -> None:
-    db = FakeSqlSession(
-        [
-            {
-                "NumeroPrestamo": "2026040208325",
-                "NumeroSocio": 12,
-                "Nombre": "JOSE TOALOMBO",
-                "EstadoPrestamo": "AL DIA",
-                "CalificacionActual": "A-1",
-                "SaldoCapital": 17024.46,
-                "PendientePago": 0,
-                "ValorAlDiaMasCuotaActual": 2214.21,
-                "CuotasPagadas": 4,
-                "TotalCuotas": 12,
-                "EsDiferido": 0,
-            }
+@pytest.mark.parametrize("agencias", [[], [" matriz ", "MATRIZ"]])
+@pytest.mark.parametrize("inicio,fin,mes_inicio,mes_fin", [
+    (date(2026, 8, 15), date(2026, 8, 25), date(2026, 7, 1), date(2026, 7, 31)),
+    (date(2026, 10, 1), date(2026, 10, 3), date(2026, 9, 1), date(2026, 9, 30)),
+])
+def test_endpoints_comparten_comparativos_con_mes_y_anio_completos(
+    inicio, fin, mes_inicio, mes_fin, agencias,
+):
+    repo = FakeRepository([
+        RecuperacionDiaria(inicio, {"CAPITAL": Decimal("600")}),
+        RecuperacionDiaria(fin, {"INTERES": Decimal("400")}),
+        RecuperacionDiaria(mes_inicio, {"CAPITAL": Decimal("1000")}),
+        RecuperacionDiaria(mes_fin, {"INTERES": Decimal("2000")}),
+        RecuperacionDiaria(date(2025, 1, 1), {"CAPITAL": Decimal("1500")}),
+        RecuperacionDiaria(date(2025, 12, 31), {"INTERES": Decimal("2500")}),
+        RecuperacionDiaria(date(2024, 12, 31), {"CAPITAL": Decimal("999")}),
+    ])
+    originales = app.dependency_overrides.copy()
+    app.dependency_overrides[get_current_auth_context] = contexto
+    app.dependency_overrides[get_resumen_recuperacion_service] = lambda: ResumenRecuperacionService(repo)
+    try:
+        client = TestClient(app)
+        payload = {"fecha_inicio": inicio.isoformat(), "fecha_fin": fin.isoformat(), "agencias": agencias}
+        respuestas = [
+            client.post(f"/negocios/recuperacion/{ruta}", json=payload, headers={"Authorization": "Bearer token"})
+            for ruta in ("resumen-actual", "resumen")
         ]
-    )
-    repository = SqlDetalleRecuperacionRepository(db)  # type: ignore[arg-type]
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(originales)
 
-    resultado = repository.obtener_datos_actuales(["2026040208325"])
-
-    assert db.params == {"numeros_prestamo": ["2026040208325"]}
-    assert "WITH PrestamosPagina" in str(db.statement)
-    assert resultado["2026040208325"].estado_prestamo == "AL DIA"
-    assert resultado["2026040208325"].valor_al_dia_mas_cuota_actual == 2214.21
+    assert all(respuesta.status_code == 200 for respuesta in respuestas)
+    actual, resumen = [respuesta.json() for respuesta in respuestas]
+    assert "diario" not in actual
+    assert actual == {clave: valor for clave, valor in resumen.items() if clave != "diario"}
+    assert actual["agencias"] == (["MATRIZ"] if agencias else [])
+    assert actual["consolidado"] is (not agencias)
+    assert actual["actual"]["recuperacion_total"] == 1000
+    assert actual["mes_anterior"]["fecha_inicio"] == mes_inicio.isoformat()
+    assert actual["mes_anterior"]["fecha_fin"] == mes_fin.isoformat()
+    assert actual["mes_anterior"]["recuperacion_total"] == 3000
+    assert actual["anio_anterior"]["fecha_inicio"] == "2025-01-01"
+    assert actual["anio_anterior"]["fecha_fin"] == "2025-12-31"
+    assert actual["anio_anterior"]["recuperacion_total"] == 4000
+    assert len(resumen["diario"]) == (fin - inicio).days + 1
+    assert sum(dia["recuperacion_total"] for dia in resumen["diario"]) == 1000
+    assert repo.llamadas == [
+        ([(inicio, fin), (mes_inicio, mes_fin), (date(2025, 1, 1), date(2025, 12, 31))], date(2026, 10, 3), ["MATRIZ"] if agencias else [])
+    ] * 2

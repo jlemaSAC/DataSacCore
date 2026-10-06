@@ -130,6 +130,8 @@ class AuthService:
             usuario,
             fecha_sistema,
             usuario_data.nombre_agencia or "",
+            cargo=usuario_data.cargo,
+            id_cargo=usuario_data.id_cargo,
         )
 
         return LoginResponse(
@@ -137,6 +139,8 @@ class AuthService:
             codigo=usuario_data.usuario,
             nombre=usuario_data.nombre,
             identificacion=usuario_data.identificacion or "",
+            cargo=usuario_data.cargo,
+            id_cargo=usuario_data.id_cargo,
             id_agencia=usuario_data.id_agencia,
             nombre_agencia=usuario_data.nombre_agencia or "",
             activo=usuario_data.activo,

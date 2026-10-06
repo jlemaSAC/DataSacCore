@@ -8,6 +8,7 @@ from app.modules.negocios.colocacion.resumen.schemas import (
     InputDetalleResumenColocacion,
     InputResumenActualColocacion,
     InputResumenColocacion,
+    ResumenActualColocacionConAdjudicadosResponse,
     ResumenActualColocacionResponse,
     ResumenColocacionResponse,
 )
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/colocacion", tags=["Negocios - Colocacion"])
 
 
 @router.post(
-    "/resumen",
+    "/evaluacion-colocacion",
     response_model=ResumenColocacionResponse,
     summary="Obtener resumen comparativo de colocación por agencia",
 )
@@ -44,7 +45,23 @@ def obtener_resumen_actual_colocacion(
 
 
 @router.post(
-    "/resumen/detalle",
+    "/resumen-actual-adjudicados",
+    response_model=ResumenActualColocacionConAdjudicadosResponse,
+    summary="Comparar colocación y listar préstamos adjudicados por agencia",
+)
+def obtener_resumen_actual_colocacion_con_adjudicados(
+    body: InputResumenActualColocacion,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: ResumenColocacionService = Depends(get_resumen_colocacion_service),
+) -> ResumenActualColocacionConAdjudicadosResponse:
+    return service.obtener_resumen_actual_con_adjudicados(
+        input_data=body,
+        auth_context=auth_context,
+    )
+
+
+@router.post(
+    "/evaluacion-colocacion/detalle",
     response_model=DetalleResumenColocacionResponse,
     summary="Obtener operaciones de una fila del resumen de colocación",
 )

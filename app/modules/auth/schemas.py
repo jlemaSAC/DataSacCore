@@ -35,6 +35,8 @@ class LoginResponse(BaseModel):
     puede_ingresar: bool
     nombre: str
     identificacion: str
+    cargo: str | None = None
+    id_cargo: int | None = None
     codigo: str
     id_agencia: int
     nombre_agencia: str
@@ -110,6 +112,8 @@ class UsuarioTokenPayload(BaseModel):
     usuario: str
     id_agencia: int
     nombre_agencia: str = ""
+    cargo: str | None = None
+    id_cargo: int | None = None
     fecha_sistema: date | datetime
 
     @field_validator("fecha_sistema", mode="before")

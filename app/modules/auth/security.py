@@ -27,6 +27,8 @@ class JwtTokenService:
         usuario: Usuario,
         fecha_sistema: date | datetime,
         nombre_agencia: str,
+        cargo: str | None = None,
+        id_cargo: int | None = None,
     ) -> str:
         settings = get_jwt_settings()
         now = datetime.now()
@@ -36,6 +38,8 @@ class JwtTokenService:
             "usuario": usuario.nombre,
             "id_agencia": usuario.id_agencia,
             "nombre_agencia": nombre_agencia,
+            "cargo": cargo,
+            "id_cargo": id_cargo,
             "fecha_sistema": fecha_sistema.isoformat(),
             "iat": now.timestamp(),
             "exp": expires_at.timestamp(),

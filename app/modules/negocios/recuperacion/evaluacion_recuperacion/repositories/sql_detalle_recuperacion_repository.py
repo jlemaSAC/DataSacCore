@@ -1,7 +1,7 @@
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
-from app.modules.negocios.recuperacion.resumen.domain import (
+from app.modules.negocios.recuperacion.evaluacion_recuperacion.domain import (
     DatosOperativosRecuperacion,
 )
 
