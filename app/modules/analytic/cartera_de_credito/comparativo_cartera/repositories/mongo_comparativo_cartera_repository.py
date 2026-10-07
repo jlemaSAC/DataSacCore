@@ -101,6 +101,37 @@ class MongoComparativoCarteraRepository:
         )
         return next(iter(self._mapear(rows).values()), None)
 
+    def obtener_por_agencia(
+        self,
+        fecha_corte: date,
+        filtrar_diferidos: bool | None,
+        *,
+        actual: bool,
+    ) -> dict[str, TotalesCartera]:
+        """Obtiene los indicadores de cada agencia sin aplicar el filtro de agencias."""
+        collection = self.actual if actual else self.historico
+        match = self._construir_match(
+            agencias=[],
+            filtrar_diferidos=filtrar_diferidos,
+            historico=not actual,
+        )
+        fecha_formateada = fecha_corte.strftime("%Y%m%d")
+        if not actual:
+            match["fecha_corte"] = fecha_formateada
+        pipeline = self._pipeline_por_agencia(
+            match,
+            preferir_provision_calculada=not actual,
+        )
+        rows = collection.aggregate(
+            pipeline,
+            **(
+                {"hint": "fecha_corte_1_estado_prestamo_1", "allowDiskUse": True}
+                if not actual
+                else {}
+            ),
+        )
+        return self._mapear_por_agencia(rows, fecha_corte)
+
     @staticmethod
     def _construir_match(
         *,
@@ -153,6 +184,58 @@ class MongoComparativoCarteraRepository:
                 }
             },
         ]
+
+    @staticmethod
+    def _pipeline_por_agencia(
+        match: MongoDocument,
+        *,
+        preferir_provision_calculada: bool,
+    ) -> list[MongoDocument]:
+        return [
+            {"$match": match},
+            {
+                "$project": {
+                    "agencia": "$Agencia",
+                    "saldo_capital": _numero("SaldoCapital"),
+                    "capital_no_devenga": _numero("CapitalNoDevenga"),
+                    "capital_vencido": _numero("CapitalVencido"),
+                    "provision_requerida": _provision_requerida(
+                        preferir_calculada=preferir_provision_calculada
+                    ),
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$agencia",
+                    "operaciones": {"$sum": 1},
+                    "saldo_capital": {"$sum": "$saldo_capital"},
+                    "capital_no_devenga": {"$sum": "$capital_no_devenga"},
+                    "capital_vencido": {"$sum": "$capital_vencido"},
+                    "provision_requerida": {"$sum": "$provision_requerida"},
+                }
+            },
+            {"$sort": {"_id": 1}},
+        ]
+
+    @staticmethod
+    def _mapear_por_agencia(
+        rows: Iterable[MongoDocument], fecha_corte: date
+    ) -> dict[str, TotalesCartera]:
+        resultado: dict[str, TotalesCartera] = {}
+        for row in rows:
+            agencia = str(row.get("_id") or "").strip()
+            if not agencia:
+                continue
+            resultado[agencia] = TotalesCartera(
+                fecha_corte=fecha_corte,
+                operaciones=int(row.get("operaciones") or 0),
+                saldo_capital=float(row.get("saldo_capital") or 0),
+                capital_vigente=0.0,
+                capital_no_devenga=float(row.get("capital_no_devenga") or 0),
+                capital_vencido=float(row.get("capital_vencido") or 0),
+                provision_requerida=float(row.get("provision_requerida") or 0),
+            )
+        return resultado
 
     @staticmethod
     def _mapear(rows: Iterable[MongoDocument]) -> dict[date, TotalesCartera]:
