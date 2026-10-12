@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 
 from app.db.mongo import get_mongo_datasac_db_sync
 from app.db.session import get_db
+from app.modules.negocios.cartera_de_credito.cartera_improductiva.repositories.sql_clientes_cartera_improductiva_repository import (
+    SqlClientesCarteraImproductivaRepository,
+)
 from app.modules.negocios.cartera_de_credito.cartera_improductiva.service import (
     CarteraImproductivaService,
 )
@@ -22,4 +25,5 @@ def get_cartera_improductiva_service(
             get_mongo_datasac_db_sync()
         ),
         sql_repository=SqlSituacionCrediticiaAsesoresRepository(db),
+        clientes_repository=SqlClientesCarteraImproductivaRepository(db),
     )

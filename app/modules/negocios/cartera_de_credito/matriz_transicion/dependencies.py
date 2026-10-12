@@ -7,6 +7,9 @@ from app.modules.negocios.cartera_de_credito.matriz_transicion.repositories.mong
     MongoMatrizTransicionRepository,
 )
 from app.modules.negocios.cartera_de_credito.matriz_transicion.service import MatrizTransicionService
+from app.modules.negocios.recuperacion.recaudacion_acumulada.repositories.mongo_recaudacion_acumulada_repository import (
+    MongoRecaudacionAcumuladaRepository,
+)
 from app.modules.negocios.recuperacion.recaudacion_acumulada.repositories.sql_detalle_cuotas_repository import (
     SqlDetalleCuotasRepository,
 )
@@ -21,7 +24,9 @@ def get_matriz_transicion_service() -> MatrizTransicionService:
 def get_matriz_transicion_prestamos_service(
     db: Session = Depends(get_db),
 ) -> MatrizTransicionService:
+    mongo_db = get_mongo_datasac_db_sync()
     return MatrizTransicionService(
-        mongo_repository=MongoMatrizTransicionRepository(get_mongo_datasac_db_sync()),
+        mongo_repository=MongoMatrizTransicionRepository(mongo_db),
         sql_repository=SqlDetalleCuotasRepository(db),
+        recuperacion_repository=MongoRecaudacionAcumuladaRepository(mongo_db),
     )

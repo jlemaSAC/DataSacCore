@@ -10,6 +10,7 @@ from app.modules.analytic.cartera_de_credito.comparativo_cartera.dependencies im
     get_comparativo_cartera_service,
 )
 from app.modules.analytic.cartera_de_credito.comparativo_cartera.domain import (
+    PrestamoResumenCartera,
     TotalesCartera,
 )
 from app.modules.analytic.cartera_de_credito.comparativo_cartera.repositories.mongo_comparativo_cartera_repository import (
@@ -62,6 +63,7 @@ class FakeRepository:
         self.filtrar_diferidos: bool | None = None
         self.resumen_agencias_fecha: date | None = None
         self.resumen_agencias_actual: bool | None = None
+        self.resumen_filtros: tuple | None = None
 
     def obtener_historico(
         self,
@@ -107,6 +109,25 @@ class FakeRepository:
                 provision_requerida=10,
             ),
         }
+
+    def obtener_prestamos_resumen(
+        self, fecha_corte: date, agencias: list[str], filtrar_diferidos: bool | None,
+        *, actual: bool,
+    ) -> list[PrestamoResumenCartera]:
+        self.resumen_filtros = (fecha_corte, agencias, filtrar_diferidos, actual)
+        return [
+            PrestamoResumenCartera(
+                numero_prestamo=str(indice), cliente=cliente,
+                dimensiones={"agencia": "MATRIZ", "producto": producto},
+                saldo_capital=saldo, cartera_improductiva=saldo * 0.15,
+                provision_requerida=saldo * 0.075,
+            )
+            for indice, (cliente, producto, saldo) in enumerate([
+                ("1", "MICROCREDITO", 600),
+                ("1", "MICROCREDITO", 200),
+                ("2", "CONSUMO", 200),
+            ])
+        ]
 
 
 class FakeCache:
@@ -442,6 +463,13 @@ def test_endpoint_devuelve_comparativo_y_requiere_bearer() -> None:
     assert body["puntos"][0]["actual"]["saldo_capital"] == 1000
     assert body["puntos"][0]["mes_anterior"]["fecha_corte"] == "2026-08-31"
     assert body["puntos"][0]["anio_anterior"]["fecha_corte"] == "2025-12-31"
+    assert body["fecha_corte_resumen"] == "2026-09-16"
+    assert len(body["resumen_por_dimension"]) == 8
+    assert body["resumen_por_dimension"][0]["filas"] == [{
+        "campo": "MATRIZ", "saldo_capital": 1000,
+        "participacion_saldo_porcentaje": 100, "operaciones": 3, "clientes": 2,
+        "provision_requerida": 75, "morosidad_porcentaje": 15,
+    }]
 
 
 def test_endpoint_de_negocios_devuelve_resumen_actual_de_cartera() -> None:
@@ -469,3 +497,126 @@ def test_endpoint_de_negocios_devuelve_resumen_actual_de_cartera() -> None:
     assert resumen[0]["morosidad_porcentaje"] == 15
     assert resumen[0]["cartera_improductiva"] == 150
     assert resumen[0]["provision_requerida"] == 75
+
+
+@pytest.mark.parametrize('actual,diferidos', [(True, True), (True, False), (False, True), (False, False), (False, None)])
+def test_repositorio_tabla_aplica_filtros_y_fuente(actual: bool, diferidos: bool | None) -> None:
+    database = FakeMongoDatabase()
+    nombre = 'SituacionCrediticiaActual' if actual else 'SituacionCrediticia'
+    database.collections[nombre].rows = [{
+        'numero_prestamo': '001', 'cliente': '17',
+        'dimensiones': {'agencia': 'MATRIZ'}, 'saldo_capital': 100,
+        'cartera_improductiva': 10, 'provision_requerida': 2,
+    }]
+    repository = MongoComparativoCarteraRepository(database)  # type: ignore[arg-type]
+    rows = repository.obtener_prestamos_resumen(date(2026, 9, 16), ['MATRIZ'], diferidos, actual=actual)
+    collection = database.collections[nombre]
+    match = collection.pipeline[0]['$match']
+    assert match['Agencia'] == {'$in': ['MATRIZ']}
+    assert match['EstadoPrestamo'] == {'$ne': 'CANCELADO'}
+    assert ('fecha_corte' in match) is not actual
+    if actual:
+        assert match['EsDiferido'] is diferidos
+        assert collection.pipeline[1]['$project']['provision_requerida']['$convert']['input'] == '$ProvisionRequerida'
+    else:
+        assert match['fecha_corte'] == '20260916'
+        assert collection.options['hint'] == 'fecha_corte_1_estado_prestamo_1'
+        if diferidos is not None:
+            assert ('$in' if diferidos else '$nin') in match['ESDIFERIDO']
+    assert rows[0].cliente == '17'
+    assert rows[0].numero_prestamo == '001'
+
+
+def test_tabla_cuenta_clientes_distintos_y_calcula_participacion_y_mora() -> None:
+    repository = FakeRepository()
+    service = ComparativoCarteraService(repository)  # type: ignore[arg-type]
+    response = service.obtener_comparativo(InputComparativoCartera(
+        fecha_desde=date(2026, 9, 16), fecha_hasta=date(2026, 9, 17),
+        agencias=['MATRIZ'], filtrar_diferidos=True,
+    ), fake_auth_context())
+    assert repository.resumen_filtros == (date(2026, 9, 17), ['MATRIZ'], True, True)
+    productos = next(item.filas for item in response.resumen_por_dimension if item.dimension == 'producto')
+    assert [item.campo for item in productos] == ['MICROCREDITO', 'CONSUMO']
+    assert [item.participacion_saldo_porcentaje for item in productos] == [80, 20]
+    assert productos[0].operaciones == 2
+    assert productos[0].clientes == 1
+    assert productos[0].morosidad_porcentaje == 15
+    responsable = next(item.filas for item in response.resumen_por_dimension if item.dimension == 'usuario_responsable_control')
+    assert responsable[0].campo == 'SIN DATOS'
+
+
+def test_tabla_usa_ultimo_corte_disponible_sin_sumar_cortes_diarios() -> None:
+    class RepositorySinUltimoCorte(FakeRepository):
+        def obtener_actual(self, *args, **kwargs):
+            return None
+    repository = RepositorySinUltimoCorte()
+    service = ComparativoCarteraService(repository)  # type: ignore[arg-type]
+    response = service.obtener_comparativo(InputComparativoCartera(
+        fecha_desde=date(2026, 9, 16), fecha_hasta=date(2026, 9, 17),
+    ), fake_auth_context())
+    assert response.fecha_corte_resumen == date(2026, 9, 16)
+    assert repository.resumen_filtros == (date(2026, 9, 16), [], None, False)
+    assert response.resumen_por_dimension[0].filas[0].saldo_capital == 1000
+
+
+def test_tabla_vacia_no_consulta_detalle_ni_sql() -> None:
+    class RepositorySinDatos(FakeRepository):
+        def obtener_historico(self, *args, **kwargs):
+            return {}
+    repository = RepositorySinDatos()
+    response = ComparativoCarteraService(repository).obtener_comparativo(  # type: ignore[arg-type]
+        InputComparativoCartera(fecha_desde=date(2026, 9, 16), fecha_hasta=date(2026, 9, 16)),
+        fake_auth_context(),
+    )
+    assert response.fecha_corte_resumen is None
+    assert response.resumen_por_dimension == []
+    assert repository.resumen_filtros is None
+
+
+def test_tabla_saldo_cero_no_divide_para_cero() -> None:
+    rows = ComparativoCarteraService._resumir_dimensiones([
+        PrestamoResumenCartera('1', '2', {'agencia': ''}, 0, 0, 0),
+    ], {})
+    fila = rows[0].filas[0]
+    assert fila.campo == 'SIN DATOS'
+    assert fila.participacion_saldo_porcentaje == 0
+    assert fila.morosidad_porcentaje == 0
+
+
+def test_tabla_completa_clientes_del_snapshot_desde_sql() -> None:
+    class RepositorySinClientes(FakeRepository):
+        def obtener_prestamos_resumen(self, *args, **kwargs):
+            return [PrestamoResumenCartera(str(i), None, {'agencia': 'MATRIZ'}, 100, 10, 5) for i in range(2)]
+    class ClientesRepository:
+        def obtener_clientes(self, numeros):
+            assert numeros == ['0', '1']
+            return {'0': '17', '1': '17'}
+    service = ComparativoCarteraService(RepositorySinClientes(), clientes_repository=ClientesRepository())  # type: ignore[arg-type]
+    response = service.obtener_comparativo(InputComparativoCartera(
+        fecha_desde=date(2026, 9, 17), fecha_hasta=date(2026, 9, 17),
+    ), fake_auth_context())
+    assert response.resumen_por_dimension[0].filas[0].clientes == 1
+    assert response.resumen_por_dimension[0].filas[0].operaciones == 2
+
+
+def test_sql_clientes_parametriza_y_divide_lotes_sin_duplicar_numeros() -> None:
+    from app.modules.analytic.cartera_de_credito.comparativo_cartera.repositories.sql_clientes_cartera_repository import SqlClientesCarteraRepository
+    class Result:
+        def mappings(self):
+            return [{'numero_prestamo': '001', 'numero_cliente': 17}]
+    class Database:
+        def __init__(self):
+            self.calls = []
+        def execute(self, statement, params):
+            assert 'INNER JOIN COLOCACION.PRESTAMO_CLIENTE' in str(statement)
+            assert 'PC.ESPRINCIPAL = 1 AND PC.ACTIVO = 1' in str(statement)
+            self.calls.append(params['numeros'])
+            return Result()
+    database = Database()
+    repository = SqlClientesCarteraRepository(database)  # type: ignore[arg-type]
+    repository.batch_size = 2
+    assert repository.obtener_clientes(['003', '001', '002', '001']) == {'001': '17'}
+    assert database.calls == [['001', '002'], ['003']]
+    database.calls.clear()
+    assert repository.obtener_clientes([]) == {}
+    assert database.calls == []
