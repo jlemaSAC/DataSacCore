@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -82,3 +83,40 @@ class CarteraImproductivaResponse(BaseModel):
     faltantes_en_fecha_fin: list[str]
     faltantes_en_fecha_inicio: list[str]
     faltantes_en_dia_anterior_fecha_fin: list[str]
+
+
+class CarteraImproductivaGrupo(BaseModel):
+    codigo_usuario: str = Field(min_length=1)
+    agencia: str | None = None
+
+
+class CarteraImproductivaPrestamosRequest(CarteraImproductivaRequest):
+    grupos: list[CarteraImproductivaGrupo] = Field(min_length=1)
+    solo_improductivos: bool = False
+    orden_por: str = Field(
+        default="ValoresFechaFin__CarteraImproductiva",
+        pattern=(
+            r"^(numero_prestamo|nombre_cliente|nombre|agencia|"
+            r"variacionDiaAnterior|variacionCartera|"
+            r"variacionMorosidadDiaAnterior|variacionMorosidadCartera|"
+            r"Valores(FechaInicio|FechaFin|DiaAnteriorFechaFin)__"
+            r"(CarteraImproductiva|MorosidadPorcentaje))$"
+        ),
+    )
+    orden: Literal[1, -1] = -1
+
+
+class CarteraImproductivaPrestamo(CarteraImproductivaComparacionAsesor):
+    numero_prestamo: str = Field(alias="NumeroPrestamo")
+    nombre_cliente: str | None = Field(default=None, alias="NombreCliente")
+    numero_socio: str | None = Field(default=None, alias="NumeroSocio")
+
+
+class CarteraImproductivaPrestamosResponse(BaseModel):
+    fecha_corte_fecha_fin: str
+    fecha_corte_fecha_inicio: str
+    fecha_corte_dia_anterior_fecha_fin: str
+    prestamos: list[CarteraImproductivaPrestamo]
+    totales: CarteraImproductivaComparacionAsesor
+    total_seleccion: int
+    total_resultados: int

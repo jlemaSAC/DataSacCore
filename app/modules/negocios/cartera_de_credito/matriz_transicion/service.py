@@ -114,29 +114,16 @@ def _texto(value: Any, default: str = "") -> str:
     return texto or default
 
 
-def _a_fecha(value: Any) -> date | None:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if not isinstance(value, str):
-        return None
-    texto = value.strip()
-    for formato in ("%Y-%m-%d", "%Y%m%d", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(texto, formato).date()
-        except ValueError:
-            continue
-    try:
-        return datetime.fromisoformat(texto.replace("Z", "+00:00")).date()
-    except ValueError:
-        return None
-
-
 class MatrizTransicionService:
-    def __init__(self, mongo_repository: Any, sql_repository: Any | None = None) -> None:
+    def __init__(
+        self,
+        mongo_repository: Any,
+        sql_repository: Any | None = None,
+        recuperacion_repository: Any | None = None,
+    ) -> None:
         self.mongo_repository = mongo_repository
         self.sql_repository = sql_repository
+        self.recuperacion_repository = recuperacion_repository
 
     def obtener(
         self,
@@ -278,12 +265,33 @@ class MatrizTransicionService:
                 for numero, _, actual in seleccionados
             ]
         )
+        numeros_seleccionados = [numero for numero, _, _ in seleccionados]
+        recuperaciones = (
+            self.recuperacion_repository.obtener_recuperaciones(
+                fecha_inicio=request.fecha_corte_anterior.date(),
+                fecha_fin=request.fecha_corte_nuevo.date(),
+                fecha_actual=hoy or datetime.now().date(),
+                numeros_prestamo=numeros_seleccionados,
+            )
+            if self.recuperacion_repository is not None
+            else {}
+        )
         return [
             self._construir_prestamo(
                 numero=numero,
                 anterior=previo,
                 nuevo=actual,
                 detalle=detalles.get(numero),
+                fecha_ultimo_pago=(
+                    recuperaciones[numero].fecha_ultimo_pago
+                    if numero in recuperaciones
+                    else None
+                ),
+                total_recuperado=(
+                    recuperaciones[numero].total_recuperado
+                    if numero in recuperaciones
+                    else 0.0
+                ),
             )
             for numero, previo, actual in sorted(seleccionados, key=lambda item: item[0])
         ]
@@ -459,6 +467,8 @@ class MatrizTransicionService:
         anterior: dict[str, Any] | None,
         nuevo: dict[str, Any],
         detalle: DetalleCuotaPrestamo | None,
+        fecha_ultimo_pago: date | None,
+        total_recuperado: float,
     ) -> PrestamoRecaudadoAcumulado:
         anterior = anterior or {}
         detalle = detalle or DetalleCuotaPrestamo(numero_prestamo=numero)
@@ -549,10 +559,8 @@ class MatrizTransicionService:
             provision_cierre_mes=round(provision_anterior, 2),
             provision_actual=round(provision_actual, 2),
             variacion_provisiones=round(provision_actual - provision_anterior, 2),
-            dia_ultimo_pago=_a_fecha(
-                nuevo.get("FechaUltimoPago", nuevo.get("UltimoPago"))
-            ),
-            total_recuperado=0.0,
+            dia_ultimo_pago=fecha_ultimo_pago,
+            total_recuperado=round(total_recuperado, 2),
             pendiente_pago=round(
                 _to_float(nuevo.get("ValorParaEstarAlDia")) + gasto_cobranza,
                 2,

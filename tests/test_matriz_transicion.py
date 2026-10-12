@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from app.modules.negocios.cartera_de_credito.matriz_transicion.schemas import (
     MatrizTransicionFiltrosRequest,
@@ -10,6 +10,7 @@ from app.modules.negocios.cartera_de_credito.matriz_transicion.service import (
 )
 from app.modules.negocios.recuperacion.recaudacion_acumulada.domain import (
     DetalleCuotaPrestamo,
+    RecuperacionPrestamo,
 )
 
 
@@ -125,9 +126,49 @@ class FakeSqlDetalleCuotasRepository:
         }
 
 
-def _service(historicos: dict[str, list[dict]], actuales: list[dict]) -> tuple[MatrizTransicionService, FakeMongoRepository]:
+class FakeRecuperacionRepository:
+    def __init__(self, recuperaciones: dict[str, RecuperacionPrestamo]) -> None:
+        self.recuperaciones = recuperaciones
+        self.consultas: list[dict[str, object]] = []
+
+    def obtener_recuperaciones(
+        self,
+        *,
+        fecha_inicio: date,
+        fecha_fin: date,
+        fecha_actual: date,
+        numeros_prestamo: list[str],
+    ) -> dict[str, RecuperacionPrestamo]:
+        self.consultas.append(
+            {
+                "fecha_inicio": fecha_inicio,
+                "fecha_fin": fecha_fin,
+                "fecha_actual": fecha_actual,
+                "numeros_prestamo": numeros_prestamo,
+            }
+        )
+        return {
+            numero: self.recuperaciones[numero]
+            for numero in numeros_prestamo
+            if numero in self.recuperaciones
+        }
+
+
+def _service(
+    historicos: dict[str, list[dict]],
+    actuales: list[dict],
+    *,
+    recuperaciones: dict[str, RecuperacionPrestamo] | None = None,
+) -> tuple[MatrizTransicionService, FakeMongoRepository]:
     mongo = FakeMongoRepository(historicos, actuales)
-    return MatrizTransicionService(mongo, FakeSqlDetalleCuotasRepository()), mongo
+    return (
+        MatrizTransicionService(
+            mongo,
+            FakeSqlDetalleCuotasRepository(),
+            FakeRecuperacionRepository(recuperaciones or {}),
+        ),
+        mongo,
+    )
 
 
 def _request(**overrides: object) -> MatrizTransicionRequest:
@@ -321,11 +362,20 @@ def test_lista_prestamos_de_una_transicion_sin_paginado() -> None:
             "ValorParaEstarAlDia": 30,
             "ValorHastaCuotaActual": 40,
             "ValorCancelarTotal": 120,
-            "FechaUltimoPago": "2026-09-20",
         },
         _document("200", 200, "C", saldo=40, provision=4),
     ]
-    service, mongo = _service(historicos, actuales)
+    service, mongo = _service(
+        historicos,
+        actuales,
+        recuperaciones={
+            "100": RecuperacionPrestamo(
+                numero_prestamo="100",
+                fecha_ultimo_pago=date(2026, 9, 20),
+                total_recuperado=35.5,
+            )
+        },
+    )
     request = MatrizTransicionPrestamosRequest(
         fecha_corte_anterior=datetime(2026, 8, 31),
         fecha_corte_nuevo=datetime(2026, 9, 30),
@@ -342,8 +392,16 @@ def test_lista_prestamos_de_una_transicion_sin_paginado() -> None:
     assert prestamo.calificacion_anterior == "A"
     assert prestamo.calificacion_actual == "B"
     assert prestamo.variacion_saldo_capital == 20
-    assert prestamo.total_recuperado == 0
+    assert prestamo.total_recuperado == 35.5
     assert prestamo.dia_ultimo_pago.isoformat() == "2026-09-20"
+    assert service.recuperacion_repository.consultas == [
+        {
+            "fecha_inicio": date(2026, 8, 31),
+            "fecha_fin": date(2026, 9, 30),
+            "fecha_actual": date(2026, 9, 30),
+            "numeros_prestamo": ["100"],
+        }
+    ]
     assert prestamo.numero_cuota_actual_no_pagada == 4
     assert prestamo.numero_cuota_siguiente == 5
     assert prestamo.cobro_para_bajar_una_cuota == 25

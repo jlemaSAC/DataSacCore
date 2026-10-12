@@ -8,6 +8,8 @@ from app.modules.negocios.cartera_de_credito.cartera_improductiva.dependencies i
 from app.modules.negocios.cartera_de_credito.cartera_improductiva.schemas import (
     CarteraImproductivaRequest,
     CarteraImproductivaResponse,
+    CarteraImproductivaPrestamosRequest,
+    CarteraImproductivaPrestamosResponse,
 )
 from app.modules.negocios.cartera_de_credito.cartera_improductiva.service import (
     CarteraImproductivaService,
@@ -42,3 +44,16 @@ def obtener_cartera_improductiva(
         id_agencia=request.id_agencia,
         filtrar_diferidos=request.filtrar_diferidos,
     )
+
+
+@router.post(
+    "/cartera-improductiva/prestamos",
+    response_model=CarteraImproductivaPrestamosResponse,
+    summary="Consultar préstamos de los grupos de cartera improductiva seleccionados",
+)
+def obtener_prestamos_cartera_improductiva(
+    request: CarteraImproductivaPrestamosRequest,
+    _: AuthContext = Depends(get_current_auth_context),
+    service: CarteraImproductivaService = Depends(get_cartera_improductiva_service),
+) -> CarteraImproductivaPrestamosResponse:
+    return service.obtener_prestamos(request)

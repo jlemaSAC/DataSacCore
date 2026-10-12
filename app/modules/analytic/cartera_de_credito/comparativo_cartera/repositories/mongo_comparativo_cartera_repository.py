@@ -6,6 +6,8 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 
 from app.modules.analytic.cartera_de_credito.comparativo_cartera.domain import (
+    DimensionCartera,
+    PrestamoResumenCartera,
     TotalesCartera,
 )
 
@@ -46,6 +48,31 @@ def _provision_requerida(*, preferir_calculada: bool) -> dict[str, Any]:
             _numero("ProvisionRequerida"),
         ]
     }
+
+
+def _texto(*campos: str) -> MongoDocument:
+    expresion: Any = ""
+    for campo in reversed(campos):
+        texto = {"$trim": {"input": {"$convert": {
+            "input": f"${campo}", "to": "string", "onError": "", "onNull": "",
+        }}}}
+        expresion = {"$cond": [{"$ne": [texto, ""]}, texto, expresion]}
+    return expresion
+
+
+CAMPOS_DIMENSION: dict[DimensionCartera, tuple[str, ...]] = {
+    "agencia": ("Agencia",),
+    "asesor": ("NombreAsesor", "NombreCompleto", "CodigoAsesor", "CodigoUsuario"),
+    "usuario_responsable_control": (
+        "UsuarioControl", "UsuarioResponsableControl", "CodigoUsuarioControl",
+        "CodigoUsuarioResponsableControl",
+    ),
+    "calificacion": ("Calificacion",),
+    "provincia": ("Provincia",),
+    "producto": ("Producto",),
+    "tipo_prestamo": ("TipoPrestamo",),
+    "cargo_asesor": ("CargoAsesor",),
+}
 
 
 class MongoComparativoCarteraRepository:
@@ -131,6 +158,51 @@ class MongoComparativoCarteraRepository:
             ),
         )
         return self._mapear_por_agencia(rows, fecha_corte)
+
+    def obtener_prestamos_resumen(
+        self,
+        fecha_corte: date,
+        agencias: list[str],
+        filtrar_diferidos: bool | None,
+        *,
+        actual: bool,
+    ) -> list[PrestamoResumenCartera]:
+        collection = self.actual if actual else self.historico
+        match = self._construir_match(
+            agencias=agencias, filtrar_diferidos=filtrar_diferidos, historico=not actual,
+        )
+        if not actual:
+            match["fecha_corte"] = fecha_corte.strftime("%Y%m%d")
+        rows = collection.aggregate(
+            [
+                {"$match": match},
+                {"$project": {
+                    "_id": 0,
+                    "numero_prestamo": _texto("NumeroPrestamo"),
+                    "cliente": _texto("Cliente", "NumeroCliente"),
+                    "dimensiones": {
+                        dimension: _texto(*campos)
+                        for dimension, campos in CAMPOS_DIMENSION.items()
+                    },
+                    "saldo_capital": _numero("SaldoCapital"),
+                    "cartera_improductiva": {"$add": [
+                        _numero("CapitalNoDevenga"), _numero("CapitalVencido"),
+                    ]},
+                    "provision_requerida": _provision_requerida(
+                        preferir_calculada=not actual,
+                    ),
+                }},
+            ],
+            **({"hint": "fecha_corte_1_estado_prestamo_1"} if not actual else {}),
+        )
+        return [PrestamoResumenCartera(
+            numero_prestamo=row["numero_prestamo"],
+            cliente=row["cliente"] or None,
+            dimensiones=row["dimensiones"],
+            saldo_capital=float(row["saldo_capital"]),
+            cartera_improductiva=float(row["cartera_improductiva"]),
+            provision_requerida=float(row["provision_requerida"]),
+        ) for row in rows]
 
     @staticmethod
     def _construir_match(

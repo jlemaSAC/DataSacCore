@@ -28,6 +28,8 @@ class MongoSituacionCrediticiaAsesoresRepository:
         "IdAgencia": 1,
         "id_agencia": 1,
         "Cliente": 1,
+        "Nombres": 1,
+        "NombreCliente": 1,
         "EstadoPrestamo": 1,
         "CodigoEstadoPrestamo": 1,
         "CodigoEstado": 1,

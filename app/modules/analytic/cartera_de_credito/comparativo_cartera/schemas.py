@@ -3,6 +3,7 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.modules.prestamos.normalizadores import normalizar_texto
+from app.modules.analytic.cartera_de_credito.comparativo_cartera.domain import DimensionCartera
 
 
 class InputComparativoCartera(BaseModel):
@@ -97,6 +98,21 @@ class ResumenCarteraAgencia(BaseModel):
     provision_requerida: float
 
 
+class FilaResumenCartera(BaseModel):
+    campo: str
+    saldo_capital: float
+    participacion_saldo_porcentaje: float
+    operaciones: int
+    clientes: int = Field(description="Clientes distintos dentro de esta agrupacion.")
+    provision_requerida: float
+    morosidad_porcentaje: float
+
+
+class ResumenCarteraDimension(BaseModel):
+    dimension: DimensionCartera
+    filas: list[FilaResumenCartera]
+
+
 class ComparativoCarteraResponse(BaseModel):
     fecha_desde: date
     fecha_hasta: date
@@ -105,4 +121,8 @@ class ComparativoCarteraResponse(BaseModel):
     filtrar_diferidos: bool | None
     resumen_morosidad: ComparativoMorosidadRango
     resumen_por_agencia: list[ResumenCarteraAgencia] = Field(default_factory=list)
+    fecha_corte_resumen: date | None = Field(
+        default=None, description="Ultimo corte disponible del rango usado por la tabla."
+    )
+    resumen_por_dimension: list[ResumenCarteraDimension] = Field(default_factory=list)
     puntos: list[PuntoComparativoCartera]
