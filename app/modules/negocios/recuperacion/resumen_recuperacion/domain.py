@@ -7,3 +7,4 @@ from decimal import Decimal
 class RecuperacionDiaria:
     fecha: date
     montos: dict[str, Decimal]
+    agencia: str | None = None

@@ -162,7 +162,7 @@ class ResumenActualColocacionResponse(BaseModel):
     consolidado: bool
     agencias: list[str]
     colocacion_por_agencia: list[ColocacionPorAgencia] = Field(
-        description="Montos de todas las agencias del rango seleccionado, sin aplicar el filtro de agencias."
+        description="Montos de las agencias seleccionadas en el rango."
     )
     acumulado_anual: RangoResumenActualColocacion = Field(
         description="Colocación acumulada desde el 1 de enero hasta la fecha fin seleccionada."
@@ -208,6 +208,7 @@ class InputDetalleResumenColocacion(BaseModel):
     tasa_desde: float | None = Field(default=None, ge=0, examples=[4])
     tasa_hasta_exclusiva: float | None = Field(default=None, gt=0, examples=[5])
     asesores: list[str] = Field(default_factory=list)
+    condiciones: list[str] = Field(default_factory=list)
     pagina: int = Field(default=1, ge=1)
     tamano_pagina: int = Field(default=100, ge=1, le=500)
 
@@ -242,6 +243,8 @@ class InputDetalleResumenColocacion(BaseModel):
                 raise ValueError("valor_dimension no puede ser negativo para una tasa.")
         if any(not asesor.strip() for asesor in self.asesores):
             raise ValueError("asesores no puede contener nombres vacíos.")
+        if any(not condicion.strip() for condicion in self.condiciones):
+            raise ValueError("condiciones no puede contener nombres vacíos.")
         return self
 
 

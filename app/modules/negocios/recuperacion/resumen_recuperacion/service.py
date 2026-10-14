@@ -14,6 +14,7 @@ from app.modules.negocios.recuperacion.resumen_recuperacion.schemas import (
     DiaResumenRecuperacion,
     InputResumenRecuperacion,
     RangoResumenRecuperacion,
+    RecuperacionPorAgencia,
     ResumenRecuperacionResponse,
 )
 
@@ -43,10 +44,15 @@ class ResumenRecuperacionService:
         try:
             filas = self.repository.obtener_diario(rangos, hoy, body.agencias)
             por_fecha: dict[date, dict[str, Decimal]] = {}
+            por_agencia: dict[str, dict[str, Decimal]] = {}
             for fila in filas:
                 montos = por_fecha.setdefault(fila.fecha, _ceros())
                 for tipo in TIPOS_COBRO:
                     montos[tipo] += fila.montos.get(tipo, Decimal(0))
+                if body.fecha_inicio <= fila.fecha <= body.fecha_fin and fila.agencia is not None:
+                    montos_agencia = por_agencia.setdefault(fila.agencia or "SIN DATOS", _ceros())
+                    for tipo in TIPOS_COBRO:
+                        montos_agencia[tipo] += fila.montos.get(tipo, Decimal(0))
             por_fecha = {
                 fecha: {tipo: valor.quantize(CENTAVO, rounding=ROUND_HALF_UP) for tipo, valor in montos.items()}
                 for fecha, montos in por_fecha.items()
@@ -75,6 +81,16 @@ class ResumenRecuperacionService:
             return ResumenRecuperacionResponse(
                 fecha_inicio=body.fecha_inicio, fecha_fin=body.fecha_fin,
                 consolidado=not body.agencias, agencias=body.agencias,
+                recuperacion_por_agencia=[
+                    RecuperacionPorAgencia(
+                        agencia=agencia,
+                        **_importes({
+                            tipo: monto.quantize(CENTAVO, rounding=ROUND_HALF_UP)
+                            for tipo, monto in montos.items()
+                        }),
+                    )
+                    for agencia, montos in sorted(por_agencia.items())
+                ],
                 actual=resumenes[0], mes_anterior=resumenes[1], anio_anterior=resumenes[2],
                 diario=diario,
             )

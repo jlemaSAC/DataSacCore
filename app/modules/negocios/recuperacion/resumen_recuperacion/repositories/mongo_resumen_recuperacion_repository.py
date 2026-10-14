@@ -13,7 +13,7 @@ TIPO_TRANSACCION_EXCLUIDA = "CASTIGO DE PRÉSTAMO"
 
 
 class MongoResumenRecuperacionRepository:
-    """Materializa solo sumas diarias; nunca movimientos o contexto de préstamos."""
+    """Materializa sumas diarias por agencia, sin traer movimientos individuales."""
 
     def __init__(self, mongo_db: Database) -> None:
         self.historico = mongo_db["RecuperacionCrediticia"]
@@ -39,11 +39,13 @@ class MongoResumenRecuperacionRepository:
         for collection, intervalos in consultas:
             pipeline = self.construir_pipeline(intervalos, agencias)
             for fila in collection.aggregate(pipeline, maxTimeMS=15_000):
+                clave = fila["_id"]
                 dias.append(RecuperacionDiaria(
-                    fecha=datetime.strptime(str(fila["_id"]), "%Y%m%d").date(),
+                    fecha=datetime.strptime(str(clave["fecha"]), "%Y%m%d").date(),
                     montos={tipo: _decimal(fila.get(tipo, 0)) for tipo in TIPOS_COBRO},
+                    agencia=clave["agencia"],
                 ))
-        return sorted(dias, key=lambda dia: dia.fecha)
+        return sorted(dias, key=lambda dia: (dia.fecha, dia.agencia or ""))
 
     @staticmethod
     def construir_pipeline(
@@ -57,15 +59,13 @@ class MongoResumenRecuperacionRepository:
             "numero_resumen": {"$trim": {"input": {"$convert": {
                 "input": {"$ifNull": ["$NUMERO_PRESTAMO", "$NumeroPrestamo"]},
                 "to": "string", "onError": "", "onNull": "",
-            }}}}
+            }}}},
+            "agencia_resumen": {"$toUpper": {"$trim": {"input": {
+                "$convert": {"input": "$AGENCIA", "to": "string", "onError": "", "onNull": ""}
+            }}}},
         }
         validos: dict[str, Any] = {"numero_resumen": {"$ne": ""}}
         if agencias:
-            # Conservar la normalización existente hasta validar los valores
-            # reales de AGENCIA. El filtro de fecha sí usa el campo original.
-            normalizados["agencia_resumen"] = {"$toUpper": {"$trim": {"input": {
-                "$convert": {"input": "$AGENCIA", "to": "string", "onError": "", "onNull": ""}
-            }}}}
             validos["agencia_resumen"] = {"$in": agencias}
         return [
             {"$match": filtros[0] if len(filtros) == 1 else {"$or": filtros}},
@@ -82,7 +82,7 @@ class MongoResumenRecuperacionRepository:
             {"$set": normalizados},
             {"$match": validos},
             {"$group": {
-                "_id": "$fecha_corte",
+                "_id": {"fecha": "$fecha_corte", "agencia": "$agencia_resumen"},
                 **{tipo: {"$sum": {"$convert": {
                     "input": "$" + tipo, "to": "decimal", "onError": 0, "onNull": 0,
                 }}} for tipo in TIPOS_COBRO},

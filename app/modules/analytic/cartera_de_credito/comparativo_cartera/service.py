@@ -127,6 +127,7 @@ class ComparativoCarteraService:
                             totales[hoy] = actual
             totales_por_agencia = self.repository.obtener_por_agencia(
                 input_data.fecha_hasta,
+                input_data.agencias,
                 input_data.filtrar_diferidos,
                 actual=input_data.fecha_hasta == hoy,
             )

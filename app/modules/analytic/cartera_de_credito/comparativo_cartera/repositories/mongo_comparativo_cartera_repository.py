@@ -131,14 +131,15 @@ class MongoComparativoCarteraRepository:
     def obtener_por_agencia(
         self,
         fecha_corte: date,
+        agencias: list[str],
         filtrar_diferidos: bool | None,
         *,
         actual: bool,
     ) -> dict[str, TotalesCartera]:
-        """Obtiene los indicadores de cada agencia sin aplicar el filtro de agencias."""
+        """Obtiene los indicadores de las agencias solicitadas."""
         collection = self.actual if actual else self.historico
         match = self._construir_match(
-            agencias=[],
+            agencias=agencias,
             filtrar_diferidos=filtrar_diferidos,
             historico=not actual,
         )

@@ -27,7 +27,8 @@ router = APIRouter(
     response_model=CarteraImproductivaResponse,
     summary="Comparar cartera improductiva y morosidad de asesores",
     description=(
-        "Compara fecha_fin, fecha_inicio y el día anterior a fecha_fin. "
+        "Compara fecha_fin, fecha_inicio, el día anterior a fecha_fin "
+        "y las fechas equivalentes de inicio y fin del mes anterior. "
         "id_agencia=0 devuelve el consolidado de todas las agencias."
     ),
 )

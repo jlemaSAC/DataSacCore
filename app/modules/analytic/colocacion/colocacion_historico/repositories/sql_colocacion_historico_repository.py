@@ -67,6 +67,25 @@ def _texto_sql(columna):
     return func.upper(func.ltrim(func.rtrim(func.coalesce(columna, "SIN DATOS"))))
 
 
+def _condicion_evaluacion_sql(id_prestamo, tipo_emision):
+    """Replica la condición del ETL y normaliza sólo la presentación de NUEVO."""
+    tipo_condicion = _texto_sql(
+        func.COLOCACION.RETORNA_TIPOCONDICION_POR_IDPRESTAMO(id_prestamo)
+    )
+    emision = _texto_sql(tipo_emision)
+    return case(
+        (
+            tipo_condicion == "NUEVO",
+            case(
+                (emision == "NORMAL", "NORMAL"),
+                (emision == "SIN DATOS", "N/A"),
+                else_="NUEVO",
+            ),
+        ),
+        else_=tipo_condicion,
+    )
+
+
 class SqlColocacionHistoricoRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -95,13 +114,14 @@ class SqlColocacionHistoricoRepository:
                     [agencia.strip().upper() for agencia in agencias]
                 )
             )
+        condicion = _condicion_evaluacion_sql(Prestamo.id, TipoEmision.nombre)
 
         base = (
             select(
                 Prestamo.id.label("id_prestamo"),
                 Prestamo.deuda_inicial.label("deuda_inicial"),
                 Agencia.nombre.label("agencia"),
-                TipoEmision.nombre.label("condicion"),
+                condicion.label("condicion"),
                 TipoPrestamo.nombre.label("tipo_prestamo"),
                 CalificacionContable.nombre.label("producto"),
                 SubcalificacionContable.nombre.label("segmento"),
@@ -331,13 +351,14 @@ class SqlColocacionHistoricoRepository:
         dimension: DimensionFiltroColocacion,
         valor_dimension: str,
         asesores: list[str] | None = None,
+        condiciones: list[str] | None = None,
         tasa_desde: float | None = None,
         tasa_hasta_exclusiva: float | None = None,
         limite: int = 500,
     ) -> ResultadoDetalleColocacion:
         """Devuelve un prefijo ordenado y sus totales sin materializar todo el detalle."""
         agencia = _texto_sql(Agencia.nombre)
-        condicion = _texto_sql(TipoEmision.nombre)
+        condicion = _condicion_evaluacion_sql(Prestamo.id, TipoEmision.nombre)
         tipo_prestamo = _texto_sql(TipoPrestamo.nombre)
         producto = _texto_sql(CalificacionContable.nombre)
         segmento = _texto_sql(SubcalificacionContable.nombre)
@@ -375,6 +396,10 @@ class SqlColocacionHistoricoRepository:
         ]
         if asesores:
             filtros.append(asesor.in_([valor.strip().upper() for valor in asesores]))
+        if condiciones:
+            filtros.append(
+                condicion.in_([valor.strip().upper() for valor in condiciones])
+            )
 
         base = (
             select(
