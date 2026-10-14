@@ -10,6 +10,7 @@ from app.modules.negocios.cartera_de_credito.cartera_improductiva.dependencies i
 )
 from app.modules.negocios.cartera_de_credito.cartera_improductiva.service import (
     CarteraImproductivaService,
+    _mes_anterior,
 )
 from app.modules.negocios.router import router as negocios_router
 
@@ -62,6 +63,12 @@ class FakeMongoRepository:
             ),
         ]
         self.historicos = {
+            "20260820": [
+                _document("1", "ASESOR_ANTERIOR", nombre="Asesor anterior", saldo=80, no_devenga=8, vencido=0)
+            ],
+            "20260823": [
+                _document("1", "ASESOR_ANTERIOR", nombre="Asesor anterior", saldo=100, no_devenga=12, vencido=0)
+            ],
             "20260920": [
                 _document(
                     "1",
@@ -102,7 +109,7 @@ class FakeMongoRepository:
         agencia_nombre: str | None,
     ) -> list[dict]:
         assert agencia_nombre is None
-        return self.historicos[fecha_corte]
+        return self.historicos.get(fecha_corte, [])
 
 
 class FakeSqlRepository:
@@ -126,6 +133,35 @@ def _service() -> CarteraImproductivaService:
     return CarteraImproductivaService(FakeMongoRepository(), FakeSqlRepository())
 
 
+def test_mes_anterior_ajusta_fin_de_mes_y_cambio_de_anio() -> None:
+    assert _mes_anterior(date(2026, 3, 31)) == date(2026, 2, 28)
+    assert _mes_anterior(date(2024, 3, 31)) == date(2024, 2, 29)
+    assert _mes_anterior(date(2026, 1, 15)) == date(2025, 12, 15)
+
+
+def test_incluye_asesor_y_prestamo_presentes_solo_en_mes_anterior() -> None:
+    mongo = FakeMongoRepository()
+    mongo.historicos["20260820"].append(
+        _document("9", "SOLO_PREVIO", nombre="Asesor previo", saldo=100, no_devenga=5, vencido=0)
+    )
+    mongo.historicos["20260823"].append(
+        _document("9", "SOLO_PREVIO", nombre="Asesor previo", saldo=100, no_devenga=9, vencido=0)
+    )
+    service = CarteraImproductivaService(mongo, FakeSqlRepository())
+    response = service.obtener(fecha_inicio=date(2026, 9, 20), fecha_fin=date(2026, 9, 23))
+    previo = next(item for item in response.comparacion if item.codigo_usuario == "SOLO_PREVIO")
+    assert previo.valores_fecha_fin is None
+    assert previo.nombre_asesor_fecha_fin_mes_anterior == "Asesor previo"
+    assert previo.valores_fecha_fin_mes_anterior.cartera_improductiva == 9
+
+    detalle = service.obtener_prestamos(_detalle_request(
+        grupos=[{"codigo_usuario": "SOLO_PREVIO", "agencia": "CENTRO"}],
+    ))
+    assert [item.numero_prestamo for item in detalle.prestamos] == ["9"]
+    assert detalle.totales.valores_fecha_inicio_mes_anterior.cartera_improductiva == 5
+    assert detalle.totales.valores_fecha_fin_mes_anterior.cartera_improductiva == 9
+
+
 def test_service_compara_los_tres_cortes_y_reasigna_al_asesor_actual() -> None:
     response = _service().obtener(
         fecha_inicio=date(2026, 9, 20),
@@ -135,6 +171,8 @@ def test_service_compara_los_tres_cortes_y_reasigna_al_asesor_actual() -> None:
     assert response.fecha_corte_fecha_fin == "20260923"
     assert response.fecha_corte_fecha_inicio == "20260920"
     assert response.fecha_corte_dia_anterior_fecha_fin == "20260922"
+    assert response.fecha_corte_fecha_inicio_mes_anterior == "20260820"
+    assert response.fecha_corte_fecha_fin_mes_anterior == "20260823"
     assert [item.codigo_usuario for item in response.comparacion] == [
         "ASESOR_ACTUAL",
         "SOLO_FIN",
@@ -154,6 +192,8 @@ def test_service_compara_los_tres_cortes_y_reasigna_al_asesor_actual() -> None:
     assert asesor.valores_dia_anterior_fecha_fin is not None
     assert asesor.valores_dia_anterior_fecha_fin.saldo_capital == 40
     assert asesor.valores_dia_anterior_fecha_fin.cartera_improductiva == 4
+    assert asesor.valores_fecha_inicio_mes_anterior.cartera_improductiva == 8
+    assert asesor.valores_fecha_fin_mes_anterior.cartera_improductiva == 12
     assert response.faltantes_en_fecha_inicio == ["SOLO_FIN"]
     assert response.faltantes_en_dia_anterior_fecha_fin == ["SOLO_FIN"]
     assert response.agencias_gerentes_oficina[0].codigo_usuario_gerente == "GERENTE"
@@ -234,7 +274,7 @@ def test_service_filtra_la_agencia_en_los_tres_cortes() -> None:
         def obtener_historico(self, fecha_corte, agencia_nombre):
             assert agencia_nombre == "CENTRO"
             return [
-                item for item in self.historicos[fecha_corte]
+                item for item in self.historicos.get(fecha_corte, [])
                 if item["Agencia"] == agencia_nombre
             ]
 
@@ -295,6 +335,8 @@ def test_detalle_une_por_numero_y_reasigna_sin_reemplazar_importes_historicos():
     assert prestamo.valores_fecha_inicio.cartera_improductiva == 10
     assert prestamo.valores_dia_anterior_fecha_fin.cartera_improductiva == 4
     assert prestamo.valores_fecha_fin.cartera_improductiva == 15
+    assert prestamo.valores_fecha_inicio_mes_anterior.cartera_improductiva == 8
+    assert prestamo.valores_fecha_fin_mes_anterior.cartera_improductiva == 12
     principal = service.obtener(fecha_inicio=date(2026, 9, 20), fecha_fin=date(2026, 9, 23))
     assert response.totales.valores_fecha_inicio == principal.comparacion[0].valores_fecha_inicio
     assert response.totales.valores_fecha_fin == principal.comparacion[0].valores_fecha_fin
@@ -445,7 +487,7 @@ def test_detalle_limita_la_consulta_a_una_agencia_y_valida_su_existencia():
 
         def obtener_historico(self, fecha_corte, agencia_nombre):
             assert agencia_nombre == "CENTRO"
-            return [doc for doc in self.historicos[fecha_corte] if doc["Agencia"] == agencia_nombre]
+            return [doc for doc in self.historicos.get(fecha_corte, []) if doc["Agencia"] == agencia_nombre]
 
     mongo = MongoAgencia()
     mongo.actuales.append(_document("9", "ASESOR_ACTUAL", nombre="Otro", saldo=900, no_devenga=900, vencido=0, agencia="QUITO"))

@@ -78,6 +78,37 @@ def _texto_normalizado(*campos: str) -> dict[str, Any]:
     }
 
 
+def _condicion_evaluacion() -> dict[str, Any]:
+    """Alinea la condición histórica con la regla usada en Evaluación."""
+    tipo_condicion = _texto_normalizado("TipoCondicion")
+    tipo_emision = _texto_normalizado("TipoEmision")
+    return {
+        "$switch": {
+            "branches": [
+                {
+                    "case": {"$eq": [tipo_condicion, "NUEVO"]},
+                    "then": {
+                        "$switch": {
+                            "branches": [
+                                {
+                                    "case": {"$eq": [tipo_emision, "NORMAL"]},
+                                    "then": "NORMAL",
+                                },
+                                {
+                                    "case": {"$eq": [tipo_emision, "SIN DATOS"]},
+                                    "then": "N/A",
+                                },
+                            ],
+                            "default": "NUEVO",
+                        }
+                    },
+                }
+            ],
+            "default": tipo_condicion,
+        }
+    }
+
+
 def _rango_edad() -> dict[str, Any]:
     edad_convertida = {
         "$convert": {
@@ -271,6 +302,7 @@ class MongoColocacionHistoricoRepository:
             cortes,
             agencias,
             CAMPOS_DIMENSION_RESUMEN,
+            normalizar_condicion=True,
         )
 
     def obtener_prestamos_adjudicados_resumen(
@@ -473,6 +505,7 @@ class MongoColocacionHistoricoRepository:
         dimension: DimensionFiltroColocacion,
         valor_dimension: str,
         asesores: list[str] | None = None,
+        condiciones: list[str] | None = None,
         tasa_desde: float | None = None,
         tasa_hasta_exclusiva: float | None = None,
         limite: int = 500,
@@ -493,7 +526,7 @@ class MongoColocacionHistoricoRepository:
         ]
         dimensiones = {
             "agencia": _texto_normalizado("Agencia"),
-            "condicion": _texto_normalizado("TipoCondicion"),
+            "condicion": _condicion_evaluacion(),
             "tipo_prestamo": _texto_normalizado("TipoPrestamo"),
             "producto": _texto_normalizado("Producto"),
             "segmento": _texto_normalizado("Segmento"),
@@ -517,7 +550,7 @@ class MongoColocacionHistoricoRepository:
                     {"$lt": [dimensiones["tasa_real"], tasa_hasta_exclusiva]},
                 ]
             }
-        condiciones = [
+        expresiones_filtro = [
             {
                 "$in": [
                     dimensiones["agencia"],
@@ -527,11 +560,20 @@ class MongoColocacionHistoricoRepository:
             filtro_dimension,
         ]
         if asesores:
-            condiciones.append(
+            expresiones_filtro.append(
                 {
                     "$in": [
                         dimensiones["asesor"],
                         [asesor.strip().upper() for asesor in asesores],
+                    ]
+                }
+            )
+        if condiciones:
+            expresiones_filtro.append(
+                {
+                    "$in": [
+                        dimensiones["condicion"],
+                        [condicion.strip().upper() for condicion in condiciones],
                     ]
                 }
             )
@@ -541,7 +583,7 @@ class MongoColocacionHistoricoRepository:
                 "$match": {
                     "EstadoPrestamo": {"$ne": "CANCELADO"},
                     "$or": rangos,
-                    "$expr": {"$and": condiciones},
+                    "$expr": {"$and": expresiones_filtro},
                 }
             },
             {
@@ -616,6 +658,7 @@ class MongoColocacionHistoricoRepository:
         cortes: list[CorteMensual],
         agencias: list[str] | None,
         campos_dimension: tuple[str, ...] | None = None,
+        normalizar_condicion: bool = False,
     ) -> list[ColocacionAgrupada]:
         if not cortes:
             return []
@@ -636,7 +679,11 @@ class MongoColocacionHistoricoRepository:
         ]
         dimensiones = {
             "agencia": _texto_normalizado("Agencia"),
-            "condicion": _texto_normalizado("TipoCondicion"),
+            "condicion": (
+                _condicion_evaluacion()
+                if normalizar_condicion
+                else _texto_normalizado("TipoCondicion")
+            ),
             "tipo_prestamo": _texto_normalizado("TipoPrestamo"),
             "producto": _texto_normalizado("Producto"),
             "segmento": _texto_normalizado("Segmento"),

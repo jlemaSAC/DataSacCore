@@ -45,6 +45,8 @@ class CarteraImproductivaComparacionAsesor(BaseModel):
         default=None,
         alias="NombreAsesorDiaAnteriorFechaFin",
     )
+    nombre_asesor_fecha_inicio_mes_anterior: str | None = Field(default=None, alias="NombreAsesorFechaInicioMesAnterior")
+    nombre_asesor_fecha_fin_mes_anterior: str | None = Field(default=None, alias="NombreAsesorFechaFinMesAnterior")
     cargo_asesor_fecha_fin: str | None = Field(
         default=None,
         alias="CargoAsesorFechaFin",
@@ -58,6 +60,8 @@ class CarteraImproductivaComparacionAsesor(BaseModel):
         default=None,
         alias="AgenciaDiaAnteriorFechaFin",
     )
+    agencia_fecha_inicio_mes_anterior: str | None = Field(default=None, alias="AgenciaFechaInicioMesAnterior")
+    agencia_fecha_fin_mes_anterior: str | None = Field(default=None, alias="AgenciaFechaFinMesAnterior")
     valores_fecha_fin: CarteraImproductivaMorosidadValores | None = Field(
         default=None,
         alias="ValoresFechaFin",
@@ -72,9 +76,17 @@ class CarteraImproductivaComparacionAsesor(BaseModel):
         default=None,
         alias="ValoresDiaAnteriorFechaFin",
     )
+    valores_fecha_inicio_mes_anterior: CarteraImproductivaMorosidadValores | None = Field(
+        default=None, alias="ValoresFechaInicioMesAnterior",
+    )
+    valores_fecha_fin_mes_anterior: CarteraImproductivaMorosidadValores | None = Field(
+        default=None, alias="ValoresFechaFinMesAnterior",
+    )
 
 
 class CarteraImproductivaResponse(BaseModel):
+    fecha_corte_fecha_inicio_mes_anterior: str
+    fecha_corte_fecha_fin_mes_anterior: str
     fecha_corte_fecha_fin: str
     fecha_corte_fecha_inicio: str
     fecha_corte_dia_anterior_fecha_fin: str
@@ -113,6 +125,8 @@ class CarteraImproductivaPrestamo(CarteraImproductivaComparacionAsesor):
 
 
 class CarteraImproductivaPrestamosResponse(BaseModel):
+    fecha_corte_fecha_inicio_mes_anterior: str
+    fecha_corte_fecha_fin_mes_anterior: str
     fecha_corte_fecha_fin: str
     fecha_corte_fecha_inicio: str
     fecha_corte_dia_anterior_fecha_fin: str

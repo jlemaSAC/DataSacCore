@@ -36,8 +36,8 @@ class FakeRepository:
 
 def test_diario_comparativos_y_composicion_comparten_los_mismos_importes():
     repo = FakeRepository([
-        RecuperacionDiaria(date(2026, 10, 1), {"CAPITAL": Decimal("100.10"), "INTERES": Decimal("20.20")}),
-        RecuperacionDiaria(date(2026, 10, 3), {"CAPITAL": Decimal("50.30"), "INTERES_MORA": Decimal("-1.10")}),
+        RecuperacionDiaria(date(2026, 10, 1), {"CAPITAL": Decimal("100.10"), "INTERES": Decimal("20.20")}, "MATRIZ"),
+        RecuperacionDiaria(date(2026, 10, 3), {"CAPITAL": Decimal("50.30"), "INTERES_MORA": Decimal("-1.10")}, "MATRIZ"),
         RecuperacionDiaria(date(2026, 9, 1), {"CAPITAL": Decimal("40")}),
         RecuperacionDiaria(date(2026, 9, 4), {"CAPITAL": Decimal("999")}),
         RecuperacionDiaria(date(2025, 10, 1), {"INTERES": Decimal("10")}),
@@ -49,6 +49,9 @@ def test_diario_comparativos_y_composicion_comparten_los_mismos_importes():
     assert respuesta.agencias == ["MATRIZ"]
     assert not respuesta.consolidado
     assert respuesta.actual.recuperacion_total == 169.50
+    assert len(respuesta.recuperacion_por_agencia) == 1
+    assert respuesta.recuperacion_por_agencia[0].agencia == "MATRIZ"
+    assert respuesta.recuperacion_por_agencia[0].recuperacion_total == 169.50
     assert sum(d.recuperacion_total for d in respuesta.diario) == pytest.approx(respuesta.actual.recuperacion_total)
     for tipo, monto in respuesta.actual.recuperacion_por_tipo.items():
         assert sum(d.recuperacion_por_tipo[tipo] for d in respuesta.diario) == pytest.approx(monto)
@@ -111,8 +114,8 @@ class FakeCollection:
 
 
 def repositorio_con_filas():
-    historico = FakeCollection([{"_id": "20261001", "CAPITAL": Decimal128("12.34")}])
-    actual = FakeCollection([{"_id": "20261003", "INTERES": Decimal128("1.20")}])
+    historico = FakeCollection([{"_id": {"fecha": "20261001", "agencia": "MATRIZ"}, "CAPITAL": Decimal128("12.34")}])
+    actual = FakeCollection([{"_id": {"fecha": "20261003", "agencia": "MATRIZ"}, "INTERES": Decimal128("1.20")}])
     colecciones = {"RecuperacionCrediticia": historico, "RecuperacionCrediticiaActual": actual}
     return MongoResumenRecuperacionRepository(colecciones), historico, actual
 
@@ -127,6 +130,7 @@ def test_repositorio_usa_dos_consultas_selectivas_sin_duplicar_hoy():
     assert len(historico.llamadas) == len(actual.llamadas) == 1
     assert filas[0].montos["CAPITAL"] == Decimal("12.34")
     assert filas[1].montos["INTERES"] == Decimal("1.20")
+    assert [fila.agencia for fila in filas] == ["MATRIZ", "MATRIZ"]
     rangos = historico.llamadas[0][0][0]["$match"]["$or"]
     assert rangos[-1]["fecha_corte"]["$lte"] == "20261002"
     assert rangos == [
@@ -137,6 +141,34 @@ def test_repositorio_usa_dos_consultas_selectivas_sin_duplicar_hoy():
     for collection in (historico, actual):
         pipeline = collection.llamadas[0][0]
         assert not any("$lookup" in etapa or "$unwind" in etapa for etapa in pipeline)
+        assert pipeline[-1]["$group"]["_id"] == {
+            "fecha": "$fecha_corte", "agencia": "$agencia_resumen"
+        }
+        assert pipeline[2]["$set"]["agencia_resumen"]
+        assert pipeline[3]["$match"]["agencia_resumen"] == {"$in": ["MATRIZ"]}
+
+
+def test_consolidado_desglosa_tipos_de_cobro_por_agencia_en_el_rango_actual():
+    repo = FakeRepository([
+        RecuperacionDiaria(date(2026, 10, 1), {"CAPITAL": Decimal("100.10"), "INTERES": Decimal("20")}, "MATRIZ"),
+        RecuperacionDiaria(date(2026, 10, 1), {"CAPITAL": Decimal("50"), "COBRANZA": Decimal("2.50")}, "CUENCA"),
+        RecuperacionDiaria(date(2026, 10, 2), {"INTERES": Decimal("10")}, "MATRIZ"),
+        RecuperacionDiaria(date(2026, 9, 1), {"CAPITAL": Decimal("999")}, "CUENCA"),
+    ])
+    respuesta = ResumenRecuperacionService(repo).obtener_resumen(
+        InputResumenRecuperacion(fecha_inicio="2026-10-01", fecha_fin="2026-10-03"),
+        contexto(),
+    )
+
+    assert respuesta.actual.recuperacion_total == 182.60
+    assert [fila.agencia for fila in respuesta.recuperacion_por_agencia] == ["CUENCA", "MATRIZ"]
+    cuenca, matriz = respuesta.recuperacion_por_agencia
+    assert cuenca.recuperacion_total == 52.50
+    assert cuenca.recuperacion_por_tipo["CAPITAL"] == 50
+    assert cuenca.recuperacion_por_tipo["COBRANZA"] == 2.50
+    assert matriz.recuperacion_total == 130.10
+    assert matriz.recuperacion_por_tipo["INTERES"] == 30
+    assert set(matriz.recuperacion_por_tipo) == set(respuesta.actual.recuperacion_por_tipo)
 
 
 def test_rango_cerrado_no_consulta_coleccion_actual_y_funde_intervalos_solapados():
@@ -202,8 +234,8 @@ def test_endpoints_comparten_comparativos_con_mes_y_anio_completos(
     inicio, fin, mes_inicio, mes_fin, agencias,
 ):
     repo = FakeRepository([
-        RecuperacionDiaria(inicio, {"CAPITAL": Decimal("600")}),
-        RecuperacionDiaria(fin, {"INTERES": Decimal("400")}),
+        RecuperacionDiaria(inicio, {"CAPITAL": Decimal("600")}, "MATRIZ"),
+        RecuperacionDiaria(fin, {"INTERES": Decimal("400")}, "MATRIZ"),
         RecuperacionDiaria(mes_inicio, {"CAPITAL": Decimal("1000")}),
         RecuperacionDiaria(mes_fin, {"INTERES": Decimal("2000")}),
         RecuperacionDiaria(date(2025, 1, 1), {"CAPITAL": Decimal("1500")}),
@@ -231,6 +263,11 @@ def test_endpoints_comparten_comparativos_con_mes_y_anio_completos(
     assert actual["agencias"] == (["MATRIZ"] if agencias else [])
     assert actual["consolidado"] is (not agencias)
     assert actual["actual"]["recuperacion_total"] == 1000
+    assert len(actual["recuperacion_por_agencia"]) == 1
+    assert actual["recuperacion_por_agencia"][0]["agencia"] == "MATRIZ"
+    assert actual["recuperacion_por_agencia"][0]["recuperacion_total"] == 1000.0
+    assert actual["recuperacion_por_agencia"][0]["recuperacion_por_tipo"]["CAPITAL"] == 600.0
+    assert actual["recuperacion_por_agencia"][0]["recuperacion_por_tipo"]["INTERES"] == 400.0
     assert actual["mes_anterior"]["fecha_inicio"] == mes_inicio.isoformat()
     assert actual["mes_anterior"]["fecha_fin"] == mes_fin.isoformat()
     assert actual["mes_anterior"]["recuperacion_total"] == 3000

@@ -148,23 +148,14 @@ class ResumenColocacionService:
             )
             colocacion_por_agencia: list[ColocacionPorAgencia] = []
             if incluir_colocacion_por_agencia:
-                agrupaciones_todas_agencias = (
-                    self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
-                        input_data.fecha_inicio,
-                        input_data.fecha_fin,
-                        fecha_hoy,
-                        input_data.agencias,
-                    )
-                    if not input_data.agencias
-                    else self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
-                        input_data.fecha_inicio,
-                        input_data.fecha_fin,
-                        fecha_hoy,
-                        [],
-                    )
+                agrupaciones_agencias = self.colocacion_historico_service.obtener_agrupaciones_resumen_por_rango(
+                    input_data.fecha_inicio,
+                    input_data.fecha_fin,
+                    fecha_hoy,
+                    input_data.agencias,
                 )
                 colocacion_por_agencia = _resumir_colocacion_por_agencia(
-                    agrupaciones_todas_agencias,
+                    agrupaciones_agencias,
                 )
             return ResumenActualColocacionResponse(
                 fecha_inicio=input_data.fecha_inicio,
@@ -265,18 +256,22 @@ class ResumenColocacionService:
         try:
             agencias = list(dict.fromkeys(agencia.strip() for agencia in input_data.agencias))
             asesores = list(dict.fromkeys(asesor.strip() for asesor in input_data.asesores))
+            condiciones = list(
+                dict.fromkeys(condicion.strip().upper() for condicion in input_data.condiciones)
+            )
             inicio = (input_data.pagina - 1) * input_data.tamano_pagina
             resultado = self.colocacion_historico_service.obtener_detalles_resumen_por_rango(
-                input_data.fecha_inicio,
-                input_data.fecha_fin,
-                fecha_hoy,
-                agencias,
-                input_data.dimension,
-                input_data.valor_dimension.strip(),
-                asesores,
-                input_data.tasa_desde,
-                input_data.tasa_hasta_exclusiva,
-                inicio + input_data.tamano_pagina,
+                fecha_desde=input_data.fecha_inicio,
+                fecha_hasta=input_data.fecha_fin,
+                fecha_hoy=fecha_hoy,
+                agencias=agencias,
+                dimension=input_data.dimension,
+                valor_dimension=input_data.valor_dimension.strip(),
+                asesores=asesores,
+                condiciones=condiciones,
+                tasa_desde=input_data.tasa_desde,
+                tasa_hasta_exclusiva=input_data.tasa_hasta_exclusiva,
+                limite=inicio + input_data.tamano_pagina,
             )
             items = resultado.items[inicio : inicio + input_data.tamano_pagina]
             return DetalleResumenColocacionResponse(

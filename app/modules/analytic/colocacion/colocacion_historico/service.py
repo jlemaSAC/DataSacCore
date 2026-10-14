@@ -316,6 +316,7 @@ class ColocacionHistoricoService:
         dimension: DimensionFiltroColocacion,
         valor_dimension: str,
         asesores: list[str] | None = None,
+        condiciones: list[str] | None = None,
         tasa_desde: float | None = None,
         tasa_hasta_exclusiva: float | None = None,
         limite: int = 500,
@@ -324,29 +325,31 @@ class ColocacionHistoricoService:
         segmentos = self._segmentar_rango(fecha_desde, fecha_hasta)
         cortes = self._construir_cortes_por_rango(segmentos, fecha_hoy)
         resultado_mongo = self.mongo_repository.obtener_detalles_resumen(
-            cortes,
-            agencias,
-            dimension,
-            valor_dimension,
-            asesores,
-            tasa_desde,
-            tasa_hasta_exclusiva,
-            limite,
+            cortes=cortes,
+            agencias=agencias,
+            dimension=dimension,
+            valor_dimension=valor_dimension,
+            asesores=asesores,
+            condiciones=condiciones,
+            tasa_desde=tasa_desde,
+            tasa_hasta_exclusiva=tasa_hasta_exclusiva,
+            limite=limite,
         )
         detalles = list(resultado_mongo.items)
         total_registros = resultado_mongo.total_registros
         total_monto_colocado = resultado_mongo.total_monto_colocado
         if fecha_desde <= fecha_hoy <= fecha_hasta:
             resultado_sql = self.sql_repository.obtener_detalles_resumen(
-                datetime.combine(fecha_hoy, time.min),
-                datetime.combine(fecha_hoy, time.max),
-                agencias,
-                dimension,
-                valor_dimension,
-                asesores,
-                tasa_desde,
-                tasa_hasta_exclusiva,
-                limite,
+                fecha_inicio=datetime.combine(fecha_hoy, time.min),
+                fecha_fin=datetime.combine(fecha_hoy, time.max),
+                agencias=agencias,
+                dimension=dimension,
+                valor_dimension=valor_dimension,
+                asesores=asesores,
+                condiciones=condiciones,
+                tasa_desde=tasa_desde,
+                tasa_hasta_exclusiva=tasa_hasta_exclusiva,
+                limite=limite,
             )
             detalles.extend(resultado_sql.items)
             total_registros += resultado_sql.total_registros

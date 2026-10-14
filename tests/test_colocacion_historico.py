@@ -336,6 +336,10 @@ def test_repositorios_livianos_omiten_dimensiones_no_usadas() -> None:
     assert "provincia" not in project_mongo
     assert "garantia" not in project_mongo
     assert "plazo" not in project_mongo
+    assert "$switch" in project_mongo["condicion"]
+    assert "TipoCondicion" in str(project_mongo["condicion"])
+    assert "TipoEmision" in str(project_mongo["condicion"])
+    assert "N/A" in str(project_mongo["condicion"])
 
     db = FakeResumenSqlSession()
     sql_repository = SqlColocacionHistoricoRepository(db)  # type: ignore[arg-type]
@@ -347,6 +351,8 @@ def test_repositorios_livianos_omiten_dimensiones_no_usadas() -> None:
     sql = str(db.statement.compile(dialect=mssql.dialect(), compile_kwargs={"literal_binds": True}))
     assert "[PRESTAMOGARANTIAPERSONAL]" not in sql
     assert "[DIVISIONPOLITICACONSOLIDADO]" not in sql
+    assert "RETORNA_TIPOCONDICION_POR_IDPRESTAMO" in sql
+    assert "N/A" in sql
     assert datos[0].dimensiones.tasa_real_valor == 17.0
     assert datos[0].dimensiones.tasa_valor == 16.0
     assert datos[0].dimensiones.provincia == "SIN DATOS"
@@ -369,12 +375,15 @@ def test_repositorio_mongo_detalle_calcula_totales_y_limita_en_la_base() -> None
         ["MATRIZ"],
         "agencia",
         "MATRIZ",
+        condiciones=["NUEVO"],
         limite=25,
     )
 
     facet = mongo_db.collection.pipeline[-1]["$facet"]
+    expresiones_filtro = mongo_db.collection.pipeline[0]["$match"]["$expr"]["$and"]
     assert facet["items"][-1] == {"$limit": 25}
     assert "$group" in facet["totales"][0]
+    assert any(expresion.get("$in", [None, None])[1] == ["NUEVO"] for expresion in expresiones_filtro)
     assert resultado.total_registros == 0
     assert resultado.items == []
 
@@ -389,6 +398,7 @@ def test_repositorio_sql_detalle_consulta_totales_y_prefijo_limitado() -> None:
         ["MATRIZ"],
         "agencia",
         "MATRIZ",
+        condiciones=["NUEVO"],
         limite=25,
     )
 
@@ -396,6 +406,9 @@ def test_repositorio_sql_detalle_consulta_totales_y_prefijo_limitado() -> None:
     assert len(db.statements) == 2
     assert "TOP 25" in sql_items
     assert "ORDER BY" in sql_items
+    assert "NUEVO" in sql_items
+    assert "RETORNA_TIPOCONDICION_POR_IDPRESTAMO" in sql_items
+    assert "N/A" in sql_items
     assert resultado.total_registros == 2
     assert resultado.total_monto_colocado == 125.0
     assert resultado.items == []

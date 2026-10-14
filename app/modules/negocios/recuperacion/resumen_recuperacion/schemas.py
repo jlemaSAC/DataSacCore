@@ -42,11 +42,18 @@ class DiaResumenRecuperacion(BaseModel):
     recuperacion_por_tipo: dict[str, float]
 
 
+class RecuperacionPorAgencia(BaseModel):
+    agencia: str
+    recuperacion_total: float
+    recuperacion_por_tipo: dict[str, float]
+
+
 class ResumenActualRecuperacionResponse(BaseModel):
     fecha_inicio: date
     fecha_fin: date
     consolidado: bool
     agencias: list[str]
+    recuperacion_por_agencia: list[RecuperacionPorAgencia]
     actual: RangoResumenRecuperacion
     mes_anterior: RangoResumenRecuperacion
     anio_anterior: RangoResumenRecuperacion

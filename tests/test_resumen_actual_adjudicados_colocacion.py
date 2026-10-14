@@ -200,6 +200,24 @@ def test_resumen_actual_existente_conserva_colocacion_por_agencia() -> None:
     ]
 
 
+def test_resumen_actual_filtra_colocacion_por_agencia() -> None:
+    historico = _FakeColocacionHistoricoService()
+    service = ResumenColocacionService(historico)  # type: ignore[arg-type]
+
+    service.obtener_resumen_actual(
+        InputResumenActualColocacion(
+            fecha_inicio=date(2026, 8, 15),
+            fecha_fin=date(2026, 8, 25),
+            agencias=["MATRIZ"],
+        ),
+        _auth_context(),
+    )
+
+    assert historico.llamadas_agrupaciones == [
+        (date(2026, 8, 15), date(2026, 8, 25), ["MATRIZ"])
+    ]
+
+
 def test_endpoint_resumen_actual_adjudicados_retorna_detalle_por_agencia() -> None:
     service = ResumenColocacionService(_FakeColocacionHistoricoService())  # type: ignore[arg-type]
     app.dependency_overrides[get_current_auth_context] = _auth_context
