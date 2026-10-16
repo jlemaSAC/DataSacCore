@@ -29,9 +29,13 @@ from app.modules.negocios.colocacion.diaria_asesores.router import (
     router as colocacion_diaria_asesores_router,
 )
 from app.modules.negocios.inicio.router import router as negocio_inicio_router
+from app.modules.negocios.cartera_de_credito.control_diario_cartera.router import (
+    router as control_diario_cartera_router,
+)
 
 
 router = APIRouter(prefix="/negocios")
+router.include_router(control_diario_cartera_router)
 router.include_router(cartera_resumen_actual_router)
 router.include_router(cartera_resumen_diario_asesores_router)
 router.include_router(cartera_improductiva_router)

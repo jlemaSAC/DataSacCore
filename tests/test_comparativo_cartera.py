@@ -474,6 +474,7 @@ def test_endpoint_devuelve_comparativo_y_requiere_bearer() -> None:
     assert body["resumen_por_dimension"][0]["filas"] == [{
         "campo": "MATRIZ", "saldo_capital": 1000,
         "participacion_saldo_porcentaje": 100, "operaciones": 3, "clientes": 2,
+        "cartera_improductiva": 150,
         "provision_requerida": 75, "morosidad_porcentaje": 15,
     }]
 
@@ -503,6 +504,7 @@ def test_endpoint_de_negocios_devuelve_resumen_actual_de_cartera() -> None:
     assert resumen[0]["morosidad_porcentaje"] == 15
     assert resumen[0]["cartera_improductiva"] == 150
     assert resumen[0]["provision_requerida"] == 75
+    assert response.json()["resumen_por_dimension"][0]["filas"][0]["cartera_improductiva"] == 150
 
 
 @pytest.mark.parametrize('actual,diferidos', [(True, True), (True, False), (False, True), (False, False), (False, None)])
@@ -547,6 +549,9 @@ def test_tabla_cuenta_clientes_distintos_y_calcula_participacion_y_mora() -> Non
     assert productos[0].operaciones == 2
     assert productos[0].clientes == 1
     assert productos[0].morosidad_porcentaje == 15
+    assert [item.cartera_improductiva for item in productos] == [120, 30]
+    for dimension in response.resumen_por_dimension:
+        assert sum(item.cartera_improductiva for item in dimension.filas) == 150
     responsable = next(item.filas for item in response.resumen_por_dimension if item.dimension == 'usuario_responsable_control')
     assert responsable[0].campo == 'SIN DATOS'
 
@@ -563,6 +568,7 @@ def test_tabla_usa_ultimo_corte_disponible_sin_sumar_cortes_diarios() -> None:
     assert response.fecha_corte_resumen == date(2026, 9, 16)
     assert repository.resumen_filtros == (date(2026, 9, 16), [], None, False)
     assert response.resumen_por_dimension[0].filas[0].saldo_capital == 1000
+    assert response.resumen_por_dimension[0].filas[0].cartera_improductiva == 150
 
 
 def test_tabla_vacia_no_consulta_detalle_ni_sql() -> None:
@@ -587,6 +593,15 @@ def test_tabla_saldo_cero_no_divide_para_cero() -> None:
     assert fila.campo == 'SIN DATOS'
     assert fila.participacion_saldo_porcentaje == 0
     assert fila.morosidad_porcentaje == 0
+    assert fila.cartera_improductiva == 0
+
+
+def test_tabla_redondea_cartera_improductiva_despues_de_sumar_el_grupo() -> None:
+    rows = ComparativoCarteraService._resumir_dimensiones([
+        PrestamoResumenCartera('1', '1', {'agencia': 'MATRIZ'}, 100, 10.004, 0),
+        PrestamoResumenCartera('2', '2', {'agencia': 'MATRIZ'}, 100, 20.004, 0),
+    ], {})
+    assert rows[0].filas[0].cartera_improductiva == 30.01
 
 
 def test_tabla_completa_clientes_del_snapshot_desde_sql() -> None:

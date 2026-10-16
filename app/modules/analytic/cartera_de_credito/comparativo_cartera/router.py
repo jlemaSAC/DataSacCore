@@ -26,7 +26,7 @@ Devuelve un punto por cada fecha del rango y usa como referencias el cierre del
 mes anterior y el cierre del año anterior. El rango debe pertenecer a un solo mes.
 Una lista de agencias vacia representa el consolidado institucional.
 Incluye resumen_por_dimension para las ocho pestañas de la tabla, con saldo,
-participacion, operaciones, clientes distintos, provision requerida y mora.
+participacion, operaciones, clientes distintos, cartera improductiva, provision requerida y mora.
 La tabla aplica los mismos filtros y usa el ultimo corte disponible del rango,
 indicado en fecha_corte_resumen. Los valores de agrupacion ausentes son SIN DATOS.
 """,

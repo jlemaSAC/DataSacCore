@@ -104,6 +104,9 @@ class FilaResumenCartera(BaseModel):
     participacion_saldo_porcentaje: float
     operaciones: int
     clientes: int = Field(description="Clientes distintos dentro de esta agrupacion.")
+    cartera_improductiva: float = Field(
+        description="Suma del capital que no devenga intereses y del capital vencido del grupo."
+    )
     provision_requerida: float
     morosidad_porcentaje: float
 

@@ -233,6 +233,7 @@ class ComparativoCarteraService:
                 ),
                 operaciones=item.operaciones,
                 clientes=len(item.clientes),
+                cartera_improductiva=round(float(item.improductiva), 2),
                 provision_requerida=round(float(item.provision), 2),
                 morosidad_porcentaje=(
                     round(float(item.improductiva / item.saldo * 100), 2) if item.saldo else 0.0
