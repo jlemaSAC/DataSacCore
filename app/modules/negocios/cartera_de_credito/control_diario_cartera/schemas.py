@@ -1,12 +1,20 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+
+TipoVariacionCartera = Literal['diaria', 'cierre_mes_anterior', 'mismo_dia_mes_anterior']
 
 
 class ControlDiarioCarteraRequest(BaseModel):
     mes: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="Mes en formato YYYY-MM.")
     agencia: str | None = Field(default=None, max_length=150)
     filtrar_diferidos: bool | None = None
+    tipo_variacion: TipoVariacionCartera = Field(
+        default='diaria',
+        description='Base de comparación. El mismo día se ajusta al último día válido del mes anterior.',
+    )
 
     @field_validator("mes")
     @classmethod
@@ -48,5 +56,6 @@ class ControlDiarioCarteraResponse(BaseModel):
     mes: str
     agencia: str | None
     filtrar_diferidos: bool | None
+    tipo_variacion: TipoVariacionCartera
     dias: list[DiaControlCartera]
     filas: list[FilaControlDiarioCartera]

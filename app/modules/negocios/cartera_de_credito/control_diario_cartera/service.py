@@ -28,8 +28,10 @@ class ControlDiarioCarteraService:
         if inicio > fecha_limite:
             raise HTTPException(400, "El mes no puede ser posterior a la fecha del sistema.")
         fin = inicio.replace(day=monthrange(inicio.year, inicio.month)[1])
+        cierre_anterior = inicio - timedelta(days=1)
+        inicio_anterior = cierre_anterior.replace(day=1)
         cortes = self.repository.obtener_cortes(
-            desde=inicio - timedelta(days=1),
+            desde=inicio_anterior if request.tipo_variacion == 'mismo_dia_mes_anterior' else cierre_anterior,
             hasta=min(fin, fecha_limite),
             agencia=request.agencia,
             filtrar_diferidos=request.filtrar_diferidos,
@@ -37,16 +39,27 @@ class ControlDiarioCarteraService:
         dias = []
         for i in range(fin.day):
             fecha = inicio + timedelta(days=i)
-            anterior = fecha - timedelta(days=1)
+            if request.tipo_variacion == 'cierre_mes_anterior':
+                anterior = cierre_anterior
+            elif request.tipo_variacion == 'mismo_dia_mes_anterior':
+                anterior = inicio_anterior.replace(day=min(fecha.day, cierre_anterior.day))
+            else:
+                anterior = fecha - timedelta(days=1)
             dias.append(DiaControlCartera(
                 fecha=fecha,
                 fecha_anterior=anterior,
-                disponible=fecha in cortes.fechas and anterior in cortes.fechas,
+                disponible=fecha <= fecha_limite and fecha in cortes.fechas and anterior in cortes.fechas,
             ))
         # La última identificación de cada asesor/agencia mantiene estable el filtro de cargos.
         por_asesor: dict[tuple[str, str], dict[date, CorteAsesor]] = {}
+        fechas_relevantes = {
+            fecha
+            for dia in dias if dia.fecha <= fecha_limite
+            for fecha in (dia.fecha, dia.fecha_anterior)
+        }
         for corte in cortes.asesores:
-            por_asesor.setdefault((corte.codigo_asesor, corte.agencia), {})[corte.fecha] = corte
+            if corte.fecha in fechas_relevantes:
+                por_asesor.setdefault((corte.codigo_asesor, corte.agencia), {})[corte.fecha] = corte
         filas = []
         ordenados = sorted(por_asesor.items(), key=lambda item: (item[0][1], item[0][0]))
         for (codigo, agencia), valores in ordenados:
@@ -66,6 +79,7 @@ class ControlDiarioCarteraService:
             mes=request.mes,
             agencia=request.agencia,
             filtrar_diferidos=request.filtrar_diferidos,
+            tipo_variacion=request.tipo_variacion,
             dias=dias,
             filas=filas,
         )

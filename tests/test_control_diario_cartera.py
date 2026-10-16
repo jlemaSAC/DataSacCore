@@ -110,6 +110,78 @@ def test_mes_futuro_rechazado_antes_de_consultar_mongo():
     assert repo.calls == []
 
 
+@pytest.mark.parametrize('tipo,esperados,desde', [
+    ('diaria', [20.1, -9.9], date(2026, 9, 30)),
+    ('cierre_mes_anterior', [20.1, 10.2], date(2026, 9, 30)),
+    ('mismo_dia_mes_anterior', [40.2, 20.3], date(2026, 9, 1)),
+])
+def test_tres_variaciones_con_los_mismos_filtros(tipo, esperados, desde):
+    repo = FakeRepository([
+        corte('2026-09-01', '80', provision='4', improductiva='5'),
+        corte('2026-09-02', '90', provision='5', improductiva='10'),
+        corte('2026-09-30', '100.10', provision='5', improductiva='10'),
+        corte('2026-10-01', '120.20', provision='7', improductiva='8'),
+        corte('2026-10-02', '110.30', provision='6', improductiva='15'),
+    ])
+    respuesta = consultar(repo, tipo_variacion=tipo, agencia=' MATRIZ ', filtrar_diferidos=True)
+    assert respuesta.tipo_variacion == tipo
+    assert [v.saldo_capital for v in respuesta.filas[0].variaciones[:2]] == esperados
+    if tipo == 'mismo_dia_mes_anterior':
+        assert respuesta.filas[0].variaciones[0].model_dump() == {
+            'saldo_capital': 40.2, 'cartera_improductiva': 3, 'provisiones': 3,
+        }
+    assert repo.calls == [dict(desde=desde, hasta=date(2026, 10, 15), agencia='MATRIZ', filtrar_diferidos=True)]
+
+
+@pytest.mark.parametrize('mes,limite,dia_anterior', [
+    ('2024-03', date(2024, 3, 31), date(2024, 2, 29)),
+    ('2025-03', date(2025, 3, 31), date(2025, 2, 28)),
+    ('2026-10', date(2026, 10, 31), date(2026, 9, 30)),
+    ('2026-01', date(2026, 1, 31), date(2025, 12, 31)),
+])
+def test_mismo_dia_ajusta_mes_corto_bisiesto_y_cambio_de_anio(mes, limite, dia_anterior):
+    respuesta = consultar(
+        FakeRepository([corte(dia_anterior.isoformat(), '100'), corte(limite.isoformat(), '150')]),
+        mes, limite, tipo_variacion='mismo_dia_mes_anterior',
+    )
+    assert respuesta.dias[-1].fecha_anterior == dia_anterior
+    assert respuesta.filas[0].variaciones[-1].saldo_capital == 50
+
+
+@pytest.mark.parametrize('tipo', ['cierre_mes_anterior', 'mismo_dia_mes_anterior'])
+def test_variacion_mensual_no_sustituye_cortes_ausentes_ni_calcula_dias_futuros(tipo):
+    respuesta = consultar(FakeRepository([
+        corte('2026-09-01', '80'), corte('2026-09-30', '100'),
+        corte('2026-10-01', '120'), corte('2026-10-03', '150'),
+    ]), limite=date(2026, 10, 2), tipo_variacion=tipo)
+    assert respuesta.dias[0].disponible
+    assert not respuesta.dias[1].disponible
+    assert not respuesta.dias[2].disponible
+    assert respuesta.filas[0].variaciones[1:3] == [None, None]
+    sin_base = consultar(FakeRepository([corte('2026-10-01', '120')]), tipo_variacion=tipo)
+    assert not sin_base.dias[0].disponible
+    assert sin_base.filas[0].variaciones[0] is None
+
+
+def test_mismo_dia_usa_cero_solo_para_asesores_ausentes_en_cortes_existentes():
+    respuesta = consultar(FakeRepository([
+        corte('2026-09-01', '100', asesor='SALE'),
+        corte('2026-10-01', '50', asesor='ENTRA'),
+    ]), tipo_variacion='mismo_dia_mes_anterior')
+    filas = {fila.codigo_asesor: fila for fila in respuesta.filas}
+    assert filas['SALE'].variaciones[0].saldo_capital == -100
+    assert filas['ENTRA'].variaciones[0].saldo_capital == 50
+
+
+def test_mismo_dia_no_incluye_asesores_de_fechas_que_no_participan_en_la_comparacion():
+    respuesta = consultar(FakeRepository([
+        corte('2026-09-01', '100'), corte('2026-10-01', '150'),
+        corte('2026-09-30', '500', asesor='NO_COMPARADO'),
+    ]), limite=date(2026, 10, 1), tipo_variacion='mismo_dia_mes_anterior')
+    assert [fila.codigo_asesor for fila in respuesta.filas] == ['A1']
+    assert respuesta.filas[0].variaciones[0].saldo_capital == 50
+
+
 @pytest.mark.parametrize('mes', ['2026-13', '2026-00', '26-01', '0000-01', '9999-12'])
 def test_contrato_valida_mes(mes):
     with pytest.raises(ValidationError):
@@ -133,6 +205,12 @@ def test_endpoint_valida_bearer_y_usa_fecha_del_sistema():
     assert response.status_code == 200
     assert repo.calls[0]['hasta'] == date(2026, 10, 8)
     assert response.json()['filtrar_diferidos'] is True
+    assert response.json()['tipo_variacion'] == 'diaria'
+    for tipo in ['cierre_mes_anterior', 'mismo_dia_mes_anterior']:
+        response = client.post(ruta, json={'mes': '2026-10', 'tipo_variacion': tipo})
+        assert response.status_code == 200
+        assert response.json()['tipo_variacion'] == tipo
+    assert client.post(ruta, json={'mes': '2026-10', 'tipo_variacion': 'invalida'}).status_code == 422
     assert client.post(ruta, json={'mes': '2026-11'}).status_code == 400
     assert client.post(ruta, json={'mes': '2026-15'}).status_code == 422
 
