@@ -1,400 +1,177 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from pymongo.collection import Collection
+from bson import Decimal128
 from pymongo.database import Database
 
-
-MongoDocument = dict[str, Any]
-COLECCION_RECUPERACION = "RecuperacionCrediticia"
-COLECCION_RECUPERACION_ACTUAL = "RecuperacionCrediticiaActual"
-COLECCION_SITUACION = "SituacionCrediticia"
-COLECCION_SITUACION_ACTUAL = "SituacionCrediticiaActual"
-PATRON_TIPO_TRANSACCION = r"^ABONO PR.STAMO DESDE CUENTA(?:$|\s)"
-ESTADOS_INCLUIDOS = ["CASTIGADO", "JUDICIAL", "T", "J"]
-CAMPOS_MONTO = (
-    "TOTAL_RECUPERADO",
-    "CAPITAL",
-    "INTERES",
-    "INTERES_MORA",
-    "SEGURO",
-    "COBRANZA",
-    "JUDICIAL",
-    "DIFERIDO",
-    "OTROS",
+from ..domain import (
+    CorteCastigoNoDisponibleError,
+    CorteDepositosCastigo,
+    CortesDepositosCastigo,
+    PrestamoCastigoInicio,
+    normalizar_estado,
 )
 
-
-def _texto_normalizado(campo: Any) -> dict[str, Any]:
-    return {
-        "$toUpper": {
-            "$trim": {
-                "input": {
-                    "$convert": {
-                        "input": campo,
-                        "to": "string",
-                        "onError": "",
-                        "onNull": "",
-                    }
-                }
-            }
-        }
-    }
-
-
-def _numero(campo: str) -> dict[str, Any]:
-    return {
-        "$convert": {
-            "input": campo,
-            "to": "double",
-            "onError": 0,
-            "onNull": 0,
-        }
-    }
-
-
-def _nombre_campo_alternativo(campo: str) -> str:
-    """Nombre camel case utilizado por algunas versiones de los documentos."""
-    return "".join(parte.title() for parte in campo.lower().split("_"))
+MongoDocument = dict[str, Any]
+ESTADOS_INCLUIDOS = ["CASTIGADO", "CASTIGO", "JUDICIAL", "T", "J"]
+TAMANO_LOTE = 500
 
 
 class MongoCastigoRepository:
-    """Agrega depósitos diarios desde las colecciones de recuperaciones Mongo."""
+    """Lee el universo inicial y sus acumulados, incluyendo los cortes cancelados."""
 
     def __init__(self, mongo_db: Database[MongoDocument]) -> None:
-        self.historico: Collection[MongoDocument] = mongo_db[COLECCION_RECUPERACION]
-        self.actual: Collection[MongoDocument] = mongo_db[COLECCION_RECUPERACION_ACTUAL]
+        self.historico = mongo_db["SituacionCrediticia"]
+        self.actual = mongo_db["SituacionCrediticiaActual"]
 
-    def obtener_depositos_diarios(
+    def obtener_cortes(
         self,
+        *,
         fecha_desde: date,
         fecha_hasta: date,
         fecha_actual: date,
         agencias: list[str],
         asesores: list[str],
         cargos: list[str],
-    ) -> dict[str, Any]:
-        consultas: list[tuple[Collection[MongoDocument], str, str]] = []
-        ayer = fecha_actual - timedelta(days=1)
-        fecha_historica_hasta = min(fecha_hasta, ayer)
-
-        if fecha_desde <= fecha_historica_hasta:
-            consultas.append(
-                (
-                    self.historico,
-                    fecha_desde.strftime("%Y%m%d"),
-                    fecha_historica_hasta.strftime("%Y%m%d"),
-                )
-            )
-        if fecha_desde <= fecha_actual <= fecha_hasta:
-            fecha_hoy = fecha_actual.strftime("%Y%m%d")
-            consultas.append((self.actual, fecha_hoy, fecha_hoy))
-
-        depositos_por_clave: dict[tuple[Any, ...], dict[str, Any]] = {}
-        catalogos = {"agencias": set(), "asesores": set(), "cargos": set()}
-        for collection, desde, hasta in consultas:
-            pipeline = self._construir_pipeline(
-                desde=desde,
-                hasta=hasta,
-                fecha_inicio=fecha_desde.strftime("%Y%m%d"),
-                fecha_fin=fecha_hasta.strftime("%Y%m%d"),
-                fecha_actual=fecha_actual.strftime("%Y%m%d"),
-                agencias=agencias,
-                asesores=asesores,
-                cargos=cargos,
-            )
-            documento = next(iter(collection.aggregate(pipeline, allowDiskUse=True)), {})
-            for campo, campo_pipeline in (
-                ("agencias", "agencia"),
-                ("asesores", "asesor"),
-                ("cargos", "cargo_asesor"),
-            ):
-                catalogos[campo].update(
-                    str(item["_id"])
-                    for item in documento.get(campo_pipeline, [])
-                    if item.get("_id")
-                )
-            for fila in documento.get("depositos", []):
-                clave = tuple(
-                    fila.get("_id", {}).get(campo)
-                    for campo in (
-                        "fecha",
-                        "numero_prestamo",
-                        "estado_prestamo_inicio",
-                        "estado_prestamo_fin",
-                        "tipo_transaccion",
-                        "agencia",
-                        "codigo_asesor",
-                        "asesor",
-                        "cargo_asesor",
-                    )
-                )
-                acumulado = depositos_por_clave.setdefault(
-                    clave,
-                    {**fila, **{campo.lower(): 0.0 for campo in CAMPOS_MONTO}},
-                )
-                for campo in CAMPOS_MONTO:
-                    acumulado[campo.lower()] += float(fila.get(campo.lower()) or 0)
-
-        depositos = list(depositos_por_clave.values())
-        depositos.sort(
-            key=lambda fila: (
-                fila.get("_id", {}).get("fecha", ""),
-                fila.get("_id", {}).get("numero_prestamo", ""),
-                fila.get("_id", {}).get("agencia", ""),
-                fila.get("_id", {}).get("asesor", ""),
-            )
-        )
-        return {
-            "depositos": depositos,
-            "catalogos": {campo: sorted(valores) for campo, valores in catalogos.items()},
+        numeros_prestamo: list[str] | None = None,
+    ) -> CortesDepositosCastigo:
+        # El día anterior solo es base cuando pertenece al mismo mes.
+        base = fecha_desde - timedelta(days=1) if fecha_desde.day > 1 else fecha_desde
+        rango = {"fecha_corte": {
+            "$gte": base.strftime("%Y%m%d"), "$lte": fecha_hasta.strftime("%Y%m%d"),
+        }}
+        fechas = {
+            datetime.strptime(valor, "%Y%m%d").date()
+            for valor in self.historico.distinct("fecha_corte", rango, maxTimeMS=60000)
         }
+        fecha_sql = None
+        if fecha_hasta == fecha_actual and fecha_actual not in fechas:
+            ultimo = self.actual.find_one({}, {"_id": 0, "as_of": 1})
+            if ultimo and _fecha_actual(ultimo.get("as_of")) == fecha_actual:
+                fecha_sql = fecha_actual
+                fechas.add(fecha_actual)
+        fecha = base
+        while fecha <= fecha_hasta:
+            if fecha not in fechas:
+                raise CorteCastigoNoDisponibleError(
+                    f"No existe un corte de SituacionCrediticia para {fecha.isoformat()}; "
+                    "no se puede calcular el depósito diario."
+                )
+            fecha += timedelta(days=1)
 
-    @staticmethod
-    def _construir_pipeline(
-        *,
-        desde: str,
-        hasta: str,
-        fecha_inicio: str,
-        fecha_fin: str,
-        fecha_actual: str,
-        agencias: list[str],
-        asesores: list[str],
-        cargos: list[str],
-    ) -> list[dict[str, Any]]:
-        pipeline: list[dict[str, Any]] = [
-            {"$match": {"fecha_corte": {"$gte": desde, "$lte": hasta}}},
-            {
-                "$project": {
-                    "fecha": "$fecha_corte",
-                    "numero_prestamo": {
-                        "$trim": {
-                            "input": {
-                                "$convert": {
-                                    "input": {"$ifNull": ["$NUMERO_PRESTAMO", "$NumeroPrestamo"]},
-                                    "to": "string",
-                                    "onError": "",
-                                    "onNull": "",
-                                }
-                            }
-                        }
-                    },
-                    "tipo_transaccion": _texto_normalizado(
-                        {"$ifNull": ["$TIPO_TRANSACCION", "$TipoTransaccion"]}
-                    ),
-                    "agencia": _texto_normalizado("$AGENCIA"),
-                    "codigo_asesor": {
-                        "$trim": {
-                            "input": {
-                                "$convert": {
-                                    "input": "$CODIGO_ASESOR_COBRO",
-                                    "to": "string",
-                                    "onError": "",
-                                    "onNull": "",
-                                }
-                            }
-                        }
-                    },
-                    "asesor": _texto_normalizado(
-                        {"$ifNull": ["$NOMBRE_ASESOR_COBRO", "$CODIGO_ASESOR_COBRO"]}
-                    ),
-                    "cargo_asesor": _texto_normalizado("$CARGO_ASESOR_COBRO"),
-                    **{
-                        campo.lower(): _numero(
-                            {"$ifNull": [f"${campo}", f"${_nombre_campo_alternativo(campo)}"]}
-                        )
-                        for campo in CAMPOS_MONTO
-                    },
-                }
-            },
-            {
-                "$match": {
-                    "numero_prestamo": {"$ne": ""},
-                    "tipo_transaccion": {
-                        "$regex": PATRON_TIPO_TRANSACCION,
-                        "$options": "i",
-                    },
-                }
-            },
-            *_lookup_estado_corte("inicio", fecha_inicio, fecha_actual),
-            {"$match": {"estado_prestamo_inicio": {"$in": ESTADOS_INCLUIDOS}}},
-            *_lookup_estado_corte("fin", fecha_fin, fecha_actual),
-            {
-                "$set": {
-                    "total_recuperado": {
-                        "$cond": [
-                            {"$gt": ["$total_recuperado", 0]},
-                            "$total_recuperado",
-                            {
-                                "$add": [
-                                    "$capital",
-                                    "$interes",
-                                    "$interes_mora",
-                                    "$seguro",
-                                    "$cobranza",
-                                    "$judicial",
-                                    "$diferido",
-                                    "$otros",
-                                ]
-                            },
-                        ]
-                    }
-                }
-            },
-            {
-                "$facet": {
-                    "depositos": [
-                        *_filtros_dimensiones(agencias, asesores, cargos),
-                        {
-                            "$group": {
-                                "_id": {
-                                    "fecha": "$fecha",
-                                    "numero_prestamo": "$numero_prestamo",
-                                    "estado_prestamo_inicio": "$estado_prestamo_inicio",
-                                    "estado_prestamo_fin": "$estado_prestamo_fin",
-                                    "tipo_transaccion": "$tipo_transaccion",
-                                    "agencia": "$agencia",
-                                    "codigo_asesor": "$codigo_asesor",
-                                    "asesor": "$asesor",
-                                    "cargo_asesor": "$cargo_asesor",
-                                },
-                                **{
-                                    campo.lower(): {"$sum": f"${campo.lower()}"}
-                                    for campo in CAMPOS_MONTO
-                                },
-                            }
-                        },
-                        {"$sort": {"_id.fecha": 1, "_id.numero_prestamo": 1}},
-                    ],
-                    **{
-                        campo: [
-                            {"$match": {campo: {"$ne": ""}}},
-                            {"$group": {"_id": f"${campo}"}},
-                            {"$sort": {"_id": 1}},
-                        ]
-                        for campo in ("agencia", "asesor", "cargo_asesor")
-                    },
-                }
-            },
-        ]
-        return pipeline
-
-
-def _filtros_dimensiones(
-    agencias: list[str], asesores: list[str], cargos: list[str]
-) -> list[dict[str, Any]]:
-    filtros = []
-    for campo, valores in (
-        ("agencia", agencias),
-        ("asesor", asesores),
-        ("cargo_asesor", cargos),
-    ):
-        if valores:
-            filtros.append({"$match": {campo: {"$in": valores}}})
-    return filtros
-
-
-def _lookup_estado_corte(
-    nombre: str,
-    fecha_corte: str,
-    fecha_actual: str,
-) -> list[dict[str, Any]]:
-    proyeccion = {
-        "_id": 0,
-        "EstadoPrestamo": 1,
-        "CodigoEstadoPrestamo": 1,
-        "CodigoEstado": 1,
-    }
-    situacion = f"situacion_{nombre}"
-    estado = f"estado_prestamo_{nombre}"
-    if fecha_corte == fecha_actual:
-        fecha_anterior = (
-            date(
-                int(fecha_actual[:4]),
-                int(fecha_actual[4:6]),
-                int(fecha_actual[6:]),
-            )
-            - timedelta(days=1)
-        ).strftime("%Y%m%d")
-        lookup_actual = _lookup_situacion(
-            COLECCION_SITUACION_ACTUAL,
-            f"{situacion}_actual",
-            proyeccion,
+        es_inicio_actual = fecha_desde == fecha_sql
+        coleccion_inicio = self.actual if es_inicio_actual else self.historico
+        match_inicio: MongoDocument = (
+            {} if es_inicio_actual else {"fecha_corte": fecha_desde.strftime("%Y%m%d")}
         )
-        lookup_historico = _lookup_situacion(
-            COLECCION_SITUACION,
-            f"{situacion}_historica",
-            proyeccion,
-            fecha_corte=fecha_anterior,
-        )
-        stages = [
-            lookup_actual,
-            lookup_historico,
-            {
-                "$set": {
-                    situacion: {
-                        "$ifNull": [
-                            {"$arrayElemAt": [f"${situacion}_actual", 0]},
-                            {"$arrayElemAt": [f"${situacion}_historica", 0]},
-                        ]
-                    }
-                }
-            },
+        match_inicio["$or"] = [
+            {"EstadoPrestamo": {"$in": ESTADOS_INCLUIDOS}},
+            {"CodigoEstadoPrestamo": {"$in": ["T", "J"]}},
         ]
-    else:
-        stages = [
-            _lookup_situacion(
-                COLECCION_SITUACION,
-                situacion,
-                proyeccion,
-                fecha_corte=fecha_corte,
+        if numeros_prestamo is not None:
+            match_inicio["NumeroPrestamo"] = {"$in": numeros_prestamo}
+        proyeccion = {campo: 1 for campo in (
+            "NumeroPrestamo", "EstadoPrestamo", "CodigoEstadoPrestamo",
+            "Agencia", "CodigoAsesor", "CodigoUsuario", "NombreAsesor", "CargoAsesor",
+        )}
+        proyeccion["_id"] = 0
+        prestamos_por_numero: dict[str, PrestamoCastigoInicio] = {}
+        for documento in coleccion_inicio.find(match_inicio, proyeccion).max_time_ms(60000):
+            estado = normalizar_estado(
+                documento.get("EstadoPrestamo") or documento.get("CodigoEstadoPrestamo")
             )
-        ]
+            agencia = _texto(documento.get("Agencia"))
+            asesor = _texto(documento.get("NombreAsesor"))
+            cargo = _texto(documento.get("CargoAsesor"))
+            if estado not in {"CASTIGADO", "JUDICIAL"}:
+                continue
+            filtros = ((agencia, agencias), (asesor, asesores), (cargo, cargos))
+            if any(valores and valor not in valores for valor, valores in filtros):
+                continue
+            numero = str(documento.get("NumeroPrestamo") or "").strip()
+            if not numero:
+                continue
+            prestamo = PrestamoCastigoInicio(
+                numero_prestamo=numero,
+                estado=estado,
+                agencia=agencia,
+                codigo_asesor=str(
+                    documento.get("CodigoUsuario") or documento.get("CodigoAsesor") or ""
+                ).strip(),
+                asesor=asesor,
+                cargo=cargo,
+            )
+            anterior = prestamos_por_numero.get(numero)
+            if anterior is not None and anterior != prestamo:
+                raise CorteCastigoNoDisponibleError(
+                    "El corte inicial contiene dimensiones contradictorias para un préstamo."
+                )
+            prestamos_por_numero[numero] = prestamo
+        prestamos = list(prestamos_por_numero.values())
+        if not prestamos:
+            return CortesDepositosCastigo(prestamos=[], cortes=[])
 
-    stages.extend(
-        [
-            {"$unwind": f"${situacion}"},
-            {
-                "$set": {
-                    estado: _texto_normalizado(
-                        {
-                            "$ifNull": [
-                                f"${situacion}.EstadoPrestamo",
-                                {
-                                    "$ifNull": [
-                                        f"${situacion}.CodigoEstadoPrestamo",
-                                        f"${situacion}.CodigoEstado",
-                                    ]
-                                },
-                            ]
-                        }
+        numeros = [prestamo.numero_prestamo for prestamo in prestamos]
+        cortes = []
+        estados_actuales = {}
+        for offset in range(0, len(numeros), TAMANO_LOTE):
+            lote = numeros[offset:offset + TAMANO_LOTE]
+            match = {**rango, "NumeroPrestamo": {"$in": lote}}
+            campos = {
+                "_id": 0, "NumeroPrestamo": 1, "fecha_corte": 1,
+                "DepositosMes": 1, "EstadoPrestamo": 1,
+            }
+            for documento in self.historico.find(match, campos).max_time_ms(60000):
+                numero = str(documento["NumeroPrestamo"]).strip()
+                fecha = datetime.strptime(documento["fecha_corte"], "%Y%m%d").date()
+                if fecha == fecha_sql:
+                    continue
+                valor = documento.get("DepositosMes")
+                if valor is None:
+                    raise CorteCastigoNoDisponibleError(
+                        f"El corte {fecha.isoformat()} no contiene DepositosMes "
+                        "para todos los préstamos del universo inicial."
                     )
+                try:
+                    monto = valor.to_decimal() if isinstance(valor, Decimal128) else Decimal(str(valor))
+                    if not monto.is_finite():
+                        raise InvalidOperation
+                except (InvalidOperation, ValueError) as exc:
+                    raise CorteCastigoNoDisponibleError(
+                        f"DepositosMes contiene un valor no válido en el corte {fecha.isoformat()}."
+                    ) from exc
+                cortes.append(CorteDepositosCastigo(
+                    numero, fecha, monto, normalizar_estado(documento.get("EstadoPrestamo")),
+                ))
+            if fecha_sql:
+                campos_actuales = {
+                    "_id": 0, "NumeroPrestamo": 1,
+                    "EstadoPrestamo": 1, "CodigoEstadoPrestamo": 1,
                 }
-            },
-        ]
-    )
-    return stages
+                for documento in self.actual.find(
+                    {"NumeroPrestamo": {"$in": lote}}, campos_actuales,
+                ).max_time_ms(60000):
+                    estados_actuales[str(documento["NumeroPrestamo"]).strip()] = normalizar_estado(
+                        documento.get("EstadoPrestamo") or documento.get("CodigoEstadoPrestamo")
+                    )
+        return CortesDepositosCastigo(prestamos, cortes, fecha_sql, estados_actuales)
 
 
-def _lookup_situacion(
-    coleccion: str,
-    alias: str,
-    proyeccion: dict[str, int],
-    *,
-    fecha_corte: str | None = None,
-) -> dict[str, Any]:
-    condiciones = [{"$eq": ["$NumeroPrestamo", "$$numero"]}]
-    if fecha_corte is not None:
-        condiciones.append({"$eq": ["$fecha_corte", fecha_corte]})
-    return {
-        "$lookup": {
-            "from": coleccion,
-            "let": {"numero": "$numero_prestamo"},
-            "pipeline": [
-                {"$match": {"$expr": {"$and": condiciones}}},
-                {"$project": proyeccion},
-                {"$limit": 1},
-            ],
-            "as": alias,
-        }
-    }
+def _texto(valor: Any) -> str:
+    return str(valor or "").strip().upper()
+
+
+def _fecha_actual(valor: Any) -> date | None:
+    if isinstance(valor, datetime):
+        instante = valor.replace(tzinfo=valor.tzinfo or timezone.utc)
+        return instante.astimezone(ZoneInfo("America/Guayaquil")).date()
+    if isinstance(valor, date):
+        return valor
+    if valor:
+        try:
+            return _fecha_actual(datetime.fromisoformat(str(valor).replace("Z", "+00:00")))
+        except ValueError:
+            return None
+    return None

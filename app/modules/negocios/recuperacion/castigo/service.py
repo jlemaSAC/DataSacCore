@@ -1,114 +1,175 @@
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 from fastapi import HTTPException
 
-from app.modules.negocios.recuperacion.castigo.repositories.mongo_castigo_repository import (
-    MongoCastigoRepository,
+from app.modules.auth.schemas import AuthContext
+from .domain import (
+    CorteCastigoNoDisponibleError,
+    CorteDepositosCastigo,
+    CortesDepositosCastigo,
 )
-from app.modules.negocios.recuperacion.castigo.schemas import (
+from .repositories.mongo_castigo_repository import MongoCastigoRepository
+from .repositories.sql_castigo_repository import SqlCastigoRepository
+from .schemas import (
     DepositoCastigoDiarioOut,
     DepositosCastigoCatalogosOut,
     DepositosCastigoResponse,
     InputDepositosCastigo,
+    InputDetalleDepositosCastigo,
+    DetalleDepositosCastigoResponse,
+    MovimientoDepositoCuentaOut,
 )
-from app.modules.auth.schemas import AuthContext
-
 
 logger = logging.getLogger("uvicorn.error")
-MAX_MESES_RANGO = 60
 
 
 class CastigoService:
-    def __init__(self, mongo_repository: MongoCastigoRepository) -> None:
+    def __init__(
+        self,
+        mongo_repository: MongoCastigoRepository,
+        sql_repository: SqlCastigoRepository,
+    ) -> None:
         self.mongo_repository = mongo_repository
+        self.sql_repository = sql_repository
 
     def obtener_depositos_diarios(
-        self,
-        input_data: InputDepositosCastigo,
-        auth_context: AuthContext,
+        self, input_data: InputDepositosCastigo, auth_context: AuthContext,
+        *, numeros_prestamo: list[str] | None = None,
     ) -> DepositosCastigoResponse:
         fecha_sistema = auth_context.usuario.fecha_sistema
         fecha_actual = fecha_sistema.date() if isinstance(fecha_sistema, datetime) else fecha_sistema
-        self._validar_rango(input_data, fecha_actual)
-
+        if input_data.fecha_hasta > fecha_actual:
+            raise HTTPException(400, "fecha_hasta no puede ser posterior a la fecha del sistema.")
         try:
-            resultado = self.mongo_repository.obtener_depositos_diarios(
-                fecha_desde=input_data.fecha_desde,
-                fecha_hasta=input_data.fecha_hasta,
-                fecha_actual=fecha_actual,
-                agencias=input_data.agencias,
-                asesores=input_data.asesores,
-                cargos=input_data.cargos,
+            datos = self.mongo_repository.obtener_cortes(
+                fecha_desde=input_data.fecha_desde, fecha_hasta=input_data.fecha_hasta,
+                fecha_actual=fecha_actual, agencias=input_data.agencias,
+                asesores=input_data.asesores, cargos=input_data.cargos,
+                numeros_prestamo=numeros_prestamo,
             )
-            depositos: list[DepositoCastigoDiarioOut] = []
-            for fila in resultado.get("depositos", []):
-                clave = fila.get("_id") or {}
-                depositos.append(
-                    DepositoCastigoDiarioOut(
-                        numero_prestamo=str(clave.get("numero_prestamo") or ""),
-                        fecha=datetime.strptime(str(clave.get("fecha")), "%Y%m%d").date(),
-                        estado_inicio=str(clave.get("estado_prestamo_inicio") or ""),
-                        estado_fin=str(clave.get("estado_prestamo_fin") or ""),
-                        tipo_transaccion=str(clave.get("tipo_transaccion") or ""),
-                        agencia=str(clave.get("agencia") or ""),
-                        codigo_asesor=str(clave.get("codigo_asesor") or ""),
-                        asesor=str(clave.get("asesor") or ""),
-                        cargo_asesor=str(clave.get("cargo_asesor") or ""),
-                        total_depositado=float(fila.get("total_recuperado") or 0),
-                    )
+            cortes = list(datos.cortes)
+            if datos.fecha_sql:
+                montos = self.sql_repository.obtener_depositos_mes(
+                    [prestamo.numero_prestamo for prestamo in datos.prestamos], datos.fecha_sql,
                 )
-
-            total_depositado = sum(item.total_depositado for item in depositos)
-            catalogos_raw = resultado.get("catalogos", {})
-            catalogos = DepositosCastigoCatalogosOut(
-                agencias=catalogos_raw.get("agencias", []),
-                asesores=catalogos_raw.get("asesores", []),
-                cargos=catalogos_raw.get("cargos", []),
+                for prestamo in datos.prestamos:
+                    if prestamo.numero_prestamo not in montos:
+                        raise CorteCastigoNoDisponibleError(
+                            "No se pudo obtener DepositosMes del corte actual "
+                            "para todos los préstamos del universo inicial."
+                        )
+                    cortes.append(CorteDepositosCastigo(
+                        prestamo.numero_prestamo, datos.fecha_sql,
+                        montos[prestamo.numero_prestamo],
+                        datos.estados_actuales.get(prestamo.numero_prestamo, ""),
+                    ))
+            depositos = calcular_depositos_diarios(
+                datos, cortes, input_data.fecha_desde, input_data.fecha_hasta,
             )
-            logger.debug(
-                "castigo_depositos_diarios_consulta_completada",
-                extra={
-                    "fecha_desde": input_data.fecha_desde.isoformat(),
-                    "fecha_hasta": input_data.fecha_hasta.isoformat(),
-                    "depositos": len(depositos),
-                    "total_depositado": total_depositado,
-                },
-            )
+            total = sum((Decimal(str(item.total_depositado)) for item in depositos), Decimal(0))
             return DepositosCastigoResponse(
-                fecha_desde=input_data.fecha_desde,
-                fecha_hasta=input_data.fecha_hasta,
-                depositos=depositos,
-                total_depositado=total_depositado,
-                catalogos=catalogos,
+                fecha_desde=input_data.fecha_desde, fecha_hasta=input_data.fecha_hasta,
+                depositos=depositos, total_depositado=float(total),
+                catalogos=DepositosCastigoCatalogosOut(
+                    agencias=sorted({p.agencia for p in datos.prestamos if p.agencia}),
+                    asesores=sorted({p.asesor for p in datos.prestamos if p.asesor}),
+                    cargos=sorted({p.cargo for p in datos.prestamos if p.cargo}),
+                ),
             )
+        except CorteCastigoNoDisponibleError as exc:
+            raise HTTPException(409, str(exc)) from exc
         except HTTPException:
             raise
         except Exception as exc:
-            logger.exception("Error consultando depósitos diarios de préstamos castigados")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error consultando depósitos diarios de castigos: {exc}",
-            ) from exc
+            logger.exception("Error consultando depósitos mensuales de préstamos castigados")
+            raise HTTPException(500, "No fue posible consultar los depósitos diarios de castigo.") from exc
 
-    @staticmethod
-    def _validar_rango(
-        input_data: InputDepositosCastigo,
-        fecha_actual: date,
-    ) -> None:
-        if input_data.fecha_hasta > fecha_actual:
-            raise HTTPException(
-                status_code=400,
-                detail="fecha_hasta no puede ser posterior a la fecha del sistema.",
-            )
-        meses = (
-            (input_data.fecha_hasta.year - input_data.fecha_desde.year) * 12
-            + input_data.fecha_hasta.month
-            - input_data.fecha_desde.month
-            + 1
+    def obtener_detalle_depositos(
+        self, input_data: InputDetalleDepositosCastigo, auth_context: AuthContext,
+    ) -> DetalleDepositosCastigoResponse:
+        consulta = InputDepositosCastigo(**input_data.model_dump(include={
+            "fecha_desde", "fecha_hasta", "agencias", "asesores", "cargos",
+        }))
+        resultado = self.obtener_depositos_diarios(
+            consulta, auth_context, numeros_prestamo=input_data.numeros_prestamo,
         )
-        if meses > MAX_MESES_RANGO:
-            raise HTTPException(
-                status_code=400,
-                detail=f"El rango no puede superar {MAX_MESES_RANGO} meses.",
+        depositos = [d for d in resultado.depositos if d.total_depositado != 0 and (
+            input_data.fecha_deposito is None or d.fecha == input_data.fecha_deposito
+        )]
+        desde = input_data.fecha_deposito or input_data.fecha_desde
+        hasta = input_data.fecha_deposito or input_data.fecha_hasta
+        numeros = sorted({d.numero_prestamo for d in depositos})
+        try:
+            if input_data.incluir_movimientos:
+                filas, cantidad, creditos = self.sql_repository.obtener_movimientos(
+                    numeros, desde, hasta, input_data.pagina, input_data.tamano_pagina,
+                )
+            else:
+                filas, cantidad, creditos = [], 0, Decimal(0)
+        except Exception as exc:
+            logger.exception("Error consultando movimientos en cuentas para castigo")
+            raise HTTPException(500, "No fue posible consultar los movimientos en cuentas.") from exc
+        return DetalleDepositosCastigoResponse(
+            fecha_desde=desde, fecha_hasta=hasta, depositos=depositos,
+            total_depositado=float(sum((Decimal(str(d.total_depositado)) for d in depositos), Decimal(0))),
+            movimientos=[MovimientoDepositoCuentaOut(**fila) for fila in filas],
+            total_movimientos=cantidad, total_creditos_cuenta=float(creditos),
+            pagina=input_data.pagina, tamano_pagina=input_data.tamano_pagina,
+        )
+
+
+def calcular_depositos_diarios(
+    datos: CortesDepositosCastigo,
+    cortes: list[CorteDepositosCastigo],
+    desde: date,
+    hasta: date,
+) -> list[DepositoCastigoDiarioOut]:
+    por_prestamo: dict[str, dict[date, CorteDepositosCastigo]] = {}
+    for corte in cortes:
+        anteriores = por_prestamo.setdefault(corte.numero_prestamo, {})
+        repetido = anteriores.get(corte.fecha)
+        if repetido is not None and repetido != corte:
+            raise CorteCastigoNoDisponibleError(
+                f"Existen cortes contradictorios en {corte.fecha.isoformat()} "
+                "para un préstamo del universo inicial."
             )
+        anteriores[corte.fecha] = corte
+    resultado = []
+    for prestamo in datos.prestamos:
+        valores = por_prestamo.get(prestamo.numero_prestamo, {})
+        base = desde - timedelta(days=1)
+        fechas_necesarias = [
+            desde + timedelta(days=i) for i in range((hasta - desde).days + 1)
+        ]
+        if desde.day > 1:
+            fechas_necesarias.insert(0, base)
+        for fecha in fechas_necesarias:
+            if fecha not in valores:
+                raise CorteCastigoNoDisponibleError(
+                    f"Falta el corte {fecha.isoformat()} de un préstamo del universo inicial; "
+                    "no se puede calcular su depósito diario."
+                )
+        anterior = valores[base].depositos_mes if desde.day > 1 else Decimal(0)
+        movimientos = []
+        for fecha in fechas_necesarias:
+            if fecha < desde:
+                continue
+            monto = (valores[fecha].depositos_mes - anterior).quantize(Decimal("0.01"))
+            anterior = valores[fecha].depositos_mes
+            if monto != 0:
+                movimientos.append((fecha, monto))
+        # Se conserva cada préstamo, incluso si su acumulado y sus variaciones son cero.
+        if not movimientos:
+            movimientos.append((hasta, Decimal(0)))
+        for fecha, monto in movimientos:
+            resultado.append(DepositoCastigoDiarioOut(
+                numero_prestamo=prestamo.numero_prestamo, fecha=fecha,
+                estado_inicio=prestamo.estado, estado_fin=valores[hasta].estado,
+                tipo_transaccion="VARIACION DEPOSITOS MES", agencia=prestamo.agencia,
+                codigo_asesor=prestamo.codigo_asesor, asesor=prestamo.asesor,
+                cargo_asesor=prestamo.cargo, total_depositado=float(monto),
+            ))
+    resultado.sort(key=lambda deposito: (deposito.fecha, deposito.numero_prestamo))
+    return resultado
