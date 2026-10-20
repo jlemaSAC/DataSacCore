@@ -5,6 +5,8 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
 from app.main import app
 from app.modules.auth.dependencies import get_current_auth_context
@@ -209,7 +211,11 @@ def test_sql_solo_consulta_el_universo_mediante_parametros_y_replica_depositos_m
     db = Db()
     valores = SqlCastigoRepository(db).obtener_depositos_mes(['P1'], date(2026, 10, 20))
     assert valores == {'P1': Decimal(125)}
-    assert db.params == {'numeros': ['P1'], 'inicio_mes': date(2026, 10, 1), 'fin_exclusivo': date(2026, 10, 21)}
+    assert db.params == {
+        'numeros': ['P1'], 'inicio_mes': date(2026, 10, 1),
+        'fin_exclusivo': date(2026, 10, 21),
+        'transacciones_excluidas': (33, 34, 2092, 2093, 2095, 2105),
+    }
     assert 'P1' not in str(db.statement)
     assert 'MD.DEBITO = 0' in str(db.statement)
     assert 'CC.PRINCIPAL = 1' in str(db.statement)
@@ -297,6 +303,54 @@ def test_sql_detalle_pagina_y_totales_usan_clientes_unicos_y_xml_parametrizado()
     assert params['prestamos_xml'] == '<prestamos><prestamo>N&lt;&amp;</prestamo></prestamos>'
     assert params['offset'] == 50
     assert params['fin_exclusivo'] == date(2026,10,3)
+    for statement, parametros in db.llamadas:
+        assert 'M.IDTRANSACCION NOT IN' in statement
+        assert parametros['transacciones_excluidas'] == (33, 34, 2092, 2093, 2095, 2105)
+
+
+def test_bloqueos_antiguos_no_generan_depositos_ficticios_en_el_corte_actual():
+    # Ejecuta el cálculo real del acumulado con datos aislados: dos depósitos y
+    # las seis transacciones contables que el reporte histórico excluye.
+    engine = create_engine('sqlite://')
+    try:
+        with engine.connect() as connection:
+            for schema in ('COLOCACION', 'FINANCIERO', 'AHORROS'):
+                connection.exec_driver_sql(f"ATTACH DATABASE ':memory:' AS {schema}")
+            tablas = {
+                'COLOCACION.PRESTAMO': 'ID INT, NUMERO TEXT',
+                'COLOCACION.PRESTAMO_CLIENTE': 'IDPRESTAMO INT, IDCLIENTE INT, ESPRINCIPAL INT',
+                'FINANCIERO.MOVIMIENTO_TRANSACCION': 'ID INT, IDTRANSACCION INT, FECHASISTEMA DATE',
+                'FINANCIERO.MOVIMIENTO_TRANSACCION_DETALLE': 'ID INT, IDMOVIMIENTOTRANSACCION INT, DEBITO INT, VALOR NUMERIC',
+                'AHORROS.CUENTA_MOVIMIENTOTRANSACCIONDETALLE': 'IDMOVIMIENTOTRANSACCIONDETALLE INT, NUMEROCUENTA TEXT',
+                'AHORROS.CUENTA': 'NUMERO TEXT',
+                'AHORROS.CUENTA_CLIENTE': 'NUMEROCUENTA TEXT, IDCLIENTE INT, PRINCIPAL INT',
+            }
+            for tabla, columnas in tablas.items():
+                connection.exec_driver_sql(f'CREATE TABLE {tabla} ({columnas})')
+            connection.exec_driver_sql("INSERT INTO COLOCACION.PRESTAMO VALUES (1, 'P1')")
+            connection.exec_driver_sql('INSERT INTO COLOCACION.PRESTAMO_CLIENTE VALUES (1, 1, 1)')
+            connection.exec_driver_sql("INSERT INTO AHORROS.CUENTA VALUES ('C1')")
+            connection.exec_driver_sql("INSERT INTO AHORROS.CUENTA_CLIENTE VALUES ('C1', 1, 1)")
+            movimientos = [(110, '2026-10-07', 283.33), (110, '2026-10-16', 40)] + [
+                (tipo, '2026-10-16', 100) for tipo in (33, 34, 2092, 2093, 2095, 2105)
+            ]
+            for indice, (tipo, fecha, valor) in enumerate(movimientos, 1):
+                connection.execute(text('INSERT INTO FINANCIERO.MOVIMIENTO_TRANSACCION VALUES (:id, :tipo, :fecha)'), {'id': indice, 'tipo': tipo, 'fecha': fecha})
+                connection.execute(text('INSERT INTO FINANCIERO.MOVIMIENTO_TRANSACCION_DETALLE VALUES (:id, :id, 0, :valor)'), {'id': indice, 'valor': valor})
+                connection.execute(text("INSERT INTO AHORROS.CUENTA_MOVIMIENTOTRANSACCIONDETALLE VALUES (:id, 'C1')"), {'id': indice})
+            with Session(bind=connection) as session:
+                repo = SqlCastigoRepository(session)
+                assert repo.obtener_depositos_mes(['P1'], date(2026, 10, 20)) == {'P1': Decimal(323)}
+                service, _ = servicio(
+                    [documento('P1', 19, 323)],
+                    [documento('P1', 20, None, as_of=datetime(2026, 10, 20, 12, tzinfo=timezone.utc))],
+                    repo,
+                )
+                resultado = consultar(service, inicio=20, fin=20)
+                assert resultado.total_depositado == 0
+                assert resultado.depositos[0].total_depositado == 0
+    finally:
+        engine.dispose()
 
 
 def test_endpoint_detalle_requiere_bearer_y_conserva_los_cancelados():

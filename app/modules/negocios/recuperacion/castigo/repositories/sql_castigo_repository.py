@@ -5,6 +5,11 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 
+# Mismas exclusiones de DepositosMes en el reporte usado por SituacionCrediticia.
+# Son bloqueos/desbloqueos de saldos, no ingresos nuevos en la cuenta.
+TRANSACCIONES_EXCLUIDAS_DEPOSITOS = (33, 34, 2092, 2093, 2095, 2105)
+
+
 class SqlCastigoRepository:
     """Completa el corte del día con el cálculo de DepositosMes del reporte SQL."""
 
@@ -35,20 +40,25 @@ class SqlCastigoRepository:
                     ON CC.NUMEROCUENTA = CM.NUMERO AND CC.PRINCIPAL = 1
                 INNER JOIN ClientesElegibles AS C ON C.IDCLIENTE = CC.IDCLIENTE
                 WHERE M.FECHASISTEMA >= :inicio_mes AND M.FECHASISTEMA < :fin_exclusivo
+                    AND M.IDTRANSACCION NOT IN :transacciones_excluidas
                 GROUP BY CC.IDCLIENTE
             )
             SELECT P.NUMERO AS NumeroPrestamo,
                    CAST(COALESCE(D.TOTAL, 0) AS INT) AS DepositosMes
             FROM PrestamosElegibles AS P
             LEFT JOIN DepositosMes AS D ON D.IDCLIENTE = P.IDCLIENTE
-        """).bindparams(bindparam("numeros", expanding=True))
-        # El reporte de origen almacena este acumulado en una columna TOTAL INT.
+        """).bindparams(
+            bindparam("numeros", expanding=True),
+            bindparam("transacciones_excluidas", expanding=True),
+        )
+        # Conserva la precisión entera de los cortes históricos existentes.
         resultado = {}
         for offset in range(0, len(numeros), 500):
             filas = self.db.execute(statement, {
                 "numeros": numeros[offset:offset + 500],
                 "inicio_mes": fecha.replace(day=1),
                 "fin_exclusivo": fecha + timedelta(days=1),
+                "transacciones_excluidas": TRANSACCIONES_EXCLUIDAS_DEPOSITOS,
             }).mappings()
             for fila in filas:
                 resultado[str(fila["NumeroPrestamo"]).strip()] = Decimal(str(fila["DepositosMes"]))
@@ -69,6 +79,7 @@ class SqlCastigoRepository:
             "prestamos_xml": tostring(raiz, encoding="unicode"),
             "desde": desde, "fin_exclusivo": hasta + timedelta(days=1),
             "offset": (pagina - 1) * tamano, "tamano": tamano,
+            "transacciones_excluidas": TRANSACCIONES_EXCLUIDAS_DEPOSITOS,
         }
         cte = """
             WITH Solicitados AS (
@@ -105,12 +116,13 @@ class SqlCastigoRepository:
                 INNER JOIN SUJETO.PERSONA AS PER ON PER.ID = C.IDPERSONA
                 LEFT JOIN FINANCIERO.TRANSACCION AS T ON T.ID = M.IDTRANSACCION
                 WHERE M.FECHASISTEMA >= :desde AND M.FECHASISTEMA < :fin_exclusivo
+                    AND M.IDTRANSACCION NOT IN :transacciones_excluidas
             )
         """
         resumen = self.db.execute(text(cte + """
             SELECT COUNT(*) AS Cantidad, COALESCE(SUM(Valor), 0) AS Total
             FROM Movimientos
-        """), params).mappings().one()
+        """).bindparams(bindparam("transacciones_excluidas", expanding=True)), params).mappings().one()
         filas = self.db.execute(text(cte + """
             SELECT M.IdDetalle, M.IdMovimiento, M.FechaSistema, M.FechaProceso,
                    M.Cliente, M.NombreCliente, M.NumeroCuenta, M.Documento,
@@ -121,5 +133,5 @@ class SqlCastigoRepository:
             FROM Movimientos AS M
             ORDER BY M.FechaSistema DESC, M.IdDetalle DESC
             OFFSET :offset ROWS FETCH NEXT :tamano ROWS ONLY
-        """), params).mappings().all()
+        """).bindparams(bindparam("transacciones_excluidas", expanding=True)), params).mappings().all()
         return [dict(fila) for fila in filas], int(resumen["Cantidad"]), Decimal(str(resumen["Total"]))

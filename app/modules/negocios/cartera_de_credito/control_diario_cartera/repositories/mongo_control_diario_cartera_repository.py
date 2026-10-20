@@ -32,7 +32,7 @@ def _decimal(value: Any) -> Decimal:
 
 
 class MongoControlDiarioCarteraRepository:
-    """Agrega un rango mensual en el servidor y devuelve solo cortes por asesor/agencia."""
+    """Agrega un rango de fechas en el servidor y devuelve solo cortes por asesor/agencia."""
 
     def __init__(self, mongo_db: Database[MongoDocument]) -> None:
         self.historico = mongo_db["SituacionCrediticia"]

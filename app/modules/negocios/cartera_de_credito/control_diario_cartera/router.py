@@ -13,7 +13,7 @@ router = APIRouter(prefix="/cartera-de-credito/control-diario-cartera", tags=["N
 
 
 @router.post("/mensual", response_model=ControlDiarioCarteraResponse,
-             summary="Variaciones diarias o contra el mes anterior por asesor y agencia desde MongoDB")
+             summary="Variaciones por rango de fechas, asesor y agencia desde MongoDB")
 def obtener_control_diario_cartera(
     request: ControlDiarioCarteraRequest,
     auth: AuthContext = Depends(get_current_auth_context),
