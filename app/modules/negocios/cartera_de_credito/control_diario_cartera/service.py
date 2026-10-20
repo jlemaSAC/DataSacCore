@@ -1,4 +1,3 @@
-from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -24,37 +23,41 @@ class ControlDiarioCarteraService:
         *,
         fecha_limite: date,
     ) -> ControlDiarioCarteraResponse:
-        inicio = date.fromisoformat(f"{request.mes}-01")
-        if inicio > fecha_limite:
-            raise HTTPException(400, "El mes no puede ser posterior a la fecha del sistema.")
-        fin = inicio.replace(day=monthrange(inicio.year, inicio.month)[1])
-        cierre_anterior = inicio - timedelta(days=1)
-        inicio_anterior = cierre_anterior.replace(day=1)
-        cortes = self.repository.obtener_cortes(
-            desde=inicio_anterior if request.tipo_variacion == 'mismo_dia_mes_anterior' else cierre_anterior,
-            hasta=min(fin, fecha_limite),
-            agencia=request.agencia,
-            filtrar_diferidos=request.filtrar_diferidos,
-        )
-        dias = []
-        for i in range(fin.day):
+        inicio, fin = request.fecha_inicio, request.fecha_fin
+        if inicio > fin:
+            raise HTTPException(400, "La fecha de inicio no puede ser posterior a la fecha de fin.")
+        if fin > fecha_limite:
+            raise HTTPException(400, "La fecha de fin no puede ser posterior a la fecha del sistema.")
+        comparaciones = []
+        for i in range((fin - inicio).days + 1):
             fecha = inicio + timedelta(days=i)
+            cierre_anterior = fecha.replace(day=1) - timedelta(days=1)
             if request.tipo_variacion == 'cierre_mes_anterior':
                 anterior = cierre_anterior
             elif request.tipo_variacion == 'mismo_dia_mes_anterior':
-                anterior = inicio_anterior.replace(day=min(fecha.day, cierre_anterior.day))
+                anterior = cierre_anterior.replace(day=min(fecha.day, cierre_anterior.day))
             else:
                 anterior = fecha - timedelta(days=1)
-            dias.append(DiaControlCartera(
+            comparaciones.append((fecha, anterior))
+        cortes = self.repository.obtener_cortes(
+            desde=min(anterior for _, anterior in comparaciones),
+            hasta=fin,
+            agencia=request.agencia,
+            filtrar_diferidos=request.filtrar_diferidos,
+        )
+        dias = [
+            DiaControlCartera(
                 fecha=fecha,
                 fecha_anterior=anterior,
-                disponible=fecha <= fecha_limite and fecha in cortes.fechas and anterior in cortes.fechas,
-            ))
+                disponible=fecha in cortes.fechas and anterior in cortes.fechas,
+            )
+            for fecha, anterior in comparaciones
+        ]
         # La última identificación de cada asesor/agencia mantiene estable el filtro de cargos.
         por_asesor: dict[tuple[str, str], dict[date, CorteAsesor]] = {}
         fechas_relevantes = {
             fecha
-            for dia in dias if dia.fecha <= fecha_limite
+            for dia in dias
             for fecha in (dia.fecha, dia.fecha_anterior)
         }
         for corte in cortes.asesores:
@@ -76,7 +79,8 @@ class ControlDiarioCarteraService:
                 ],
             ))
         return ControlDiarioCarteraResponse(
-            mes=request.mes,
+            fecha_inicio=inicio,
+            fecha_fin=fin,
             agencia=request.agencia,
             filtrar_diferidos=request.filtrar_diferidos,
             tipo_variacion=request.tipo_variacion,

@@ -25,6 +25,7 @@ from app.modules.negocios.recuperacion.recaudacion_acumulada.router import (
 from app.modules.negocios.recuperacion.resumen_recuperacion.router import (
     router as resumen_recuperacion_router,
 )
+from app.modules.negocios.recuperacion.castigo.router import router as castigo_router
 from app.modules.negocios.colocacion.diaria_asesores.router import (
     router as colocacion_diaria_asesores_router,
 )
@@ -45,5 +46,6 @@ router.include_router(colocacion_resumen_router)
 router.include_router(evaluacion_recuperacion_router)
 router.include_router(recaudacion_acumulada_router)
 router.include_router(resumen_recuperacion_router)
+router.include_router(castigo_router)
 router.include_router(colocacion_diaria_asesores_router)
 router.include_router(negocio_inicio_router)

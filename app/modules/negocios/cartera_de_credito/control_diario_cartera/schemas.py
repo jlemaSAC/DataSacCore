@@ -8,21 +8,18 @@ TipoVariacionCartera = Literal['diaria', 'cierre_mes_anterior', 'mismo_dia_mes_a
 
 
 class ControlDiarioCarteraRequest(BaseModel):
-    mes: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="Mes en formato YYYY-MM.")
+    fecha_inicio: date = Field(
+        ge=date(1900, 1, 1), le=date(9998, 12, 31), description="Inicio inclusivo en formato YYYY-MM-DD.",
+    )
+    fecha_fin: date = Field(
+        ge=date(1900, 1, 1), le=date(9998, 12, 31), description="Fin inclusivo en formato YYYY-MM-DD.",
+    )
     agencia: str | None = Field(default=None, max_length=150)
     filtrar_diferidos: bool | None = None
     tipo_variacion: TipoVariacionCartera = Field(
         default='diaria',
         description='Base de comparación. El mismo día se ajusta al último día válido del mes anterior.',
     )
-
-    @field_validator("mes")
-    @classmethod
-    def validar_mes(cls, value: str) -> str:
-        fecha = date.fromisoformat(f"{value}-01")
-        if fecha.year < 1900 or fecha.year > 9998:
-            raise ValueError("El año debe estar entre 1900 y 9998.")
-        return value
 
     @field_validator("agencia")
     @classmethod
@@ -53,7 +50,8 @@ class FilaControlDiarioCartera(BaseModel):
 
 
 class ControlDiarioCarteraResponse(BaseModel):
-    mes: str
+    fecha_inicio: date
+    fecha_fin: date
     agencia: str | None
     filtrar_diferidos: bool | None
     tipo_variacion: TipoVariacionCartera

@@ -33,9 +33,9 @@ def corte(fecha, saldo, *, asesor='A1', agencia='MATRIZ', cargo='ASESOR', provis
                        Decimal(saldo), Decimal(improductiva), Decimal(provision))
 
 
-def consultar(repository, mes='2026-10', limite=date(2026, 10, 15), **kwargs):
+def consultar(repository, inicio='2026-10-01', fin='2026-10-15', limite=date(2026, 10, 15), **kwargs):
     return ControlDiarioCarteraService(repository).obtener(
-        ControlDiarioCarteraRequest(mes=mes, **kwargs), fecha_limite=limite,
+        ControlDiarioCarteraRequest(fecha_inicio=inicio, fecha_fin=fin, **kwargs), fecha_limite=limite,
     )
 
 
@@ -46,7 +46,9 @@ def test_calcula_deltas_con_dia_anterior_y_cierre_previo_sin_redondeo_binario():
         corte('2026-10-02', '110.30', provision='6', improductiva='15'),
     ])
     respuesta = consultar(repo)
-    assert len(respuesta.dias) == 31
+    assert len(respuesta.dias) == 15
+    assert respuesta.fecha_inicio == date(2026, 10, 1)
+    assert respuesta.fecha_fin == date(2026, 10, 15)
     assert respuesta.dias[0].fecha_anterior == date(2026, 9, 30)
     assert respuesta.filas[0].variaciones[0].model_dump() == {
         'saldo_capital': 20.1, 'cartera_improductiva': -2, 'provisiones': 2,
@@ -77,7 +79,7 @@ def test_corte_existente_sin_asesor_equivale_a_cero_y_conserva_bajas_y_altas():
     assert filas['ENTRA'].variaciones[0].saldo_capital == 50
 
 
-def test_mismo_asesor_en_dos_agencias_no_se_mezcla_y_cargo_es_ultimo_del_mes():
+def test_mismo_asesor_en_dos_agencias_no_se_mezcla_y_cargo_es_ultimo_del_rango():
     respuesta = consultar(FakeRepository([
         corte('2026-09-30', '100', cargo='ANTERIOR'),
         corte('2026-10-01', '130', cargo='NUEVO'),
@@ -96,16 +98,21 @@ def test_mismo_asesor_en_dos_agencias_no_se_mezcla_y_cargo_es_ultimo_del_mes():
 ])
 def test_limites_calendario_y_consulta_unica(mes, dias, desde, hasta):
     repo = FakeRepository()
-    respuesta = consultar(repo, mes, agencia=' MATRIZ ', filtrar_diferidos=False)
+    respuesta = consultar(repo, f'{mes}-01', hasta, agencia=' MATRIZ ', filtrar_diferidos=False)
     assert len(respuesta.dias) == dias
     assert respuesta.filas == []
     assert repo.calls == [dict(desde=desde, hasta=hasta, agencia='MATRIZ', filtrar_diferidos=False)]
 
 
-def test_mes_futuro_rechazado_antes_de_consultar_mongo():
+@pytest.mark.parametrize('inicio,fin', [
+    ('2026-11-01', '2026-11-02'),
+    ('2026-10-05', '2026-10-16'),
+    ('2026-10-10', '2026-10-05'),
+])
+def test_rango_invalido_rechazado_antes_de_consultar_mongo(inicio, fin):
     repo = FakeRepository()
     with pytest.raises(HTTPException) as exc:
-        consultar(repo, '2026-11')
+        consultar(repo, inicio, fin)
     assert exc.value.status_code == 400
     assert repo.calls == []
 
@@ -142,22 +149,22 @@ def test_tres_variaciones_con_los_mismos_filtros(tipo, esperados, desde):
 def test_mismo_dia_ajusta_mes_corto_bisiesto_y_cambio_de_anio(mes, limite, dia_anterior):
     respuesta = consultar(
         FakeRepository([corte(dia_anterior.isoformat(), '100'), corte(limite.isoformat(), '150')]),
-        mes, limite, tipo_variacion='mismo_dia_mes_anterior',
+        f'{mes}-01', limite, limite=limite, tipo_variacion='mismo_dia_mes_anterior',
     )
     assert respuesta.dias[-1].fecha_anterior == dia_anterior
     assert respuesta.filas[0].variaciones[-1].saldo_capital == 50
 
 
 @pytest.mark.parametrize('tipo', ['cierre_mes_anterior', 'mismo_dia_mes_anterior'])
-def test_variacion_mensual_no_sustituye_cortes_ausentes_ni_calcula_dias_futuros(tipo):
+def test_variacion_mensual_no_sustituye_cortes_ausentes_ni_incluye_dias_fuera_del_rango(tipo):
     respuesta = consultar(FakeRepository([
         corte('2026-09-01', '80'), corte('2026-09-30', '100'),
         corte('2026-10-01', '120'), corte('2026-10-03', '150'),
-    ]), limite=date(2026, 10, 2), tipo_variacion=tipo)
+    ]), fin='2026-10-02', limite=date(2026, 10, 2), tipo_variacion=tipo)
     assert respuesta.dias[0].disponible
     assert not respuesta.dias[1].disponible
-    assert not respuesta.dias[2].disponible
-    assert respuesta.filas[0].variaciones[1:3] == [None, None]
+    assert len(respuesta.dias) == 2
+    assert respuesta.filas[0].variaciones[1:] == [None]
     sin_base = consultar(FakeRepository([corte('2026-10-01', '120')]), tipo_variacion=tipo)
     assert not sin_base.dias[0].disponible
     assert sin_base.filas[0].variaciones[0] is None
@@ -177,15 +184,16 @@ def test_mismo_dia_no_incluye_asesores_de_fechas_que_no_participan_en_la_compara
     respuesta = consultar(FakeRepository([
         corte('2026-09-01', '100'), corte('2026-10-01', '150'),
         corte('2026-09-30', '500', asesor='NO_COMPARADO'),
-    ]), limite=date(2026, 10, 1), tipo_variacion='mismo_dia_mes_anterior')
+    ]), fin='2026-10-01', limite=date(2026, 10, 1), tipo_variacion='mismo_dia_mes_anterior')
     assert [fila.codigo_asesor for fila in respuesta.filas] == ['A1']
     assert respuesta.filas[0].variaciones[0].saldo_capital == 50
 
 
-@pytest.mark.parametrize('mes', ['2026-13', '2026-00', '26-01', '0000-01', '9999-12'])
-def test_contrato_valida_mes(mes):
+@pytest.mark.parametrize('campo', ['fecha_inicio', 'fecha_fin'])
+@pytest.mark.parametrize('fecha', ['2026-13-01', '2026-02-30', '26-01-01', '1899-12-31', '9999-12-01'])
+def test_contrato_valida_fechas(campo, fecha):
     with pytest.raises(ValidationError):
-        ControlDiarioCarteraRequest(mes=mes)
+        ControlDiarioCarteraRequest(**{'fecha_inicio': '2026-10-01', 'fecha_fin': '2026-10-08', campo: fecha})
 
 
 def test_endpoint_valida_bearer_y_usa_fecha_del_sistema():
@@ -195,24 +203,84 @@ def test_endpoint_valida_bearer_y_usa_fecha_del_sistema():
     app.dependency_overrides[get_control_diario_cartera_service] = lambda: ControlDiarioCarteraService(repo)
     client = TestClient(app)
     ruta = '/negocios/cartera-de-credito/control-diario-cartera/mensual'
-    assert client.post(ruta, json={'mes': '2026-10'}).status_code == 401
+    body = {'fecha_inicio': '2026-10-05', 'fecha_fin': '2026-10-08'}
+    assert client.post(ruta, json=body).status_code == 401
     app.dependency_overrides[get_current_auth_context] = lambda: AuthContext(
         token='test', usuario=UsuarioTokenPayload(
             sub='1', usuario='TEST', id_agencia=1, fecha_sistema=date(2026, 10, 8),
         ),
     )
-    response = client.post(ruta, json={'mes': '2026-10', 'agencia': 'MATRIZ', 'filtrar_diferidos': True})
+    response = client.post(ruta, json={**body, 'agencia': 'MATRIZ', 'filtrar_diferidos': True})
     assert response.status_code == 200
     assert repo.calls[0]['hasta'] == date(2026, 10, 8)
     assert response.json()['filtrar_diferidos'] is True
     assert response.json()['tipo_variacion'] == 'diaria'
+    assert response.json()['fecha_inicio'] == '2026-10-05'
+    assert response.json()['fecha_fin'] == '2026-10-08'
+    assert len(response.json()['dias']) == 4
+    assert repo.calls[0]['desde'] == date(2026, 10, 4)
     for tipo in ['cierre_mes_anterior', 'mismo_dia_mes_anterior']:
-        response = client.post(ruta, json={'mes': '2026-10', 'tipo_variacion': tipo})
+        response = client.post(ruta, json={**body, 'tipo_variacion': tipo})
         assert response.status_code == 200
         assert response.json()['tipo_variacion'] == tipo
-    assert client.post(ruta, json={'mes': '2026-10', 'tipo_variacion': 'invalida'}).status_code == 422
-    assert client.post(ruta, json={'mes': '2026-11'}).status_code == 400
-    assert client.post(ruta, json={'mes': '2026-15'}).status_code == 422
+    assert client.post(ruta, json={**body, 'tipo_variacion': 'invalida'}).status_code == 422
+    assert client.post(ruta, json={**body, 'fecha_fin': '2026-10-09'}).status_code == 400
+    assert client.post(ruta, json={**body, 'fecha_inicio': '2026-10-10'}).status_code == 400
+    assert client.post(ruta, json={**body, 'fecha_fin': '2026-02-30'}).status_code == 422
+    assert client.post(ruta, json={'mes': '2026-10'}).status_code == 422
+
+
+@pytest.mark.parametrize('tipo,base,esperados', [
+    ('diaria', '2026-10-04', [20, 10]),
+    ('cierre_mes_anterior', '2026-09-30', [20, 30]),
+    ('mismo_dia_mes_anterior', '2026-09-05', [20, 40]),
+])
+def test_rango_parcial_usa_cortes_de_comparacion_fuera_del_rango(tipo, base, esperados):
+    repo = FakeRepository([
+        corte(base, '100'), corte('2026-09-06', '90'),
+        corte('2026-10-05', '120'), corte('2026-10-06', '130'),
+        corte('2026-10-07', '999', asesor='FUERA'),
+    ])
+    respuesta = consultar(repo, '2026-10-05', '2026-10-06', tipo_variacion=tipo)
+    assert [dia.fecha for dia in respuesta.dias] == [date(2026, 10, 5), date(2026, 10, 6)]
+    assert [v.saldo_capital for v in respuesta.filas[0].variaciones] == esperados
+    assert [fila.codigo_asesor for fila in respuesta.filas] == ['A1']
+    assert repo.calls[0]['desde'] == date.fromisoformat(base)
+    assert repo.calls[0]['hasta'] == date(2026, 10, 6)
+
+
+@pytest.mark.parametrize('tipo,bases,esperados', [
+    ('diaria', ['2026-10-30', '2026-10-31'], [30, 70]),
+    ('cierre_mes_anterior', ['2026-09-30', '2026-10-31'], [100, 70]),
+    ('mismo_dia_mes_anterior', ['2026-09-30', '2026-10-01'], [100, 120]),
+])
+def test_rango_cruza_mes_y_cambia_base_segun_cada_dia(tipo, bases, esperados):
+    repo = FakeRepository([
+        corte('2026-09-30', '100'), corte('2026-10-01', '150'),
+        corte('2026-10-30', '170'), corte('2026-10-31', '200'), corte('2026-11-01', '270'),
+    ])
+    respuesta = consultar(repo, '2026-10-31', '2026-11-01', limite=date(2026, 11, 1), tipo_variacion=tipo)
+    assert [dia.fecha_anterior.isoformat() for dia in respuesta.dias] == bases
+    assert [v.saldo_capital for v in respuesta.filas[0].variaciones] == esperados
+    assert all(dia.disponible for dia in respuesta.dias)
+
+
+@pytest.mark.parametrize('tipo,bases', [
+    ('diaria', ['2025-12-30', '2025-12-31']),
+    ('cierre_mes_anterior', ['2025-11-30', '2025-12-31']),
+    ('mismo_dia_mes_anterior', ['2025-11-30', '2025-12-01']),
+])
+def test_rango_cruza_anio(tipo, bases):
+    respuesta = consultar(FakeRepository(), '2025-12-31', '2026-01-01', tipo_variacion=tipo)
+    assert [dia.fecha_anterior.isoformat() for dia in respuesta.dias] == bases
+
+
+def test_rango_de_un_solo_dia_es_inclusivo():
+    repo = FakeRepository([corte('2026-10-04', '100'), corte('2026-10-05', '120')])
+    respuesta = consultar(repo, '2026-10-05', '2026-10-05')
+    assert len(respuesta.dias) == 1
+    assert respuesta.dias[0].fecha == date(2026, 10, 5)
+    assert respuesta.filas[0].variaciones[0].saldo_capital == 20
 
 
 class FakeCollection:
