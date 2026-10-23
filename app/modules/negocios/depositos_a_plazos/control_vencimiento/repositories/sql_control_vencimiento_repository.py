@@ -90,6 +90,7 @@ class SqlControlVencimientoRepository:
     def obtener_detalle(
         self, *, fecha_inicio: date, fecha_fin: date, id_agencia: int,
         codigo_usuario: str | None, cargos: list[str], pagina: int, tamano_pagina: int,
+        sin_paginacion: bool = False,
     ) -> DetalleVencimientoResultado:
         base, params = self._base(fecha_inicio, fecha_fin, id_agencia, codigo_usuario)
         filtro_cargos = ""
@@ -121,15 +122,24 @@ class SqlControlVencimientoRepository:
             LEFT JOIN Intereses AS I ON I.IDDEPOSITO = X.ID
         """), params).mappings().first()
         total = int(totales["total_registros"])
-        offset = (pagina - 1) * tamano_pagina
+        offset = 0 if sin_paginacion else (pagina - 1) * tamano_pagina
         items = []
         if offset < total:
-            result = self.db.execute(text(alcance + """
+            pagina_cte = """
+                , Pagina AS (
+                    SELECT X.* FROM Alcance AS X
+                )
+            """ if sin_paginacion else """
                 , Pagina AS (
                     SELECT X.* FROM Alcance AS X
                     ORDER BY X.agencia, X.codigo, X.FECHAVENCIMIENTO, X.ID
                     OFFSET :offset ROWS FETCH NEXT :tamano_pagina ROWS ONLY
                 )
+            """
+            query_params = dict(params)
+            if not sin_paginacion:
+                query_params.update(offset=offset, tamano_pagina=tamano_pagina)
+            result = self.db.execute(text(alcance + pagina_cte + """
                 SELECT X.ID AS id_deposito, Cliente.numero_cliente, Cliente.nombre_cliente,
                     X.agencia, X.captador, X.numero_deposito, X.MONTO AS monto,
                     COALESCE(I.interes_total, 0) AS interes_total,
@@ -153,7 +163,7 @@ class SqlControlVencimientoRepository:
                 LEFT JOIN Intereses AS I ON I.IDDEPOSITO = X.ID
                 LEFT JOIN INVERSION.ESTADO_DEPOSITO AS ED ON ED.CODIGO = X.CODIGOESTADODEPOSITO
                 ORDER BY X.agencia, X.codigo, X.FECHAVENCIMIENTO, X.ID
-            """), {**params, "offset": offset, "tamano_pagina": tamano_pagina})
+            """), query_params)
             items = [dict(fila) for fila in result.mappings().all()]
         return DetalleVencimientoResultado(
             total, Decimal(str(totales["total_monto"])), Decimal(str(totales["total_interes"])), items,

@@ -61,7 +61,10 @@ class ControlVencimientoService:
             raise HTTPException(404, "La agencia no existe.")
         resultado = self.repository.obtener_detalle(**body.model_dump())
         return DetalleControlVencimientoResponse(
-            **body.model_dump(), total_registros=resultado.total_registros,
+            **body.model_dump(exclude={"pagina", "tamano_pagina", "sin_paginacion"}),
+            pagina=None if body.sin_paginacion else body.pagina,
+            tamano_pagina=None if body.sin_paginacion else body.tamano_pagina,
+            total_registros=resultado.total_registros,
             total_monto=float(resultado.total_monto), total_interes=float(resultado.total_interes),
             items=[DetalleControlVencimientoFila.model_validate({
                 **fila, "numero_cliente": str(fila["numero_cliente"]),

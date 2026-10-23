@@ -50,6 +50,7 @@ class DetalleControlVencimientoRequest(ControlVencimientoRequest):
     cargos: list[str] = Field(default_factory=list, max_length=100)
     pagina: int = Field(default=1, ge=1)
     tamano_pagina: int = Field(default=100, ge=1, le=500)
+    sin_paginacion: bool = Field(default=False, description="Devuelve todos los DPF del filtro en una respuesta.")
 
     @field_validator("codigo_usuario")
     @classmethod
@@ -89,8 +90,8 @@ class DetalleControlVencimientoResponse(BaseModel):
     id_agencia: int
     codigo_usuario: str | None
     cargos: list[str]
-    pagina: int
-    tamano_pagina: int
+    pagina: int | None
+    tamano_pagina: int | None
     total_registros: int
     total_monto: float
     total_interes: float

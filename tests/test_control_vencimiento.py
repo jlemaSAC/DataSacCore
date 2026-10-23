@@ -186,6 +186,17 @@ def test_detalle_conserva_agencia_captador_cargos_y_totales_de_todo_el_filtro():
     assert respuesta.items[0].tiene_prestamo is True
 
 
+def test_detalle_sin_paginacion_devuelve_todos_y_omite_la_pagina():
+    fuente = FuenteDetalle()
+    body = DetalleControlVencimientoRequest(**request().model_dump(), sin_paginacion=True)
+    respuesta = ControlVencimientoService(fuente, fuente).obtener_detalle(body)
+
+    assert fuente.calls == [body.model_dump()]
+    assert respuesta.pagina is None
+    assert respuesta.tamano_pagina is None
+    assert respuesta.total_registros == 120
+
+
 @pytest.mark.parametrize("campos", [
     {"pagina": 0}, {"tamano_pagina": 0}, {"tamano_pagina": 501},
     {"codigo_usuario": " "}, {"cargos": [" "]},
@@ -262,6 +273,22 @@ def test_consulta_detalle_parametriza_filtros_y_suma_interes_incluyendo_pagados(
     assert db.calls[1][1]["tamano_pagina"] == 50
     assert resultado.total_monto == Decimal("6000.00")
     assert resultado.items[0]["monto"] == Decimal("3000.00")
+
+
+def test_detalle_sin_paginacion_consulta_todas_las_filas_sin_offset():
+    db = SessionDetalle(total=120)
+    resultado = SqlControlVencimientoRepository(db).obtener_detalle(
+        fecha_inicio=date(2026, 10, 23), fecha_fin=date(2026, 11, 30), id_agencia=0,
+        codigo_usuario=None, cargos=[], pagina=1, tamano_pagina=100, sin_paginacion=True,
+    )
+
+    assert len(db.calls) == 2
+    sql, params = db.calls[1]
+    assert "OFFSET" not in sql
+    assert "FETCH NEXT" not in sql
+    assert "offset" not in params
+    assert "tamano_pagina" not in params
+    assert resultado.total_registros == 120
 
 
 @pytest.mark.parametrize("total,pagina", [(0, 1), (120, 4)])

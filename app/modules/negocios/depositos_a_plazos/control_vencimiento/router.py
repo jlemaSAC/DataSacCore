@@ -34,11 +34,12 @@ def obtener_control_vencimiento(
 
 @router.post(
     "/control-vencimiento/detalle", response_model=DetalleControlVencimientoResponse,
-    summary="Detalle paginado de DPF por vencer para una agencia o captador",
+    summary="Detalle de DPF por vencer para una agencia o captador",
     description=(
         "Conserva el universo A/E/V y los filtros del resumen. Interés total es la suma de "
         "CALCULADO de los ítems de interés, incluyendo los pagados. La tasa total es la tasa "
-        "efectiva. Tiene préstamo corresponde al cliente principal con un préstamo no cancelado."
+        "efectiva. Tiene préstamo corresponde al cliente principal con un préstamo no cancelado. "
+        "Puede devolver una página o todos los registros si sin_paginacion es true."
     ),
 )
 def obtener_detalle_control_vencimiento(

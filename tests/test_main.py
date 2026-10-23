@@ -10,6 +10,7 @@ from starlette.requests import Request
 
 from app.core.settings import (
     AppSettings,
+    DatabaseSettings,
     get_app_settings,
     get_database_settings,
     get_mongo_settings,
@@ -17,6 +18,7 @@ from app.core.settings import (
 )
 from app.db.mongo import get_mongo_client, get_mongo_client_sync
 from app.db.session import (
+    build_database_url,
     get_engine,
     get_secondary_engine,
     get_secondary_session_factory,
@@ -89,6 +91,31 @@ def test_health_check() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_database_url_includes_application_name(monkeypatch) -> None:
+    monkeypatch.setenv("APP_NAME", "DataSacCore-Test")
+    get_app_settings.cache_clear()
+    settings = DatabaseSettings(
+        user="sql-user",
+        password="sql-password",
+        host="sql.example.internal",
+        port=1433,
+        name="DataSac",
+        driver="ODBC Driver 18 for SQL Server",
+        encrypt="yes",
+        trust_server_certificate="no",
+        pool_size=20,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=1800,
+        query_timeout=30,
+    )
+
+    url = build_database_url(settings)
+
+    assert url.query["APP"] == "DataSacCore-Test"
+    get_app_settings.cache_clear()
 
 
 def test_request_log_includes_codigo_usuario(caplog) -> None:

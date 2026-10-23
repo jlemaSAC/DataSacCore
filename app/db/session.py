@@ -5,7 +5,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, URL
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.settings import DatabaseSettings, SecondaryDatabaseSettings, get_database_settings, get_secondary_database_settings
+from app.core.settings import (
+    DatabaseSettings,
+    SecondaryDatabaseSettings,
+    get_app_settings,
+    get_database_settings,
+    get_secondary_database_settings,
+)
 
 
 def build_database_url(settings: DatabaseSettings | SecondaryDatabaseSettings) -> URL:
@@ -18,6 +24,7 @@ def build_database_url(settings: DatabaseSettings | SecondaryDatabaseSettings) -
         database=settings.name,
         query={
             "driver": settings.driver,
+            "APP": get_app_settings().name,
             "Encrypt": settings.encrypt,
             "TrustServerCertificate": settings.trust_server_certificate,
         },
