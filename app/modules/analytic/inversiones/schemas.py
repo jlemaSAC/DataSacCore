@@ -38,6 +38,13 @@ class ReporteInversionesFila(BaseModel):
         description="Productos de préstamo distintos del cliente.",
     )
     tasa_efectiva: float
+    tasa_variacion: float | None = Field(
+        default=None,
+        description=(
+            "Variación de tasa del depósito (VARIACION_TASA), separada de la tasa efectiva. "
+            "Puede ser null en cierres históricos cargados antes de incorporar la columna."
+        ),
+    )
     tasa_entera: int
     tasa_decimal: float
     operaciones: int

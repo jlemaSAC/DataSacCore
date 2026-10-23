@@ -35,6 +35,7 @@ cp .env.example .env
 ```
 
 La configuracion usa SQLAlchemy con `mssql+pyodbc` y el driver ODBC de SQL Server. El endpoint `/health/db` ejecuta `SELECT 1` para validar la conexion real.
+El valor `APP_NAME` se envia como nombre de aplicacion en las conexiones ODBC, para identificar la API en los registros y sesiones de SQL Server (`DataSacCore` por defecto).
 
 La conexion a MongoDB usa `pymongo` y mantiene las bases usadas por `DataSacService`:
 

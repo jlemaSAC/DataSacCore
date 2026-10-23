@@ -1,4 +1,7 @@
 from fastapi import APIRouter
+from app.modules.negocios.depositos_a_plazos.control_vencimiento.router import router as control_vencimiento_router
+from app.modules.negocios.depositos_a_plazos.evaluacion_captadores.router import router as evaluacion_captadores_router
+from app.modules.negocios.inversiones.depositos_a_plazo.router import router as depositos_router
 
 from app.modules.negocios.colocacion.resumen.router import router as colocacion_resumen_router
 from app.modules.negocios.cartera_de_credito.resumen_actual.router import (
@@ -36,6 +39,9 @@ from app.modules.negocios.cartera_de_credito.control_diario_cartera.router impor
 
 
 router = APIRouter(prefix="/negocios")
+router.include_router(control_vencimiento_router)
+router.include_router(evaluacion_captadores_router)
+router.include_router(depositos_router)
 router.include_router(control_diario_cartera_router)
 router.include_router(cartera_resumen_actual_router)
 router.include_router(cartera_resumen_diario_asesores_router)
