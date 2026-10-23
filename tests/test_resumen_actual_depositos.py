@@ -87,6 +87,36 @@ def test_filtra_agencias_y_tasas_no_son_promedios_de_promedios():
     assert [a.agencia for a in respuesta.por_agencia] == ["MATRIZ"]
 
 
+def test_tasa_variacion_se_incluye_una_sola_vez_en_ambos_promedios_y_comparativos():
+    fuente = Fuente({
+        date(2026, 9, 18): [
+            fila("20260918", creacion="2026-08-20", tasa=7.5, operaciones=2, saldo=10000)
+            .model_copy(update={"tasa_variacion": 0.5}),
+            fila("20260918", tasa=6.25, operaciones=3, saldo=3000)
+            .model_copy(update={"tasa_variacion": 0.25}),
+            fila("20260918", tasa=5.5, condicion="RENOVADO", saldo=500)
+            .model_copy(update={"tasa_variacion": -0.5}),
+        ],
+        date(2026, 8, 31): [
+            fila("20260831", creacion="2026-08-02", tasa=8, operaciones=4)
+            .model_copy(update={"tasa_variacion": 0.75}),
+        ],
+        # Un cierre anterior sin la nueva columna conserva la tasa ya calculada.
+        date(2025, 12, 31): [fila("20251231", creacion="2025-12-02", tasa=9)],
+    })
+    respuesta = ResumenActualDepositosService(fuente, fuente).obtener_resumen(
+        InputResumenActualDepositos(fecha_inicio="2026-09-01", fecha_fin="2026-09-18"), auth(),
+    )
+    assert respuesta.actual.tasa_promedio == 6.5417
+    assert respuesta.actual.tasa_promedio_renovacion == 6.0625
+    assert respuesta.por_agencia[0].tasa_promedio == 6.5417
+    assert respuesta.por_agencia[0].tasa_promedio_renovacion == 6.0625
+    assert respuesta.mes_anterior.tasa_promedio == 8
+    assert respuesta.mes_anterior.tasa_promedio_renovacion == 8
+    assert respuesta.anio_anterior.tasa_promedio == 9
+    assert respuesta.anio_anterior.tasa_promedio_renovacion == 9
+
+
 def test_no_hay_ingresos_o_comparativos_no_inventa_tasas():
     fuente = Fuente({date(2026, 9, 18): [fila("20260918", creacion="2026-08-01")]})
     respuesta = ResumenActualDepositosService(fuente, fuente).obtener_resumen(

@@ -167,6 +167,7 @@ BEGIN
         tipo_prestamo_lista nvarchar(max) NOT NULL,
         producto_lista nvarchar(max) NOT NULL,
         tasa_efectiva decimal(18, 4) NOT NULL,
+        tasa_variacion decimal(18, 2) NOT NULL,
         tasa_entera int NOT NULL,
         tasa_decimal decimal(18, 2) NOT NULL,
         operaciones int NOT NULL,
@@ -426,7 +427,7 @@ BEGIN
             periodicidad_pago, tipo_pago, condicion, periodo_plazo, plazo_dias,
             estado,
             provincia, canton, parroquia, tiene_prestamo, cantidad_prestamos,
-            tipo_prestamo_lista, producto_lista, tasa_efectiva,
+            tipo_prestamo_lista, producto_lista, tasa_efectiva, tasa_variacion,
             tasa_entera, tasa_decimal, operaciones, saldo
         )
         SELECT
@@ -464,6 +465,7 @@ BEGIN
             COALESCE(PP.tipo_prestamo_lista, ''),
             COALESCE(PP.producto_lista, ''),
             Tasa.tasa_efectiva,
+            D.tasa_variacion,
             CONVERT(int, FLOOR(Tasa.tasa_efectiva)),
             CONVERT(decimal(18, 2), Tasa.tasa_efectiva),
             COUNT(*),
@@ -491,7 +493,7 @@ BEGIN
             D.fecha_creacion, D.codigo_tipo_deposito, R.id_deposito, B.periodo_plazo,
             D.plazo_dias, D.codigo_estado_deposito, DPC.PROVINCIA, DPC.CANTON, DPC.PARROQUIA,
             PP.id_cliente, PP.cantidad_prestamos, PP.tipo_prestamo_lista, PP.producto_lista,
-            Tasa.tasa_efectiva;
+            Tasa.tasa_efectiva, D.tasa_variacion;
 
         FETCH NEXT FROM CursorCortes
             INTO @FechaCorte, @FechaCierrePlazo, @FechaCierreColocacion;
@@ -522,6 +524,7 @@ BEGIN
         tipo_prestamo_lista,
         producto_lista,
         tasa_efectiva,
+        tasa_variacion,
         tasa_entera,
         tasa_decimal,
         operaciones,
@@ -542,7 +545,8 @@ BEGIN
         canton,
         parroquia,
         tiene_prestamo,
-        tasa_efectiva;
+        tasa_efectiva,
+        tasa_variacion;
 END;
 
 /*

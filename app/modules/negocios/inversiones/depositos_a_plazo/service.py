@@ -109,6 +109,8 @@ def _fecha_corte(fila: ReporteInversionesFila) -> date:
 
 
 def _tasa(filas: list[ReporteInversionesFila]) -> float | None:
+    # El SP ya incluye TASA + VARIACION_TASA en tasa_efectiva, también en Mongo.
+    # tasa_variacion se expone por separado para consulta; no se suma otra vez.
     operaciones = sum(fila.operaciones for fila in filas)
     if not operaciones:
         return None

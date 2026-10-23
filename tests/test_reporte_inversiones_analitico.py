@@ -148,6 +148,33 @@ def test_endpoint_consulta_rango_autenticado() -> None:
 
     assert response.status_code == 200
     assert response.json()["cortes"][0]["origen"] == "MONGO"
+    assert response.json()["filas"][0]["tasa_variacion"] is None
+
+
+def test_endpoint_devuelve_variacion_de_tasa_desde_mongo_y_sql() -> None:
+    fila_mongo = {**_fila("20260831", "2026-08"), "tasa_variacion": 0.5}
+    fila_sql = {**_fila("20260903", "2026-09", saldo=200), "tasa_variacion": -0.25}
+    mongo = FakeMongoRepository([fila_mongo])
+    service = ReporteInversionesService(
+        mongo, FakeSqlRepository([fila_sql]), FakeEtlClient(mongo),
+    )  # type: ignore[arg-type]
+    client = TestClient(app)
+    app.dependency_overrides[get_reporte_inversiones_service] = lambda: service
+    app.dependency_overrides[get_current_auth_context] = lambda: _auth(date(2026, 9, 3))
+    try:
+        response = client.get(
+            "/analytic/depositos-a-plazos-historico",
+            params={"fecha_desde": "2026-08-01", "fecha_hasta": "2026-09-03"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    datos = response.json()
+    assert [fila["tasa_variacion"] for fila in datos["filas"]] == [0.5, -0.25]
+    assert [fila["tasa_efectiva"] for fila in datos["filas"]] == [7.25, 7.25]
+    assert datos["total_operaciones"] == 2
+    assert datos["total_saldo"] == 300
 
 
 def test_endpoint_rechaza_rango_invertido() -> None:
