@@ -81,7 +81,7 @@ class DetalleControlCaptacionesFila(BaseModel):
     monto: float
     interes_total: float = Field(description="Interés calculado total al corte, incluyendo el ya pagado.")
     tasa_total: float = Field(description="Tasa del DPF al corte; suma TASA y VARIACION_TASA una sola vez.")
-    tiene_prestamo: bool
+    tiene_prestamo: bool | None = Field(description="Null si no existe cliente principal disponible.")
     fecha_vencimiento: date
     estado: str
 

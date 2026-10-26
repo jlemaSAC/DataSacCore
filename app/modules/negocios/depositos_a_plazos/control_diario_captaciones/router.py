@@ -22,9 +22,9 @@ router = APIRouter(prefix="/depositos-a-plazos", tags=["Negocios - Depósitos a 
     response_model=ControlDiarioCaptacionesResponse,
     summary="Montos diarios por captador, agencia y condición",
     description=(
-        "Rango de un mismo mes. Usa el universo del resumen de depósitos al corte: "
-        "DPF activos, exigibles o vencidos con cliente principal, agrupados por fecha de creación. "
-        "No incluye cancelaciones anteriores al corte. Devuelve montos nuevos y renovados "
+        "Rango de un mismo mes. Incluye los depósitos creados en el rango sin filtrar por "
+        "estado al corte, incluso cancelados y anulados. Agrupa por fecha de creación. "
+        "Devuelve montos nuevos y renovados "
         "por separado, con cero en días sin captaciones. Cargo corresponde al catálogo actual."
     ),
 )
@@ -43,7 +43,8 @@ def obtener_control_diario_captaciones(
     description=(
         "Mantiene fecha_fin como corte original del control diario. fecha limita el día de creación, "
         "sin mover el corte. Aplica agencia, captador, cargos y condición sobre el mismo universo. "
-        "Incluye todos los depósitos, monto, interés total y tasa total al corte, sin paginación."
+        "Incluye todos los depósitos creados en el rango, independientemente de su estado, "
+        "con monto, interés total y tasa total al corte, sin paginación."
     ),
 )
 def obtener_detalle_control_diario_captaciones(

@@ -173,7 +173,7 @@ class SessionFake:
 
 
 @pytest.mark.parametrize("fecha,en_linea", [(date(2026, 10, 21), True), (date(2026, 10, 20), False)])
-def test_repositorio_conserva_universo_y_condicion_del_resumen_en_actual_e_historico(fecha, en_linea):
+def test_repositorio_usa_solo_fecha_de_creacion_sin_filtrar_estado_ni_cliente(fecha, en_linea):
     db = SessionFake({"fecha": fecha, "cierre": datetime(2026, 10, 21, 2, 59)})
     respuesta = SqlControlDiarioCaptacionesRepository(db).obtener_diario(
         fecha_inicio=date(2026, 10, 10), fecha_fin=fecha,
@@ -181,8 +181,9 @@ def test_repositorio_conserva_universo_y_condicion_del_resumen_en_actual_e_histo
     )
     sql, params = db.calls[1]
     assert ("FOR SYSTEM_TIME AS OF :cierre" in sql) is not en_linea
-    assert "IN ('A', 'E', 'V')" in sql
-    assert "DC.ESPRINCIPAL = 1 AND DC.ACTIVO = 1" in sql
+    assert "D.CODIGOESTADODEPOSITO IN" not in sql
+    assert "D.CODIGOESTADODEPOSITO NOT IN" not in sql
+    assert "DC.ESPRINCIPAL" not in sql
     assert "R.IDDEPOSITODESTINO = D.ID" in sql
     assert "R.FECHA >= :inicio_mes AND R.FECHA < :corte_exclusivo" in sql
     assert "D.FECHACREACION >= :fecha_inicio" in sql
@@ -315,7 +316,10 @@ def test_detalle_sql_comparte_universo_y_usa_intereses_y_prestamos_del_corte(en_
     sql, params = db.calls[1]
     assert ("INVERSION.DEPOSITO_ITEMPLAZO FOR SYSTEM_TIME AS OF :cierre" in sql) is not en_linea
     assert ("COLOCACION.PRESTAMO FOR SYSTEM_TIME AS OF :cierre_colocacion" in sql) is not en_linea
-    assert "GROUP BY IP.IDDEPOSITO" in sql
+    assert "IP.IDDEPOSITO = X.ID AND IP.IDITEMPLAZO = 2" in sql
+    assert "OUTER APPLY" in sql
+    assert "Cliente.id_cliente IS NULL THEN NULL" in sql
+    assert "AS numero_cliente" in sql and "SIN DATOS" in sql
     assert "IP.IDITEMPLAZO = 2" in sql
     assert "X.fecha = :fecha" in sql
     assert "X.codigo = :codigo_usuario" in sql
@@ -336,3 +340,23 @@ def test_detalle_historico_sin_cierre_de_colocacion_no_usa_prestamos_actuales():
         id_agencia=0, fecha=None, codigo_usuario=None, cargos=[], condicion="todas",
     ) is None
     assert len(db.calls) == 1
+
+
+def test_endpoint_detalle_incluye_deposito_cancelado_y_cliente_no_disponible():
+    fuente = FuenteDetalle([
+        deposito(estado="Cancelado", monto=Decimal("13765.91")),
+        deposito(id_deposito=2, numero_cliente="SIN DATOS", nombre_cliente="SIN DATOS",
+                 tiene_prestamo=None, estado="Anulado"),
+    ])
+    app.dependency_overrides[get_current_auth_context] = auth
+    app.dependency_overrides[get_control_diario_captaciones_service] = lambda: ControlDiarioCaptacionesService(fuente, fuente)
+    try:
+        response = TestClient(app).post(URL + "/detalle", json=detalle_request(fecha=None).model_dump(mode="json"))
+        assert response.status_code == 200
+        datos = response.json()
+        assert datos["total_monto"] == 13866.01
+        assert [item["estado"] for item in datos["items"]] == ["Cancelado", "Anulado"]
+        assert datos["items"][1]["numero_cliente"] == "SIN DATOS"
+        assert datos["items"][1]["tiene_prestamo"] is None
+    finally:
+        app.dependency_overrides.clear()

@@ -38,7 +38,7 @@ _CARGO = "COALESCE(NULLIF(LTRIM(RTRIM(Cargo.nombre)), ''), 'SIN CARGO')"
 
 
 class SqlControlDiarioCaptacionesRepository:
-    """Ingresos por creación del DPF que permanece en el universo del resumen al corte."""
+    """Depósitos creados en el rango, independientemente de su estado al corte."""
 
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -86,16 +86,9 @@ class SqlControlDiarioCaptacionesRepository:
                           AND R.FECHA >= :inicio_mes AND R.FECHA < :corte_exclusivo
                     ) THEN 'RENOVADO' ELSE 'NUEVO' END AS condicion
                 FROM {fuente} AS D
-                WHERE D.CODIGOESTADODEPOSITO IN ('A', 'E', 'V')
-                  AND D.FECHACREACION >= :fecha_inicio
+                WHERE D.FECHACREACION >= :fecha_inicio
                   AND D.FECHACREACION < :hasta_exclusivo
                   AND (:id_agencia = 0 OR D.IDAGENCIA = :id_agencia)
-                  AND EXISTS (
-                      SELECT 1 FROM INVERSION.DEPOSITO_CLIENTE AS DC
-                      INNER JOIN CLIENTES.CLIENTE AS C ON C.ID = DC.IDCLIENTE
-                      INNER JOIN SUJETO.PERSONA AS P ON P.ID = C.IDPERSONA
-                      WHERE DC.IDDEPOSITO = D.ID AND DC.ESPRINCIPAL = 1 AND DC.ACTIVO = 1
-                  )
             )
         """, {
             "cierre": corte.cierre, "id_agencia": id_agencia,
@@ -156,27 +149,23 @@ class SqlControlDiarioCaptacionesRepository:
                 FROM Depositos AS X
                 {_METADATA}
                 {where}
-            ), Intereses AS (
-                SELECT IP.IDDEPOSITO, SUM(IP.CALCULADO) AS interes_total
-                FROM {intereses} AS IP
-                INNER JOIN Alcance AS A ON A.ID = IP.IDDEPOSITO
-                WHERE IP.IDITEMPLAZO = 2
-                GROUP BY IP.IDDEPOSITO
             )
-            SELECT X.ID AS id_deposito, Cliente.numero_cliente, Cliente.nombre_cliente,
+            SELECT X.ID AS id_deposito,
+                COALESCE(CONVERT(nvarchar(100), Cliente.numero_cliente), 'SIN DATOS') AS numero_cliente,
+                COALESCE(NULLIF(LTRIM(RTRIM(Cliente.nombre_cliente)), ''), 'SIN DATOS') AS nombre_cliente,
                 X.agencia, X.captador, X.numero_deposito, X.MONTO AS monto,
                 COALESCE(I.interes_total, 0) AS interes_total,
                 X.tasa_total,
                 CAST(X.FECHAVENCIMIENTO AS date) AS fecha_vencimiento,
                 COALESCE(ED.NOMBRE, X.CODIGOESTADODEPOSITO) AS estado,
-                CONVERT(bit, CASE WHEN EXISTS (
+                CONVERT(bit, CASE WHEN Cliente.id_cliente IS NULL THEN NULL WHEN EXISTS (
                     SELECT 1 FROM COLOCACION.PRESTAMO_CLIENTE AS PC
                     INNER JOIN {prestamos} AS P ON P.ID = PC.IDPRESTAMO
                     WHERE PC.IDCLIENTE = Cliente.id_cliente AND PC.ACTIVO = 1
                       AND P.CODIGOESTADO <> 'C'
                 ) THEN 1 ELSE 0 END) AS tiene_prestamo
             FROM Alcance AS X
-            CROSS APPLY (
+            OUTER APPLY (
                 SELECT TOP (1) C.ID AS id_cliente, C.NUMERO AS numero_cliente, P.NOMBRE AS nombre_cliente
                 FROM INVERSION.DEPOSITO_CLIENTE AS DC
                 INNER JOIN CLIENTES.CLIENTE AS C ON C.ID = DC.IDCLIENTE
@@ -184,7 +173,11 @@ class SqlControlDiarioCaptacionesRepository:
                 WHERE DC.IDDEPOSITO = X.ID AND DC.ESPRINCIPAL = 1 AND DC.ACTIVO = 1
                 ORDER BY DC.ID
             ) AS Cliente
-            LEFT JOIN Intereses AS I ON I.IDDEPOSITO = X.ID
+            OUTER APPLY (
+                SELECT SUM(IP.CALCULADO) AS interes_total
+                FROM {intereses} AS IP
+                WHERE IP.IDDEPOSITO = X.ID AND IP.IDITEMPLAZO = 2
+            ) AS I
             LEFT JOIN INVERSION.ESTADO_DEPOSITO AS ED ON ED.CODIGO = X.CODIGOESTADODEPOSITO
             ORDER BY X.agencia, X.captador, X.fecha, X.ID
         """), params).mappings().all()
