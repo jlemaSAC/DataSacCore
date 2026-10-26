@@ -29,6 +29,13 @@ class ResumenActualDepositosService:
     def obtener_resumen(
         self, body: InputResumenActualDepositos, auth: AuthContext
     ) -> ResumenActualDepositosResponse:
+        resumen, _ = self.obtener_resumen_con_filas(body, auth)
+        return resumen
+
+    def obtener_resumen_con_filas(
+        self, body: InputResumenActualDepositos, auth: AuthContext
+    ) -> tuple[ResumenActualDepositosResponse, list[ReporteInversionesFila]]:
+        """Comparativo y su mismo universo al corte, sin volver a consultar SQL."""
         fecha_sistema = auth.usuario.fecha_sistema
         if isinstance(fecha_sistema, datetime):
             fecha_sistema = fecha_sistema.date()
@@ -73,7 +80,7 @@ class ResumenActualDepositosService:
 
         fecha_actual, filas_actuales = cortes["actual"]
         agencias = sorted({fila.agencia.strip().upper() for fila in filas_actuales} | agencias_filtro)
-        return ResumenActualDepositosResponse(
+        resumen = ResumenActualDepositosResponse(
             fecha_inicio=body.fecha_inicio,
             fecha_fin=body.fecha_fin,
             fecha_mes_anterior=mes_anterior,
@@ -89,7 +96,7 @@ class ResumenActualDepositosService:
             por_agencia=[
                 AgenciaResumenDepositos(
                     agencia=agencia,
-                    **_metricas(
+                    **calcular_metricas_depositos(
                         [fila for fila in filas_actuales if fila.agencia.strip().upper() == agencia],
                         body.fecha_inicio,
                         fecha_actual,
@@ -99,6 +106,7 @@ class ResumenActualDepositosService:
                 if fecha_actual is not None
             ],
         )
+        return resumen, filas_actuales
 
 
 def _fecha_corte(fila: ReporteInversionesFila) -> date:
@@ -124,11 +132,11 @@ def _resumir(
         return None
     return IndicadoresDepositos(
         fecha_corte=fecha,
-        **_metricas(filas, fecha_inicio or fecha.replace(day=1), fecha).model_dump(),
+        **calcular_metricas_depositos(filas, fecha_inicio or fecha.replace(day=1), fecha).model_dump(),
     )
 
 
-def _metricas(
+def calcular_metricas_depositos(
     filas: list[ReporteInversionesFila], fecha_inicio: date, fecha_fin: date
 ) -> MetricasDepositos:
     ingresados = [
