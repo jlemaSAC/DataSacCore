@@ -16,7 +16,10 @@ from app.modules.negocios.depositos_a_plazos.control_diario_captaciones.reposito
     CorteCaptaciones,
     SqlControlDiarioCaptacionesRepository,
 )
-from app.modules.negocios.depositos_a_plazos.control_diario_captaciones.schemas import ControlDiarioCaptacionesRequest
+from app.modules.negocios.depositos_a_plazos.control_diario_captaciones.schemas import (
+    ControlDiarioCaptacionesRequest,
+    DetalleControlCaptacionesRequest,
+)
 from app.modules.negocios.depositos_a_plazos.control_diario_captaciones.service import ControlDiarioCaptacionesService
 
 
@@ -196,5 +199,140 @@ def test_repositorio_no_sustituye_historicos_faltantes_por_datos_actuales(corte)
     assert SqlControlDiarioCaptacionesRepository(db).obtener_diario(
         fecha_inicio=date(2026, 10, 10), fecha_fin=date(2026, 10, 20),
         fecha_sistema=date(2026, 10, 21), id_agencia=0,
+    ) is None
+    assert len(db.calls) == 1
+
+
+def detalle_request(**cambios):
+    return DetalleControlCaptacionesRequest(**{
+        **request().model_dump(), "fecha": date(2026, 10, 10),
+        "codigo_usuario": "ana", "cargos": [" captador "], "condicion": "renovado",
+        **cambios,
+    })
+
+
+def deposito(**cambios):
+    return {
+        "id_deposito": 1, "numero_cliente": 123, "nombre_cliente": "Cliente de prueba",
+        "agencia": "MATRIZ", "captador": "Ana", "numero_deposito": "DPF-001",
+        "monto": Decimal("100.10"), "interes_total": Decimal("0.10"),
+        "tasa_total": Decimal("7.25"),
+        "tiene_prestamo": True, "fecha_vencimiento": date(2027, 1, 10), "estado": "ACTIVO",
+        **cambios,
+    }
+
+
+class FuenteDetalle(Fuente):
+    def __init__(self, filas=None):
+        super().__init__()
+        self.corte = CorteCaptaciones(date(2026, 10, 12), filas if filas is not None else [deposito()])
+
+    def obtener_detalle(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.corte
+
+
+def test_detalle_conserva_corte_original_filtros_total_decimal_y_tasa():
+    fuente = FuenteDetalle([deposito(), deposito(id_deposito=2, interes_total=Decimal("0.20"))])
+    respuesta = ControlDiarioCaptacionesService(fuente, fuente).obtener_detalle(detalle_request(), auth())
+    assert fuente.calls[0]["fecha_fin"] == date(2026, 10, 12)
+    assert fuente.calls[0]["fecha"] == date(2026, 10, 10)
+    assert fuente.calls[0]["cargos"] == ["CAPTADOR"]
+    assert fuente.calls[0]["condicion"] == "renovado"
+    assert respuesta.fecha_corte == date(2026, 10, 12)
+    assert respuesta.total_monto == 200.2
+    assert respuesta.total_interes == 0.3
+    assert respuesta.items[0].numero_cliente == "123"
+    assert respuesta.items[0].tasa_total == 7.25
+
+
+def test_detalle_devuelve_mas_de_500_depositos_sin_paginacion():
+    fuente = FuenteDetalle([deposito(id_deposito=i) for i in range(601)])
+    respuesta = ControlDiarioCaptacionesService(fuente, fuente).obtener_detalle(detalle_request(fecha=None), auth())
+    assert respuesta.total_registros == len(respuesta.items) == 601
+    assert respuesta.total_monto == 60160.1
+    assert respuesta.total_interes == 60.1
+    assert not {"pagina", "tamano_pagina"} & respuesta.model_dump().keys()
+
+
+def test_detalle_vacio_y_corte_no_disponible():
+    fuente = FuenteDetalle([])
+    servicio = ControlDiarioCaptacionesService(fuente, fuente)
+    respuesta = servicio.obtener_detalle(detalle_request(), auth())
+    assert respuesta.items == []
+    assert respuesta.total_monto == respuesta.total_interes == 0
+    fuente.corte = None
+    with pytest.raises(HTTPException) as error:
+        servicio.obtener_detalle(detalle_request(), auth())
+    assert error.value.status_code == 404
+
+
+@pytest.mark.parametrize("cambios", [
+    {"fecha": "2026-10-09"}, {"fecha": "2026-10-13"}, {"condicion": "invalida"},
+    {"codigo_usuario": " "}, {"cargos": [""]}, {"pagina": 1},
+])
+def test_detalle_rechaza_dia_fuera_del_rango_y_filtros_invalidos(cambios):
+    with pytest.raises(ValidationError):
+        detalle_request(**cambios)
+
+
+@pytest.mark.parametrize("cambios,codigo", [({"fecha_fin": "2026-10-22"}, 400), ({"id_agencia": 999}, 404)])
+def test_detalle_valida_fecha_del_sistema_y_agencia(cambios, codigo):
+    fuente = FuenteDetalle()
+    with pytest.raises(HTTPException) as error:
+        ControlDiarioCaptacionesService(fuente, fuente).obtener_detalle(detalle_request(**cambios), auth())
+    assert error.value.status_code == codigo
+    assert fuente.calls == []
+
+
+def test_endpoint_detalle_bearer_contrato_completo_con_tasa_sin_paginacion():
+    client = TestClient(app)
+    body = detalle_request().model_dump(mode="json")
+    assert client.post(URL + "/detalle", json=body).status_code == 401
+    fuente = FuenteDetalle()
+    app.dependency_overrides[get_current_auth_context] = auth
+    app.dependency_overrides[get_control_diario_captaciones_service] = lambda: ControlDiarioCaptacionesService(fuente, fuente)
+    try:
+        respuesta = client.post(URL + "/detalle", json=body)
+        assert respuesta.status_code == 200
+        assert respuesta.json()["total_registros"] == 1
+        assert len(respuesta.json()["items"][0]) == 12
+        assert respuesta.json()["items"][0]["tasa_total"] == 7.25
+        assert client.post(URL + "/detalle", json={**body, "fecha": "2026-10-13"}).status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("en_linea", [True, False])
+def test_detalle_sql_comparte_universo_y_usa_intereses_y_prestamos_del_corte(en_linea):
+    fecha = date(2026, 10, 21 if en_linea else 20)
+    db = SessionFake({"fecha": fecha, "cierre": datetime(2026, 10, 21, 2),
+                      "cierre_colocacion": datetime(2026, 10, 21, 3)})
+    SqlControlDiarioCaptacionesRepository(db).obtener_detalle(
+        fecha_inicio=date(2026, 10, 10), fecha_fin=fecha, fecha_sistema=date(2026, 10, 21),
+        id_agencia=2, fecha=date(2026, 10, 10), codigo_usuario="ana", cargos=["CAPTADOR"], condicion="renovado",
+    )
+    sql, params = db.calls[1]
+    assert ("INVERSION.DEPOSITO_ITEMPLAZO FOR SYSTEM_TIME AS OF :cierre" in sql) is not en_linea
+    assert ("COLOCACION.PRESTAMO FOR SYSTEM_TIME AS OF :cierre_colocacion" in sql) is not en_linea
+    assert "GROUP BY IP.IDDEPOSITO" in sql
+    assert "IP.IDITEMPLAZO = 2" in sql
+    assert "X.fecha = :fecha" in sql
+    assert "X.codigo = :codigo_usuario" in sql
+    assert "X.condicion = :condicion" in sql
+    assert "IN (:cargo_0)" in sql
+    assert params["hasta_exclusivo"].day == fecha.day + 1
+    assert params["fecha"] == date(2026, 10, 10)
+    assert params["condicion"] == "RENOVADO"
+    assert "OFFSET" not in sql and "FETCH NEXT" not in sql
+    assert "D.TASA + D.VARIACION_TASA" in sql
+    assert "X.tasa_total" in sql
+
+
+def test_detalle_historico_sin_cierre_de_colocacion_no_usa_prestamos_actuales():
+    db = SessionFake({"fecha": date(2026, 10, 20), "cierre": datetime(2026, 10, 21, 2)})
+    assert SqlControlDiarioCaptacionesRepository(db).obtener_detalle(
+        fecha_inicio=date(2026, 10, 10), fecha_fin=date(2026, 10, 20), fecha_sistema=date(2026, 10, 21),
+        id_agencia=0, fecha=None, codigo_usuario=None, cargos=[], condicion="todas",
     ) is None
     assert len(db.calls) == 1
