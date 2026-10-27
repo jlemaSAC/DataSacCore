@@ -238,7 +238,7 @@ def test_mongo_menu_repository_returns_the_complete_tree_for_administration() ->
 
     assert len(menu) == 1
     assert menu[0].codigo == "SEGURIDAD"
-    assert menu[0].roles_directos_codigos == []
+    assert menu[0].roles_directos_codigos == ["001"]
     assert menu[0].roles_permitidos_codigos == ["001"]
     assert menu[0].children[0].codigo == "SEGURIDAD.PERMISOS"
     assert menu[0].children[0].activo is False
@@ -309,6 +309,9 @@ def test_mongo_menu_repository_propagates_and_synchronizes_roles_to_all_ancestor
         ("negocios.colocacion.ver", "002"),
         ("negocios.colocacion.resumen.ver", "001"),
         ("negocios.colocacion.resumen.ver", "002"),
+        # Legacy grants belonging to the group itself must survive migration.
+        ("negocios.ver", "999"),
+        ("negocios.colocacion.ver", "999"),
     }
 
 
