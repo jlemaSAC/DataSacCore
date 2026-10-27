@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.mongo import get_mongo_datasac_app_web_menu_db_sync
+from app.modules.auth.repositories.atomic_menu_repository import AtomicMenuRepository
 from app.modules.auth.repositories.mongo_menu_repository import MongoMenuRepository
 from app.modules.auth.repositories.sql_auth_repository import SqlAuthRepository
 from app.modules.auth.schemas import (
@@ -30,7 +31,7 @@ class AuthService:
         self,
         db: Session,
         sql_repository: SqlAuthRepository | None = None,
-        menu_repository: MongoMenuRepository | None = None,
+        menu_repository: MongoMenuRepository | AtomicMenuRepository | None = None,
         password_hasher: PasswordHasher | None = None,
         token_service: JwtTokenService | None = None,
     ) -> None:
@@ -228,7 +229,7 @@ class AuthService:
                 raise HTTPException(status_code=404, detail=f"Rol {codigo} no encontrado o inactivo.")
         return roles
 
-    def _get_menu_repository(self) -> MongoMenuRepository:
+    def _get_menu_repository(self) -> MongoMenuRepository | AtomicMenuRepository:
         if self.menu_repository is None:
-            self.menu_repository = MongoMenuRepository(get_mongo_datasac_app_web_menu_db_sync())
+            self.menu_repository = AtomicMenuRepository(get_mongo_datasac_app_web_menu_db_sync())
         return self.menu_repository

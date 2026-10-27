@@ -105,7 +105,7 @@ Auth:
 - `GET /data-sac-web/auth/menu/completo`: devuelve el arbol completo del menu DataSacWeb, incluidos los items inactivos y roles asignados; requiere el rol administrador `001`.
 - `GET /data-sac-web/auth/menu/{id_menu}`, `POST /data-sac-web/auth/menu`, `PATCH /data-sac-web/auth/menu/{id_menu}` y `DELETE /data-sac-web/auth/menu/{id_menu}`: administración de permisos de DataSacWeb; requieren el rol administrador `001`.
 
-La respuesta de `POST /data-sac-web/auth/login` no incluye el campo `menu`. El menu se obtiene por separado desde `GET /data-sac-web/auth/menu`, usando la base MongoDB `DataSacWebAppMenu`: primero cruza los roles SQL del usuario con `rol_permisos`, valida los permisos activos y finalmente construye el arbol desde `menu`.
+La respuesta de `POST /data-sac-web/auth/login` no incluye el campo `menu`. El menu se obtiene por separado desde `GET /data-sac-web/auth/menu`, usando la base MongoDB `DataSacWebAppMenu`: cruza los roles SQL del usuario con las asignaciones activas y construye el arbol del estado de menús vigente.
 
 ## Ejecutar pruebas
 
@@ -283,8 +283,8 @@ Convenciones para nuevos modelos:
 
 ## Gestión de menús y permisos de DataSacWeb
 
-La administración usa las asignaciones existentes de `menu.roles_directos_codigos`
-y `rol_permisos` en la base Mongo configurada para DataSacWeb. Los cargos que
+La administración conserva los menús y las asignaciones previamente existentes en
+la base Mongo configurada para DataSacWeb. Los cargos que
 intervienen en autorización son los roles de `SEGURIDAD.ROL`; los identificadores
 numéricos de `NOMINA.CARGO` no se convierten en códigos de rol.
 
@@ -316,23 +316,39 @@ acceso a hermanos ni a menús futuros. El permiso propio del padre se conserva p
 separado. Las asignaciones históricas sin marca de acceso directo se conservan
 al editar; no se ejecuta una migración destructiva al consultar.
 
-### Requisito de despliegue: replica set
+### Guardado atómico con MongoDB independiente
 
-El guardado de permisos por lotes necesita MongoDB con transacciones: replica set
-o clúster compatible. Usa lectura `snapshot`, escritura `majority` y un documento
-operativo `menu_admin_state/access` para serializar administradores. Este documento
-es coordinación de escrituras; no es otra fuente de asignaciones.
+La API puede funcionar con la instancia MongoDB independiente existente. No
+requiere replica set: guarda el estado completo de menús, permisos y relaciones
+en el documento `menu_estado` con `_id: "actual"`. La creación y las ediciones
+usan una única escritura atómica, con una revisión que impide sobrescribir cambios
+concurrentes. MongoDB limita el tamaño de un documento BSON a 16 MiB; la API
+rechaza el guardado antes de llegar a 15 MiB para dejar margen.
 
-Antes de habilitar el guardado en el entorno actual, infraestructura debe convertir
-la instancia independiente en replica set, conservar los datos y la autenticación,
-configurar autenticación entre miembros e incluir el nombre del replica set en la
-URI de despliegue. No se han modificado `.env` ni la configuración del servidor.
-Procedimiento oficial: [Convertir una instancia independiente en replica set](https://www.mongodb.com/docs/manual/tutorial/convert-standalone-to-replica-set/).
+Antes del primer cambio, la API lee `menu`, `permisos` y `rol_permisos` sin
+modificarlos. El primer guardado copia su estado completo al nuevo documento y
+aplica la operación en la misma escritura. En adelante `menu_estado/actual` es
+la fuente de verdad para la navegación, la administración de menús y ambas vistas
+de permisos. Los identificadores, códigos y asignaciones se conservan. Las tres
+colecciones originales permanecen como respaldo de la migración y ya no reflejan
+cambios posteriores; no deben usarse como fuente de permisos ni modificarse.
 
-En instancia independiente la consulta permanece disponible y el lote devuelve
-`503` sin aplicar cambios. El CRUD individual de menús mantiene su compatibilidad
-previa; en replica set también usa transacciones. No existe un guardado parcial de
-permisos como alternativa silenciosa.
+Para el cambio de versión, detener las escrituras administrativas y actualizar
+todas las instancias de DataSacCore y cualquier consumidor externo que lea o
+escriba esas tres colecciones. La aplicación anterior continuaría leyendo datos
+antiguos después de la migración, incluso si se revoca un acceso. Tras actualizar
+todos los consumidores, reiniciar la API y comprobar un lote en ambas vistas.
+La API comprueba la huella de las colecciones originales y devuelve `503` si
+detecta que otro proceso las modificó; resolver la divergencia antes de continuar.
+Las colecciones originales no constituyen un respaldo actualizado para revertir
+la aplicación después de guardar cambios en el nuevo documento: cualquier vuelta
+atrás debe reconciliar primero el estado vigente.
+
+La copia inicial exige que las colecciones originales permanezcan sin escrituras
+durante el cambio de versión. MongoDB no ofrece una lectura y creación atómica de
+varias colecciones en una instancia independiente, por lo que esta condición debe
+coordinarse con los demás procesos. No activar el nuevo documento mientras una
+versión anterior de la API siga sirviendo tráfico.
 
 Una versión desactualizada devuelve `409` antes de cambiar asignaciones. El
 frontend conserva el borrador y su resumen para revisar, descartar y recargar.
@@ -344,9 +360,9 @@ reescriben.
 Validación específica:
 
 ```bash
-.venv/bin/python -m pytest tests/test_auth.py tests/test_seguridad_permisos.py tests/test_seguridad_roles.py
+.venv/bin/python -m pytest tests/test_auth.py tests/test_seguridad_permisos.py tests/test_permisos_mongo_independiente.py tests/test_seguridad_roles.py
 ```
 
-El guardado real en replica set debe comprobarse en un entorno de pruebas antes
-del despliegue. Las pruebas automatizadas incluyen rollback, conflicto de versión,
-preservación de accesos históricos, autorización y ambas perspectivas.
+Las pruebas incluyen fallos antes de publicar, conflictos de versión, preservación
+de accesos históricos, autorización y ambas perspectivas. El guardado se puede
+validar en una base de prueba aislada de la misma instancia independiente.

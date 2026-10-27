@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from bson import ObjectId
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from pymongo.errors import OperationFailure
 import pytest
 
 from app.main import app
@@ -13,10 +12,19 @@ from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.auth.schemas import AuthContext, MenuDataSacWebCreateRequest, MenuDataSacWebUpdateRequest, UsuarioTokenPayload
 from app.modules.auth.service import AuthService
 from app.modules.seguridad.permisos.dependencies import get_permiso_service
-from app.modules.seguridad.permisos.repositories.mongo_permiso_repository import MongoPermisoRepository
+from app.modules.seguridad.permisos.repositories.mongo_permiso_repository import MongoPermisoWorkingRepository
 from app.modules.seguridad.permisos.schemas import AccessBatchRequest, AccessChange
 from app.modules.seguridad.permisos.service import PermisoService
 from test_auth import FakeMongoCollection
+
+
+class MongoPermisoRepository(MongoPermisoWorkingRepository):
+    """Exercises the existing working-copy rules with the transaction fake."""
+    def get_snapshot(self):
+        return self._snapshot()
+
+    def apply_batch(self, data):
+        return self.run_atomic(lambda repository: repository._apply_batch(data))
 
 
 class Collection(FakeMongoCollection):
@@ -178,15 +186,6 @@ def test_empty_difference_is_noop(repository):
     after, count = repository.apply_batch(batch(repository, [change(root.children[0])]))
     assert count == 0
     assert before.version == after.version
-
-
-def test_unsupported_transactions_fail_closed(repository, monkeypatch):
-    def fail():
-        raise OperationFailure('transactions unsupported', code=20)
-    monkeypatch.setattr(repository.mongo_db, 'start_session', fail)
-    with pytest.raises(HTTPException) as error:
-        repository.apply_batch(AccessBatchRequest(version='0' * 64, cambios=[AccessChange(menu_id='x', rol_codigo='002', conceder=True)]))
-    assert error.value.status_code == 503
 
 
 def context():

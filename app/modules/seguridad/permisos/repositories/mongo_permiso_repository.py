@@ -1,36 +1,16 @@
 import hashlib
 import json
+from typing import cast
 
 from fastapi import HTTPException
-from pymongo.read_concern import ReadConcern
-from pymongo.errors import OperationFailure
 
+from app.modules.auth.repositories.atomic_menu_repository import AtomicMenuRepository
+from app.modules.auth.repositories.menu_snapshot import MenuSnapshot
 from app.modules.auth.repositories.mongo_menu_repository import MongoMenuRepository
 from app.modules.seguridad.permisos.schemas import AccessBatchRequest, AccessSnapshot
 
 
-class MongoPermisoRepository(MongoMenuRepository):
-    def get_snapshot(self) -> AccessSnapshot:
-        # A coherent snapshot: never combine a pre-save tree with post-save grants.
-        try:
-            with self.mongo_db.client.start_session() as session:
-                return session.with_transaction(
-                    lambda current: type(self)(self.mongo_db, session=current)._snapshot(),
-                    read_concern=ReadConcern("snapshot"),
-                )
-        except OperationFailure as exc:
-            if exc.code not in {20, 303}:
-                raise
-            # Read-only administration remains available on standalone MongoDB.
-            # A batch must still fail closed if transactions are unsupported.
-            previous = self._snapshot()
-            for _ in range(3):
-                current = self._snapshot()
-                if current.version == previous.version:
-                    return current
-                previous = current
-            raise HTTPException(status_code=409, detail="Los permisos están cambiando. Reintente la consulta.") from exc
-
+class MongoPermisoWorkingRepository(MongoMenuRepository):
     def _snapshot(self) -> AccessSnapshot:
         menu = self.get_complete_menu_tree()
         content = {
@@ -47,9 +27,6 @@ class MongoPermisoRepository(MongoMenuRepository):
         version = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
         return AccessSnapshot(menu=menu, version=version)
 
-    def apply_batch(self, data: AccessBatchRequest) -> tuple[AccessSnapshot, int]:
-        return self.run_atomic(lambda repository: repository._apply_batch(data))
-
     def _apply_batch(self, data: AccessBatchRequest) -> tuple[AccessSnapshot, int]:
         before = self._snapshot()
         if before.version != data.version:
@@ -60,6 +37,19 @@ class MongoPermisoRepository(MongoMenuRepository):
         for change in data.cambios:
             if change.menu_id not in by_id:
                 raise HTTPException(status_code=404, detail="Menú no encontrado.")
+
+        # A no-op must not migrate or rewrite the legacy data.
+        roles_by_permission = self._roles_by_permission()
+        has_changes = any(
+            (change.rol_codigo in (
+                set(by_id[change.menu_id]["roles_directos_codigos"])
+                if by_id[change.menu_id].get("roles_directos_codigos") is not None
+                else self._legacy_direct_roles(by_id[change.menu_id], documents, roles_by_permission)
+            )) != change.conceder
+            for change in data.cambios
+        )
+        if not has_changes:
+            return before, 0
 
         # Freeze legacy grants before changing descendants or deriving parents.
         self._preserve_legacy_assignments()
@@ -97,3 +87,14 @@ class MongoPermisoRepository(MongoMenuRepository):
                     document = by_id.get(str(parent)) if parent else None
             self._sync_effective_role_permissions(only_permissions=affected_permissions)
         return self._snapshot(), count
+
+
+class MongoPermisoRepository(AtomicMenuRepository):
+    def _working(self, snapshot: MenuSnapshot) -> MongoPermisoWorkingRepository:
+        return MongoPermisoWorkingRepository(snapshot)  # type: ignore[arg-type]
+
+    def get_snapshot(self) -> AccessSnapshot:
+        return self._read(lambda repository: cast(MongoPermisoWorkingRepository, repository)._snapshot())
+
+    def apply_batch(self, data: AccessBatchRequest) -> tuple[AccessSnapshot, int]:
+        return self.run_atomic(lambda repository: cast(MongoPermisoWorkingRepository, repository)._apply_batch(data))
