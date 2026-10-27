@@ -57,14 +57,39 @@ class AuthService:
 
         roles_out = self._get_roles_out(usuario.usuario)
         menu = self._get_menu_for_roles(roles_out)
+        if any(role.codigo == self.admin_role_code for role in roles_out):
+            self._add_security_admin_navigation(menu)
         return MenuResponse(menu=menu)
+
+    @staticmethod
+    def _add_security_admin_navigation(menu: list[MenuChild]) -> None:
+        """Expose both existing admin tools without migrating stored grants."""
+        links: set[str] = set()
+        def collect(items: list[MenuChild]) -> None:
+            for item in items:
+                if item.routerLink:
+                    links.add(item.routerLink.rstrip("/"))
+                collect(item.children)
+        collect(menu)
+        entries = [
+            MenuChild(label="Gestión de menús", icon="pi pi-sitemap", routerLink="/dashboard/seguridad/menus"),
+            MenuChild(label="Gestión de permisos", icon="pi pi-shield", routerLink="/dashboard/seguridad/permisos"),
+        ]
+        missing = [entry for entry in entries if entry.routerLink not in links]
+        if not missing:
+            return
+        section = next((item for item in menu if item.routerLink == "/dashboard/seguridad" or item.label.upper() == "SEGURIDAD"), None)
+        if section:
+            section.children.extend(missing)
+        else:
+            menu.append(MenuChild(label="Seguridad", icon="pi pi-shield", routerLink="/dashboard/seguridad", children=missing))
 
     def build_complete_menu_response(
         self,
         codigo_usuario: str,
         activo: bool | None = None,
     ) -> MenuCompleteResponse:
-        self._validate_menu_admin(codigo_usuario)
+        self.validate_menu_admin(codigo_usuario)
 
         return MenuCompleteResponse(menu=self._get_menu_repository().get_complete_menu_tree(activo=activo))
 
@@ -73,9 +98,12 @@ class AuthService:
         codigo_usuario: str,
         data: MenuDataSacWebCreateRequest,
     ) -> MenuAdminChild:
-        self._validate_menu_admin(codigo_usuario)
+        self.validate_menu_admin(codigo_usuario)
         roles = self._validate_target_roles(data.roles_codigo)
-        return self._get_menu_repository().create_menu_node(data.model_copy(update={"roles_codigo": roles}))
+        return self._get_menu_repository().run_atomic(
+            lambda repository: repository.create_menu_node(data.model_copy(update={"roles_codigo": roles})),
+            require_transaction=False,
+        )
 
     def update_data_sac_web_menu_node(
         self,
@@ -83,14 +111,16 @@ class AuthService:
         id_menu: str,
         data: MenuDataSacWebUpdateRequest,
     ) -> MenuAdminChild:
-        self._validate_menu_admin(codigo_usuario)
+        self.validate_menu_admin(codigo_usuario)
         if data.roles_codigo is not None:
             roles = self._validate_target_roles(data.roles_codigo)
             data = data.model_copy(update={"roles_codigo": roles})
-        return self._get_menu_repository().update_menu_node(id_menu, data)
+        return self._get_menu_repository().run_atomic(
+            lambda repository: repository.update_menu_node(id_menu, data), require_transaction=False,
+        )
 
     def get_data_sac_web_menu_node(self, codigo_usuario: str, id_menu: str) -> MenuAdminChild:
-        self._validate_menu_admin(codigo_usuario)
+        self.validate_menu_admin(codigo_usuario)
         return self._get_menu_repository().get_menu_node(id_menu)
 
     def delete_data_sac_web_menu_node(
@@ -98,8 +128,10 @@ class AuthService:
         codigo_usuario: str,
         id_menu: str,
     ) -> MenuDataSacWebDeleteResponse:
-        self._validate_menu_admin(codigo_usuario)
-        permission = self._get_menu_repository().delete_menu_node(id_menu)
+        self.validate_menu_admin(codigo_usuario)
+        permission = self._get_menu_repository().run_atomic(
+            lambda repository: repository.delete_menu_node(id_menu), require_transaction=False,
+        )
         return MenuDataSacWebDeleteResponse(
             id=id_menu,
             permiso_codigo=permission,
@@ -183,7 +215,7 @@ class AuthService:
         role_codes = [rol.codigo for rol in roles]
         return self._get_menu_repository().get_menu_by_role_codes(role_codes)
 
-    def _validate_menu_admin(self, codigo_usuario: str) -> None:
+    def validate_menu_admin(self, codigo_usuario: str) -> None:
         usuario = self._get_enabled_user(codigo_usuario)
         roles_out = self._get_roles_out(usuario.usuario)
         if not any(rol.codigo == self.admin_role_code for rol in roles_out):

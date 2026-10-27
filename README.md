@@ -279,3 +279,74 @@ Convenciones para nuevos modelos:
 - Mantener `ForeignKey` cuando exista en la tabla.
 - Declarar cada `Column(...)` en una sola linea.
 - Mantener `__tablename__`, `__table_args__` y `primary_key=True`.
+
+
+## Gestión de menús y permisos de DataSacWeb
+
+La administración usa las asignaciones existentes de `menu.roles_directos_codigos`
+y `rol_permisos` en la base Mongo configurada para DataSacWeb. Los cargos que
+intervienen en autorización son los roles de `SEGURIDAD.ROL`; los identificadores
+numéricos de `NOMINA.CARGO` no se convierten en códigos de rol.
+
+- `/dashboard/seguridad/menus`: estructura, edición y configuración del menú.
+- `/dashboard/seguridad/permisos/permisos-por-cargo`: perspectiva predeterminada.
+- `/dashboard/seguridad/permisos/permisos-por-menu`: las mismas asignaciones por menú.
+- `GET /seguridad/permisos`: árbol completo, cargos y versión del estado.
+- `PATCH /seguridad/permisos`: diferencias explícitas y versión original.
+
+Los endpoints requieren Bearer y verifican en SQL que el usuario siga habilitado
+y tenga el rol administrativo existente `001`. No se crean roles ni permisos
+administrativos adicionales. Los enlaces de las dos herramientas se añaden al
+menú de ese administrador sin modificar los documentos de navegación existentes.
+
+Ejemplo de lote (el identificador y la versión se obtienen del GET):
+
+```json
+{
+  "version": "<sha256 devuelto por GET>",
+  "cambios": [
+    { "menu_id": "<id del menú>", "rol_codigo": "036", "conceder": true }
+  ]
+}
+```
+
+El servidor rechaza relaciones repetidas, cargos inexistentes y concesiones a
+cargos inactivos. Los padres reciben acceso efectivo desde sus hijos sin conceder
+acceso a hermanos ni a menús futuros. El permiso propio del padre se conserva por
+separado. Las asignaciones históricas sin marca de acceso directo se conservan
+al editar; no se ejecuta una migración destructiva al consultar.
+
+### Requisito de despliegue: replica set
+
+El guardado de permisos por lotes necesita MongoDB con transacciones: replica set
+o clúster compatible. Usa lectura `snapshot`, escritura `majority` y un documento
+operativo `menu_admin_state/access` para serializar administradores. Este documento
+es coordinación de escrituras; no es otra fuente de asignaciones.
+
+Antes de habilitar el guardado en el entorno actual, infraestructura debe convertir
+la instancia independiente en replica set, conservar los datos y la autenticación,
+configurar autenticación entre miembros e incluir el nombre del replica set en la
+URI de despliegue. No se han modificado `.env` ni la configuración del servidor.
+Procedimiento oficial: [Convertir una instancia independiente en replica set](https://www.mongodb.com/docs/manual/tutorial/convert-standalone-to-replica-set/).
+
+En instancia independiente la consulta permanece disponible y el lote devuelve
+`503` sin aplicar cambios. El CRUD individual de menús mantiene su compatibilidad
+previa; en replica set también usa transacciones. No existe un guardado parcial de
+permisos como alternativa silenciosa.
+
+Una versión desactualizada devuelve `409` antes de cambiar asignaciones. El
+frontend conserva el borrador y su resumen para revisar, descartar y recargar.
+Después de guardar, ambas perspectivas reciben el mismo estado confirmado y se
+refresca la navegación de la sesión del administrador. Las sesiones de otros
+usuarios reciben el nuevo menú en su siguiente actualización; sus tokens no se
+reescriben.
+
+Validación específica:
+
+```bash
+.venv/bin/python -m pytest tests/test_auth.py tests/test_seguridad_permisos.py tests/test_seguridad_roles.py
+```
+
+El guardado real en replica set debe comprobarse en un entorno de pruebas antes
+del despliegue. Las pruebas automatizadas incluyen rollback, conflicto de versión,
+preservación de accesos históricos, autorización y ambas perspectivas.

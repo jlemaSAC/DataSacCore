@@ -2,7 +2,12 @@ from collections import defaultdict
 from datetime import datetime, timezone
 import re
 import unicodedata
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, TypeVar
+
+from pymongo.client_session import ClientSession
+from pymongo.errors import OperationFailure
+from pymongo.read_concern import ReadConcern
+from pymongo.write_concern import WriteConcern
 
 from bson import ObjectId, errors
 from fastapi import HTTPException
@@ -16,6 +21,8 @@ from app.modules.auth.schemas import (
 )
 
 MongoDocument = dict[str, Any]
+Result = TypeVar("Result")
+Repository = TypeVar("Repository", bound="MongoMenuRepository")
 
 
 class MongoMenuRepository:
@@ -23,10 +30,68 @@ class MongoMenuRepository:
     permisos_collection_name = "permisos"
     rol_permisos_collection_name = "rol_permisos"
 
-    def __init__(self, mongo_db: Database[MongoDocument]) -> None:
+    def __init__(
+        self, mongo_db: Database[MongoDocument], session: ClientSession | None = None,
+    ) -> None:
+        self.mongo_db = mongo_db
+        self.session = session
+        self.query_options = {} if session is None else {"session": session}
         self.menu_collection = mongo_db[self.menu_collection_name]
         self.permisos_collection = mongo_db[self.permisos_collection_name]
         self.rol_permisos_collection = mongo_db[self.rol_permisos_collection_name]
+
+    def run_atomic(
+        self: Repository, operation: Callable[[Repository], Result], *,
+        require_transaction: bool = True,
+    ) -> Result:
+        """Serialize writers; access batches always require real transactions."""
+        def apply(session: ClientSession) -> Result:
+            self.mongo_db["menu_admin_state"].update_one(
+                {"_id": "access"}, {"$inc": {"revision": 1}}, upsert=True, session=session,
+            )
+            return operation(type(self)(self.mongo_db, session=session))
+
+        try:
+            with self.mongo_db.client.start_session() as session:
+                return session.with_transaction(
+                    apply, read_concern=ReadConcern("snapshot"),
+                    write_concern=WriteConcern("majority"),
+                )
+        except OperationFailure as exc:
+            if exc.code in {20, 303}:
+                if not require_transaction:
+                    # Preserve legacy single-menu CRUD on standalone deployments.
+                    # Batch access writes always require a real transaction.
+                    return operation(self)
+                raise HTTPException(
+                    status_code=503,
+                    detail="El guardado requiere MongoDB con transacciones (replica set o mongos). No se aplicaron cambios.",
+                ) from exc
+            raise
+
+    def _preserve_legacy_assignments(self) -> None:
+        documents = list(self.menu_collection.find({}, **self.query_options))
+        current_roles = self._roles_by_permission()
+        for document in documents:
+            if document.get("roles_directos_codigos") is None:
+                roles = self._legacy_direct_roles(document, documents, current_roles)
+                self.menu_collection.update_one(
+                    {"_id": document["_id"]},
+                    {"$set": {"roles_directos_codigos": sorted(roles)}}, **self.query_options,
+                )
+
+    def _legacy_direct_roles(
+        self, document: Mapping[str, Any], documents: list[MongoDocument],
+        current_roles: Mapping[str, set[str]],
+    ) -> set[str]:
+        # A legacy parent may have its own grants as well as grants derived
+        # from descendants. Preserve the former without inheriting downward.
+        descendants = self._collect_descendants(documents, document["_id"])[1:]
+        inherited = set().union(*(
+            current_roles.get(str(child.get("permiso_requerido")), set())
+            for child in descendants
+        ))
+        return current_roles.get(str(document.get("permiso_requerido")), set()) - inherited
 
     def get_menu_by_role_codes(self, role_codes: list[str]) -> list[MenuChild]:
         if not role_codes:
@@ -40,6 +105,7 @@ class MongoMenuRepository:
                     "activo": True,
                 },
                 {"_id": 0, "permiso_codigo": 1},
+                **self.query_options,
             )
             if documento.get("permiso_codigo")
         }
@@ -54,6 +120,7 @@ class MongoMenuRepository:
                     "activo": True,
                 },
                 {"_id": 0, "codigo": 1},
+                **self.query_options,
             )
             if documento.get("codigo")
         }
@@ -62,7 +129,7 @@ class MongoMenuRepository:
 
         documentos_activos = [
             self._serialize_document(doc)
-            for doc in self.menu_collection.find({"activo": True})
+            for doc in self.menu_collection.find({"activo": True}, **self.query_options)
         ]
         # La autorizacion de una hoja tambien necesita todos sus contenedores.
         # Esto mantiene el arbol util durante la migracion de menus existentes y
@@ -88,6 +155,7 @@ class MongoMenuRepository:
         return self._build_tree(documentos)
 
     def create_menu_node(self, data: MenuDataSacWebCreateRequest) -> MenuAdminChild:
+        self._preserve_legacy_assignments()
         parent = self._resolve_parent(data.id_padre)
         label = self._normalize_required_text(data.label, "El titulo es obligatorio.")
         node = self._build_node_document(
@@ -99,7 +167,7 @@ class MongoMenuRepository:
             activo=data.activo,
         )
         node["id_padre"] = parent.get("_id") if parent else None
-        if self.menu_collection.find_one({"codigo": node["codigo"]}):
+        if self.menu_collection.find_one({"codigo": node["codigo"]}, **self.query_options):
             raise HTTPException(status_code=409, detail="Ya existe un menu con ese codigo jerarquico.")
 
         roles_directos = self._normalize_roles(data.roles_codigo)
@@ -107,7 +175,7 @@ class MongoMenuRepository:
         now = self._now()
         node["created_at"] = now
         node["updated_at"] = now
-        result = self.menu_collection.insert_one(node)
+        result = self.menu_collection.insert_one(node, **self.query_options)
         self._ensure_permission(node)
         self._sync_effective_role_permissions()
         return self.get_menu_node(str(result.inserted_id))
@@ -117,8 +185,9 @@ class MongoMenuRepository:
         id_menu: str,
         data: MenuDataSacWebUpdateRequest,
     ) -> MenuAdminChild:
+        self._preserve_legacy_assignments()
         object_id = self._resolve_object_id(id_menu)
-        current = self.menu_collection.find_one({"_id": object_id})
+        current = self.menu_collection.find_one({"_id": object_id}, **self.query_options)
         if not current:
             raise HTTPException(status_code=404, detail="Menu no encontrado.")
 
@@ -130,7 +199,7 @@ class MongoMenuRepository:
         document["icon"] = self._normalize_optional_text(document.get("icon"))
         document["id_padre"] = parent.get("_id") if parent else None
 
-        documents = list(self.menu_collection.find({}))
+        documents = list(self.menu_collection.find({}, **self.query_options))
         descendants = self._collect_descendants(documents, object_id)
         descendant_ids = {doc["_id"] for doc in descendants}
         if parent and parent["_id"] in descendant_ids:
@@ -166,7 +235,8 @@ class MongoMenuRepository:
         regenerate(current, parent, document)
         new_codes = [new["codigo"] for _, new in regenerated]
         collision = self.menu_collection.find_one(
-            {"_id": {"$nin": list(descendant_ids)}, "codigo": {"$in": new_codes}}
+            {"_id": {"$nin": list(descendant_ids)}, "codigo": {"$in": new_codes}},
+            **self.query_options,
         )
         if collision:
             raise HTTPException(status_code=409, detail="La edicion genera un codigo jerarquico ya existente.")
@@ -178,25 +248,28 @@ class MongoMenuRepository:
             }
             if old["_id"] == object_id and roles_directos is not None:
                 update_fields["roles_directos_codigos"] = self._normalize_roles(roles_directos)
-            self.menu_collection.update_one({"_id": old["_id"]}, {"$set": update_fields})
+            self.menu_collection.update_one({"_id": old["_id"]}, {"$set": update_fields}, **self.query_options)
             self._ensure_permission(update_fields)
             old_permission = old.get("permiso_requerido")
             if old_permission and old_permission != update_fields["permiso_requerido"]:
-                self.permisos_collection.update_one({"codigo": old_permission}, {"$set": {"activo": False, "updated_at": self._now()}})
-                self.rol_permisos_collection.update_many({"permiso_codigo": old_permission}, {"$set": {"activo": False, "updated_at": self._now()}})
+                self.permisos_collection.update_one({"codigo": old_permission}, {"$set": {"activo": False, "updated_at": self._now()}}, **self.query_options)
+                self.rol_permisos_collection.update_many({"permiso_codigo": old_permission}, {"$set": {"activo": False, "updated_at": self._now()}}, **self.query_options)
 
         self._sync_effective_role_permissions()
         return self.get_menu_node(id_menu)
 
     def get_menu_node(self, id_menu: str) -> MenuAdminChild:
         object_id = self._resolve_object_id(id_menu)
-        document = self.menu_collection.find_one({"_id": object_id})
+        document = self.menu_collection.find_one({"_id": object_id}, **self.query_options)
         if not document:
             raise HTTPException(status_code=404, detail="Menu no encontrado.")
         roles = self._roles_by_permission()
+        documents = list(self.menu_collection.find({}, **self.query_options))
+        if document.get("roles_directos_codigos") is None:
+            document["roles_directos_codigos"] = sorted(self._legacy_direct_roles(document, documents, roles))
         has_children = any(
             item.get("id_padre") == object_id
-            for item in self.menu_collection.find({})
+            for item in self.menu_collection.find({}, **self.query_options)
         )
         return self._to_admin_child(
             self._serialize_document(document),
@@ -212,14 +285,19 @@ class MongoMenuRepository:
         # hijos no aparecen con el filtro actual.
         parent_ids = {
             self._object_id_to_str(document.get("id_padre"))
-            for document in self.menu_collection.find({})
+            for document in self.menu_collection.find({}, **self.query_options)
             if document.get("id_padre") is not None
         }
         documentos = [
             self._serialize_document(doc)
-            for doc in self.menu_collection.find(query)
+            for doc in self.menu_collection.find(query, **self.query_options)
         ]
         roles_por_permiso = self._roles_by_permission()
+        all_documents = list(self.menu_collection.find({}, **self.query_options))
+        for document in documentos:
+            if document.get("roles_directos_codigos") is None:
+                original = next(item for item in all_documents if str(item["_id"]) == document["id"])
+                document["roles_directos_codigos"] = sorted(self._legacy_direct_roles(original, all_documents, roles_por_permiso))
 
         hijos_por_padre: dict[str, list[dict[str, Any]]] = defaultdict(list)
         ids = {documento["id"] for documento in documentos}
@@ -246,17 +324,18 @@ class MongoMenuRepository:
         return [build_node(raiz) for raiz in raices]
 
     def delete_menu_node(self, id_menu: str) -> str:
+        self._preserve_legacy_assignments()
         object_id = self._resolve_object_id(id_menu)
-        document = self.menu_collection.find_one({"_id": object_id})
+        document = self.menu_collection.find_one({"_id": object_id}, **self.query_options)
         if not document:
             raise HTTPException(status_code=404, detail="Menu no encontrado.")
-        if self.menu_collection.find_one({"id_padre": object_id}, {"_id": 1}):
+        if self.menu_collection.find_one({"id_padre": object_id}, {"_id": 1}, **self.query_options):
             raise HTTPException(status_code=409, detail="No se puede eliminar un menu que tiene hijos.")
 
         permission = str(document["permiso_requerido"])
-        self.menu_collection.delete_one({"_id": object_id})
-        self.rol_permisos_collection.delete_many({"permiso_codigo": permission})
-        self.permisos_collection.delete_many({"codigo": permission})
+        self.menu_collection.delete_one({"_id": object_id}, **self.query_options)
+        self.rol_permisos_collection.delete_many({"permiso_codigo": permission}, **self.query_options)
+        self.permisos_collection.delete_many({"codigo": permission}, **self.query_options)
         self._sync_effective_role_permissions()
         return permission
 
@@ -339,6 +418,7 @@ class MongoMenuRepository:
         for documento in self.rol_permisos_collection.find(
             {"activo": True},
             {"_id": 0, "rol_codigo": 1, "permiso_codigo": 1},
+            **self.query_options,
         ):
             permiso_codigo = documento.get("permiso_codigo")
             rol_codigo = documento.get("rol_codigo")
@@ -356,7 +436,7 @@ class MongoMenuRepository:
         object_id = id_padre if isinstance(id_padre, ObjectId) else self._resolve_object_id(id_padre)
         if current_id is not None and object_id == current_id:
             raise HTTPException(status_code=400, detail="Un menu no puede ser su propio padre.")
-        parent = self.menu_collection.find_one({"_id": object_id})
+        parent = self.menu_collection.find_one({"_id": object_id}, **self.query_options)
         if not parent:
             raise HTTPException(status_code=404, detail="Menu padre no encontrado.")
         if parent.get("tipo", "grupo") != "grupo":
@@ -431,9 +511,10 @@ class MongoMenuRepository:
                 "$setOnInsert": {"codigo": permission, "created_at": now},
             },
             upsert=True,
+            **self.query_options,
         )
 
-    def _sync_effective_role_permissions(self) -> None:
+    def _sync_effective_role_permissions(self, only_permissions: set[str] | None = None) -> None:
         """Sincroniza cada permiso con los roles efectivos de su subarbol.
 
         `roles_directos_codigos` pertenece al nodo editado. El permiso de cada
@@ -441,7 +522,7 @@ class MongoMenuRepository:
         visible desde todos los niveles anteriores sin duplicar decisiones en
         el cliente.
         """
-        documents = list(self.menu_collection.find({}))
+        documents = list(self.menu_collection.find({}, **self.query_options))
         children_by_parent: dict[ObjectId | None, list[dict[str, Any]]] = defaultdict(list)
         for document in documents:
             children_by_parent[document.get("id_padre")].append(document)
@@ -457,9 +538,9 @@ class MongoMenuRepository:
                 return set()
             direct = document.get("roles_directos_codigos")
             if direct is None:
-                # Compatibilidad con documentos anteriores: las hojas ya
-                # asignadas conservan su lista; los grupos pasan a derivarla.
-                direct = current_roles.get(str(document["permiso_requerido"]), set()) if not children_by_parent.get(document["_id"]) else set()
+                # Keep grants that belonged to legacy groups themselves while
+                # deriving the grants supplied by descendants.
+                direct = self._legacy_direct_roles(document, documents, current_roles)
             roles = {str(role).strip() for role in direct if str(role).strip()} | child_roles
             targets[str(document["permiso_requerido"])] = roles
             return roles
@@ -468,17 +549,24 @@ class MongoMenuRepository:
             effective_roles(root)
 
         for permission, roles in targets.items():
-            self._sync_roles_for_permission(permission, roles)
+            if only_permissions is None or permission in only_permissions:
+                self._sync_roles_for_permission(permission, roles)
 
     def _sync_roles_for_permission(self, permission: str, roles: set[str]) -> None:
         now = self._now()
-        existing = list(self.rol_permisos_collection.find({"permiso_codigo": permission}))
+        existing = list(self.rol_permisos_collection.find({"permiso_codigo": permission}, **self.query_options))
         existing_roles = {str(item.get("rol_codigo")) for item in existing if item.get("rol_codigo")}
+        seen: set[str] = set()
         for relation in existing:
             role = str(relation.get("rol_codigo") or "")
+            active = role in roles and role not in seen
+            seen.add(role)
+            if bool(relation.get("activo")) == active:
+                continue
             self.rol_permisos_collection.update_one(
                 {"_id": relation["_id"]},
-                {"$set": {"activo": role in roles, "updated_at": now}},
+                {"$set": {"activo": active, "updated_at": now}},
+                **self.query_options,
             )
         for role in roles - existing_roles:
             self.rol_permisos_collection.insert_one(
@@ -488,7 +576,8 @@ class MongoMenuRepository:
                     "activo": True,
                     "created_at": now,
                     "updated_at": now,
-                }
+                },
+                **self.query_options,
             )
 
     def _resolve_object_id(self, id_menu: str) -> ObjectId:
