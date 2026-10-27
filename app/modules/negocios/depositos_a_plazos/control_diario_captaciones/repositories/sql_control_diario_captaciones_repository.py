@@ -38,7 +38,7 @@ _CARGO = "COALESCE(NULLIF(LTRIM(RTRIM(Cargo.nombre)), ''), 'SIN CARGO')"
 
 
 class SqlControlDiarioCaptacionesRepository:
-    """Depósitos creados en el rango, independientemente de su estado al corte."""
+    """Depósitos creados en el rango, excluyendo los anulados al corte."""
 
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -88,6 +88,7 @@ class SqlControlDiarioCaptacionesRepository:
                 FROM {fuente} AS D
                 WHERE D.FECHACREACION >= :fecha_inicio
                   AND D.FECHACREACION < :hasta_exclusivo
+                  AND (D.CODIGOESTADODEPOSITO IS NULL OR D.CODIGOESTADODEPOSITO <> 'N')
                   AND (:id_agencia = 0 OR D.IDAGENCIA = :id_agencia)
             )
         """, {
