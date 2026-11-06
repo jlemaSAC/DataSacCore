@@ -107,6 +107,50 @@ Auth:
 
 La respuesta de `POST /data-sac-web/auth/login` no incluye el campo `menu`. El menu se obtiene por separado desde `GET /data-sac-web/auth/menu`, usando la base MongoDB `DataSacWebAppMenu`: cruza los roles SQL del usuario con las asignaciones activas y construye el arbol del estado de menús vigente.
 
+## Evaluación de cuentas de Ahorro Vista
+
+`POST /negocios/ahorro-vista/evaluacion-cuentas-ahorro-vista` requiere
+`Authorization: Bearer <token>` y sirve a la pantalla
+`/dashboard/negocios/ahorro-vista/evaluacion-cuentas-ahorro-vista`.
+
+```json
+{
+  "fecha_inicio": "2026-11-01",
+  "fecha_fin": "2026-11-06",
+  "id_agencia": 0
+}
+```
+
+Las fechas deben pertenecer al mismo mes y `fecha_fin` no puede superar la fecha
+del sistema. `id_agencia=0` obtiene el consolidado. Se compara el saldo al corte
+final con el cierre del mes anterior; `fecha_inicio` no filtra aperturas ni suma
+saldos diarios. La respuesta informa las fechas operativas efectivamente usadas.
+
+`comparacion` contiene una fila por usuario oficial, agencia y producto, con clave
+`usuario::agencia::producto`. `CodigoProducto` es `AHORROS.TIPO_CUENTA.CODIGO`
+(por ejemplo, `002`), y `ProductoAhorro` es su nombre. Estos campos permiten
+construir el filtro de productos después de cargar los datos, incluyendo productos
+presentes solo en uno de los cortes. No se devuelve cargo ni se filtra por cargo.
+
+`ValoresActual` y `ValoresCierreMesAnterior` contienen `Saldo`, `Cuentas`,
+`TasaPromedio` y `SumaTasas`. Después de filtrar, sumar saldo y cuentas y calcular
+la tasa como `SUM(SumaTasas) / SUM(Cuentas)`; con cero cuentas, la tasa es `null`.
+Así se pueden agrupar los resultados por asesor, agencia o producto sin promediar
+promedios. `DiferenciasCierreMesAnterior` resta saldo y cuentas; las diferencias
+de tasas son puntos porcentuales y son `null` si falta uno de los valores.
+
+Incluye cuentas activas, inactivas y bloqueadas, excluyendo programados y
+aportaciones (tipo `001`), como el resumen de Ahorro Vista. La tasa por cuenta es
+la máxima configurada para su saldo en `ITEMSALDO_TASA`, o cero si no hay una
+tasa configurada. Los cortes cerrados consultan las versiones temporales de
+cuentas, saldos y tasas usando `FECHACIERREVISTA`; los nombres de asesores,
+agencias y productos y los gerentes corresponden al catálogo actual.
+
+Un grupo ausente en un corte tiene valores `null` y aparece en
+`faltantes_en_actual` o `faltantes_en_cierre_mes_anterior`. Un corte disponible
+sin cuentas devuelve una lista vacía; un corte sin cierre disponible devuelve
+`404`. También devuelve `agencias_gerentes_oficina` para el resumen por agencia.
+
 ## Ejecutar pruebas
 
 ```bash
