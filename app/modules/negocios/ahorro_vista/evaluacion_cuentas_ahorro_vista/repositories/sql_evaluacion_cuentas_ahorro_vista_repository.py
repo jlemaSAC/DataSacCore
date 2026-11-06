@@ -95,6 +95,5 @@ class SqlEvaluacionCuentasAhorroVistaRepository:
             LEFT JOIN GENERAL.AGENCIA AS A ON A.ID = X.id_agencia
             LEFT JOIN SEGURIDAD.USUARIO AS U ON U.USUARIO = X.codigo_usuario
             INNER JOIN AHORROS.TIPO_CUENTA AS TC ON TC.CODIGO = X.codigo_producto
-            ORDER BY X.id_agencia, X.codigo_usuario, X.codigo_producto
         """), {"cierre": corte["cierre"], "id_agencia": id_agencia}).mappings().all()
         return CorteEvaluacionAhorroVista(fecha_real, [dict(fila) for fila in filas])

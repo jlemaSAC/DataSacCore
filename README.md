@@ -151,6 +151,96 @@ Un grupo ausente en un corte tiene valores `null` y aparece en
 sin cuentas devuelve una lista vacía; un corte sin cierre disponible devuelve
 `404`. También devuelve `agencias_gerentes_oficina` para el resumen por agencia.
 
+## Depósitos y retiros diarios de Ahorro Vista
+
+`POST /negocios/ahorro-vista/depositos-y-retiros-diarios` requiere Bearer y sirve a
+la pantalla `/dashboard/negocios/ahorro-vista/depositos-y-retiros-diarios`.
+
+```json
+{
+  "fecha_inicio": "2026-11-01",
+  "fecha_fin": "2026-11-06",
+  "id_agencia": 0
+}
+```
+
+El rango debe pertenecer a un mismo mes y no superar la fecha del sistema.
+`id_agencia=0` consulta el consolidado. No acepta filtros de productos ni cargos:
+los productos se filtran localmente sobre la respuesta.
+
+Incluye todos los tipos de operación que agreguen o quiten saldo de una cuenta.
+No existe una lista fija de IDs de transacción. Abarca depósitos, retiros,
+transferencias, intereses, notas de crédito/débito, cobros, aperturas y cierres
+si generan una variación neta distinta de cero en la cuenta.
+
+Se calcula `SUM(créditos) - SUM(débitos)` usando
+`MOVIMIENTO_TRANSACCION_DETALLE.VALOR` y `DEBITO`, exclusivamente en los detalles
+vinculados a la misma operación (`MOVIMIENTO_TRANSACCION.ID`) y cuenta.
+Una variación positiva se suma en `depositos`; una negativa se suma en `retiros`
+por su magnitud. Una operación con variación cero queda fuera: así los bloqueos,
+desbloqueos y otros traslados internos entre saldos no inflan las dos columnas.
+La compensación es por operación y cuenta, no por día: un depósito de 100 y un
+retiro posterior de 100 sí aparecen como 100 en cada columna. Una transferencia
+entre dos cuentas aparece como salida de la primera y entrada de la segunda;
+estos importes representan flujos de cuentas, no solo efectivo externo.
+
+Excluye ahorros programados y aportaciones (`001`). No filtra el estado actual
+de la cuenta, para conservar movimientos válidos de cuentas que luego se cerraron.
+
+La fecha de cada flujo es `MOVIMIENTO_TRANSACCION.FECHASISTEMA`. La agencia, el
+asesor oficial y el producto pertenecen a la cuenta al corte final consultado;
+en fechas cerradas se lee `CUENTA FOR SYSTEM_TIME AS OF FECHACIERREVISTA`.
+Los nombres provienen del catálogo actual. Las tablas de movimientos se consultan
+directamente por el rango, sin reconstruir saldos ni tasas. La relación
+`MOVIMIENTO_TRANSACCION_REVERSO` excluye los movimientos de reversión y los
+originales revertidos hasta el corte. Si la reversión tiene fecha posterior al
+corte, se conserva el original; no se usa `ESREVERSO=0` como único criterio.
+
+La respuesta incluye `dias` en orden cronológico y `filas` por
+`codigo_usuario + id_agencia + codigo_producto`. Cada fila tiene `nombre_asesor`,
+`agencia`, `producto_ahorro` y una lista `valores` con el mismo tamaño y orden de
+`dias`. Cada elemento contiene `depositos` y `retiros`, sin acumular, completando
+ceros. El frontend puede agrupar por agencia para Resumen y por asesor para
+Detalle, sumando los productos seleccionados. No hay duplicados adicionales de
+resúmenes ni un endpoint para el diálogo de operaciones.
+
+Cada día incluye también `transacciones`, agrupadas por tipo y sentido dentro
+del mismo asesor, agencia y producto. `id_transaccion` identifica el tipo en
+`FINANCIERO.TRANSACCION`, no una operación individual; `tipo_transaccion` es su
+nombre del catálogo actual. `valor` siempre es positivo y `es_debito=true`
+indica salida; `false`, crédito o entrada. El sentido se deriva de la variación
+real de la cuenta, no del campo `DEBITO` del catálogo de tipos. Un mismo tipo
+puede aparecer dos veces en el día si hubo entradas y salidas, sin compensarlas.
+Los días sin movimientos contienen `transacciones: []`. Por ejemplo, un
+elemento de `valores` puede ser:
+
+```json
+{
+  "depositos": 100,
+  "retiros": 40,
+  "transacciones": [
+    {"id_transaccion": 2, "tipo_transaccion": "DEPOSITO", "valor": 100, "es_debito": false},
+    {"id_transaccion": 3, "tipo_transaccion": "RETIRO", "valor": 40, "es_debito": true}
+  ]
+}
+```
+
+Un rango disponible sin movimientos devuelve `filas: []` y conserva `dias`.
+Si falta el cierre necesario, responde `404`. `fecha_corte` identifica el último
+corte operativo usado. Si este es anterior al final solicitado, los ceros
+posteriores no representan actividad confirmada de esos días.
+
+Ante un deadlock de SQL Server (error nativo `1205`), el repositorio hace
+`rollback` y repite la lectura completa, incluido el corte, hasta tres intentos
+en total, con una espera breve y aleatoria entre intentos. Otros errores SQL no
+se reintentan. Si el deadlock persiste, responde `503` con `Retry-After: 2`.
+Es una recuperación ante conflictos transitorios; no elimina su causa en SQL
+Server ni cambia el aislamiento de lectura o la configuración de la base.
+
+La consulta filtra primero fechas y reversos, calcula la variación por operación
+y cuenta, agrega por cuenta/día y luego por asesor/agencia/producto. No utiliza tablas temporales,
+funciones de ventana ni un `ORDER BY` final; el servicio ordena la respuesta.
+
 ## Ejecutar pruebas
 
 ```bash

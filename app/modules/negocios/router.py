@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from app.modules.negocios.ahorro_vista.depositos_y_retiros_diarios.router import router as depositos_y_retiros_diarios_router
 from app.modules.negocios.ahorro_vista.evaluacion_cuentas_ahorro_vista.router import router as evaluacion_cuentas_ahorro_vista_router
 from app.modules.negocios.ahorro_vista.resumen_ahorro_vista.router import router as resumen_ahorro_vista_router
 from app.modules.negocios.depositos_a_plazos.control_diario_cancelacion.router import router as control_diario_cancelacion_router
@@ -46,6 +47,7 @@ from app.modules.negocios.cartera_de_credito.control_diario_cartera.router impor
 
 
 router = APIRouter(prefix="/negocios")
+router.include_router(depositos_y_retiros_diarios_router)
 router.include_router(evaluacion_cuentas_ahorro_vista_router)
 router.include_router(resumen_ahorro_vista_router)
 router.include_router(control_diario_captaciones_router)
