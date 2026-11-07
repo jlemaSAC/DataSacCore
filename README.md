@@ -139,8 +139,10 @@ Así se pueden agrupar los resultados por asesor, agencia o producto sin promedi
 promedios. `DiferenciasCierreMesAnterior` resta saldo y cuentas; las diferencias
 de tasas son puntos porcentuales y son `null` si falta uno de los valores.
 
-Incluye cuentas activas, inactivas y bloqueadas, excluyendo programados y
-aportaciones (tipo `001`), como el resumen de Ahorro Vista. La tasa por cuenta es
+Incluye cuentas activas, inactivas y bloqueadas, excluyendo aportaciones (tipo `001`).
+El booleano opcional `es_programado` conserva `false` por defecto para Ahorro Vista.
+Con `true` sirve a `/dashboard/negocios/ahorro-restringido/evaluacion-cuentas-restringidas`,
+aplicando el mismo filtro al corte actual y al cierre del mes anterior. La tasa por cuenta es
 la máxima configurada para su saldo en `ITEMSALDO_TASA`, o cero si no hay una
 tasa configurada. Los cortes cerrados consultan las versiones temporales de
 cuentas, saldos y tasas usando `FECHACIERREVISTA`; los nombres de asesores,
@@ -500,3 +502,39 @@ Validación específica:
 Las pruebas incluyen fallos antes de publicar, conflictos de versión, preservación
 de accesos históricos, autorización y ambas perspectivas. El guardado se puede
 validar en una base de prueba aislada de la misma instancia independiente.
+
+
+## Resúmenes de ahorro vista y restringido
+
+`POST /negocios/ahorro-vista/resumen-ahorro-vista` requiere Bearer y recibe
+`fecha_inicio`, `fecha_fin` (del mismo mes), `agencias` y el booleano opcional
+`es_programado`. El valor predeterminado `false` conserva el resumen de ahorro
+vista; `true` sirve al resumen de ahorro restringido en
+`/dashboard/negocios/ahorro-restringido/resumen-ahorro-restringido`.
+
+El filtro se aplica al corte actual, los comparativos SQL/Mongo y los saldos
+diarios. Se mantienen las dimensiones por agencia, asesor, estado y producto,
+la tasa ponderada por cuentas y los cierres faltantes como `null`.
+
+## Control diario de cancelación de ahorro restringido
+
+`POST /negocios/ahorro-restringido/control-diario-cancelacion-restringidos` requiere
+Bearer y recibe `fecha_inicio`, `fecha_fin` del mismo mes e `id_agencia` (`0` para
+consolidado). Devuelve `fecha_corte`, `dias` y `filas` por asesor, agencia y producto;
+cada día contiene `monto` y `cuentas`. Sirve a la ruta frontend del mismo nombre.
+
+El universo son cuentas con `TIPO_CUENTA.ESPROGRAMADO=1` y estado `C` al corte.
+Se toma el último cierre válido por cuenta (transacción `30`, CIERRE DE CUENTAS),
+excluyendo reversos vigentes al corte. El monto suma los débitos de ítems con
+`ITEMSALDO.SUMASALDO=1`; los débitos internos de provisiones de interés no se
+vuelven a sumar. El estado guardado en el movimiento puede seguir siendo `A`.
+No se determina una cancelación por `CUENTA_PROGRAMADO.ACTIVO` ni por solicitudes
+de anulación del contrato. Se utiliza `FECHACIERREVISTA` para cuentas e ítems
+históricos; sin cierre se devuelve `404`, y un corte vacío devuelve `filas: []`.
+
+`POST /negocios/ahorro-restringido/control-diario-cancelacion-restringidos/detalle`
+conserva el rango/corte y agrega `fecha` (null para el período), `codigo_usuario`,
+`cargos` y códigos `productos`. Devuelve `total_registros`, `total_monto` e `items`
+con cuenta, cliente principal, producto, agencia, asesor, fecha y monto de salida.
+Los nombres/cargos corresponden al catálogo actual. No se reutilizan condiciones
+nuevo/renovado, préstamos, tasas ni intereses de los depósitos a plazo.

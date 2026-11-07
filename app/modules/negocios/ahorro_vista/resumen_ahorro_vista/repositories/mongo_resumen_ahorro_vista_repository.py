@@ -10,13 +10,13 @@ class MongoResumenAhorroVistaRepository:
     def __init__(self, db: Database) -> None:
         self.collection = db[REPORTE_AHORRO_VISTA_COLLECTION]
 
-    def obtener_corte(self, fecha: date) -> list[dict[str, Any]] | None:
+    def obtener_corte(self, fecha: date, es_programado: bool = False) -> list[dict[str, Any]] | None:
         # Reducir el corte en el servidor: no transportar ~100 mil filas analíticas.
         dimensiones = ("agencia", "asesor", "estado", "producto_ahorro", "tasa_decimal")
         filas = list(self.collection.aggregate([
             {"$match": {
                 "fecha_corte": fecha.strftime("%Y%m%d"),
-                "es_programado": False,
+                "es_programado": es_programado,
             }},
             {"$group": {
                 "_id": {campo: f"${campo}" for campo in dimensiones},

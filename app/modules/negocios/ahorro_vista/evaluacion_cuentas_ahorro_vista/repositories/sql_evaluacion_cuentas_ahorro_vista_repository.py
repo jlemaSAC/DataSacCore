@@ -18,6 +18,7 @@ class SqlEvaluacionCuentasAhorroVistaRepository:
 
     def obtener_corte(
         self, *, fecha: date, fecha_sistema: date, id_agencia: int,
+        es_programado: bool = False,
     ) -> CorteEvaluacionAhorroVista | None:
         corte = self.db.execute(text("""
             SELECT TOP (1) CAST(CS.FECHASISTEMA AS date) AS fecha,
@@ -49,7 +50,7 @@ class SqlEvaluacionCuentasAhorroVistaRepository:
                     CU.CODIGOTIPOCUENTA
                 FROM AHORROS.CUENTA {temporal} AS CU
                 INNER JOIN AHORROS.TIPO_CUENTA AS TC
-                    ON TC.CODIGO = CU.CODIGOTIPOCUENTA AND TC.ESPROGRAMADO = 0
+                    ON TC.CODIGO = CU.CODIGOTIPOCUENTA AND TC.ESPROGRAMADO = :es_programado
                 WHERE CU.CODIGOESTADO IN (N'A', N'I', N'B')
                   AND CU.CODIGOTIPOCUENTA <> N'001'
                   {filtro_agencia}
@@ -95,5 +96,5 @@ class SqlEvaluacionCuentasAhorroVistaRepository:
             LEFT JOIN GENERAL.AGENCIA AS A ON A.ID = X.id_agencia
             LEFT JOIN SEGURIDAD.USUARIO AS U ON U.USUARIO = X.codigo_usuario
             INNER JOIN AHORROS.TIPO_CUENTA AS TC ON TC.CODIGO = X.codigo_producto
-        """), {"cierre": corte["cierre"], "id_agencia": id_agencia}).mappings().all()
+        """), {"cierre": corte["cierre"], "id_agencia": id_agencia, "es_programado": es_programado}).mappings().all()
         return CorteEvaluacionAhorroVista(fecha_real, [dict(fila) for fila in filas])

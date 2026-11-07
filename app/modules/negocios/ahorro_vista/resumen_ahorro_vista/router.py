@@ -17,16 +17,16 @@ router = APIRouter(prefix="/ahorro-vista", tags=["Negocios - Ahorro Vista"])
 
 @router.post(
     "/resumen-ahorro-vista", response_model=ResumenAhorroVistaResponse,
-    summary="Saldo, cuentas y tasa promedio de ahorros a la vista",
+    summary="Saldo, cuentas y tasa promedio de ahorros",
     description=(
         "Saldo al corte final del rango (mismo mes), comparado con el cierre del mes "
         "anterior y el 31 de diciembre del año anterior, como en DPF. Incluye cuentas "
-        "activas, inactivas y bloqueadas con es_programado=false, excluyendo "
-        "aportaciones (tipo 001), como el analítico filtrado a Ahorro Vista. "
+        "activas, inactivas y bloqueadas filtradas por es_programado (false por defecto; "
+        "true para ahorro restringido), excluyendo aportaciones (tipo 001). "
         "Tasa ponderada por cuentas. Usa SQL para el corte seleccionado y "
         "Mongo para cierres comparativos; reconstruye en SQL si no hay un corte Mongo "
         "completo. Incluye saldo_diario para cada fecha del rango, con el mismo filtro "
-        "de agencias y es_programado=false. Un comparativo o día sin cierre disponible "
+        "de agencias y es_programado de la consulta. Un comparativo o día sin cierre disponible "
         "es null, no cero."
     ),
 )

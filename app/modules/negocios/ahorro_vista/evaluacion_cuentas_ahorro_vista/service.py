@@ -68,9 +68,10 @@ class EvaluacionCuentasAhorroVistaService:
         for fecha in (body.fecha_fin, fecha_cierre):
             corte = self.repository.obtener_corte(
                 fecha=fecha, fecha_sistema=fecha_sistema, id_agencia=body.id_agencia,
+                es_programado=body.es_programado,
             )
             if corte is None:
-                raise HTTPException(404, f"No existe un cierre de ahorros a la vista disponible para {fecha}.")
+                raise HTTPException(404, f"No existe un cierre de ahorros disponible para {fecha}.")
             cortes.append(corte)
         actual, cierre = cortes
 

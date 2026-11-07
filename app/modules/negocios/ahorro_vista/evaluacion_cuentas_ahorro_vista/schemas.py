@@ -13,6 +13,9 @@ class EvaluacionCuentasAhorroVistaRequest(BaseModel):
     fecha_inicio: date
     fecha_fin: date
     id_agencia: int = Field(default=0, ge=0, description="0 para consolidado.")
+    es_programado: bool = Field(
+        default=False, description="true para cuentas restringidas; false para Ahorro Vista.",
+    )
 
     @model_validator(mode="after")
     def validar_rango(self) -> "EvaluacionCuentasAhorroVistaRequest":

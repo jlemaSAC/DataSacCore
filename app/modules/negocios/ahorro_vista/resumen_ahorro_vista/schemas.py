@@ -10,6 +10,7 @@ class InputResumenAhorroVista(BaseModel):
     fecha_inicio: date
     fecha_fin: date
     agencias: list[str] = Field(default_factory=list)
+    es_programado: bool = False
 
     @field_validator("agencias")
     @classmethod
@@ -87,7 +88,7 @@ class ResumenAhorroVistaResponse(BaseModel):
     saldo_diario: list[SaldoDiarioAhorroVista] = Field(
         description=(
             "Una entrada por fecha del rango, ordenada ascendentemente, con las mismas "
-            "agencias y es_programado=false. Son saldos al corte, no flujos acumulados. "
+            "agencias y filtro es_programado de la consulta. Son saldos al corte, no flujos acumulados. "
             "El último día reutiliza el corte del indicador actual."
         )
     )

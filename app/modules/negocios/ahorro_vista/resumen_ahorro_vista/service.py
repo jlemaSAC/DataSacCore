@@ -59,13 +59,13 @@ class ResumenAhorroVistaService:
                 corte = fecha
                 if nombre != "actual":
                     try:
-                        filas = self.mongo_repository.obtener_corte(fecha)
+                        filas = self.mongo_repository.obtener_corte(fecha, es_programado=body.es_programado)
                     except PyMongoError:
                         # Mongo es una optimización del histórico; SQL conserva el origen.
                         filas = None
                 if filas is None:
                     try:
-                        corte, filas = self.sql_repository.obtener_corte(fecha)
+                        corte, filas = self.sql_repository.obtener_corte(fecha, es_programado=body.es_programado)
                     except CorteAhorroVistaNoDisponible as exc:
                         if nombre == "actual":
                             raise HTTPException(409, str(exc)) from exc
@@ -101,6 +101,7 @@ class ResumenAhorroVistaService:
         # evita otra lectura del saldo vivo y diferencias por movimientos en curso.
         historicos = self.sql_repository.obtener_saldos_diarios(
             body.fecha_inicio, body.fecha_fin - timedelta(days=1), body.agencias,
+            es_programado=body.es_programado,
         )
         por_fecha = {
             (fila["fecha"].date() if isinstance(fila["fecha"], datetime) else fila["fecha"]):

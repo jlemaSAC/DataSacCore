@@ -19,10 +19,11 @@ router = APIRouter(prefix="/ahorro-vista", tags=["Negocios - Ahorro Vista"])
 
 @router.post(
     "/evaluacion-cuentas-ahorro-vista", response_model=EvaluacionCuentasAhorroVistaResponse,
-    summary="Evaluación de cuentas de Ahorro Vista frente al cierre del mes anterior",
+    summary="Evaluación de cuentas de ahorro frente al cierre del mes anterior",
     description=(
         "Saldo, cuentas y tasa promedio por asesor, agencia y producto de ahorro. "
-        "Incluye estados A/I/B, excluye aportaciones (001) y productos programados. "
+        "Incluye estados A/I/B y excluye aportaciones (001). es_programado=false "
+        "por defecto; true para cuentas restringidas. "
         "Compara el corte final con el cierre del mes anterior; fecha_inicio no limita "
         "la apertura de cuentas. id_agencia=0 consulta el consolidado. "
         "ProductoAhorro y CodigoProducto permiten filtrar después de cargar los datos. "

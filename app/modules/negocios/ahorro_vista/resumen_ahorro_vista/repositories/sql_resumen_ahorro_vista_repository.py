@@ -10,13 +10,14 @@ class CorteAhorroVistaNoDisponible(ValueError):
 
 
 class SqlResumenAhorroVistaRepository:
-    """Universo del analítico con es_programado=false, sin transacciones ni préstamos."""
+    """Universo del analítico por tipo de ahorro, sin transacciones ni préstamos."""
 
     def __init__(self, db: Session) -> None:
         self.db = db
 
     def obtener_saldos_diarios(
-        self, fecha_inicio: date, fecha_fin: date, agencias: list[str]
+        self, fecha_inicio: date, fecha_fin: date, agencias: list[str],
+        es_programado: bool = False,
     ) -> list[dict[str, Any]]:
         """Saldos por cierre diario en bloque; el servicio reutiliza el corte final."""
         if fecha_fin < fecha_inicio:
@@ -35,7 +36,7 @@ class SqlResumenAhorroVistaRepository:
         # AS OF permite buscar por cada instante exacto del cierre. Una sola
         # ejecución, con una rama por día (el contrato limita el rango a un mes).
         # Evitar cruzar todas las versiones temporales de cuentas e ítems entre sí.
-        parametros: dict[str, Any] = {}
+        parametros: dict[str, Any] = {"es_programado": es_programado}
         consultas = []
         filtro_agencias = (
             "AND UPPER(COALESCE(NULLIF(LTRIM(RTRIM(A.NOMBRE)), N''), N'SIN DATOS')) IN :agencias"
@@ -51,7 +52,7 @@ class SqlResumenAhorroVistaRepository:
                     SELECT CU.NUMERO, SUM(CI.SALDO) AS saldo
                     FROM AHORROS.CUENTA FOR SYSTEM_TIME AS OF :cierre_{indice} AS CU
                     INNER JOIN AHORROS.TIPO_CUENTA AS TC
-                        ON TC.CODIGO = CU.CODIGOTIPOCUENTA AND TC.ESPROGRAMADO = 0
+                        ON TC.CODIGO = CU.CODIGOTIPOCUENTA AND TC.ESPROGRAMADO = :es_programado
                     INNER JOIN AHORROS.CUENTA_ITEMSALDO
                         FOR SYSTEM_TIME AS OF :cierre_{indice} AS CI
                         ON CI.NUMEROCUENTA = CU.NUMERO
@@ -75,7 +76,7 @@ class SqlResumenAhorroVistaRepository:
             parametros["agencias"] = agencias
         return [dict(f) for f in self.db.execute(query, parametros).mappings().all()]
 
-    def obtener_corte(self, fecha: date) -> tuple[date, list[dict[str, Any]]]:
+    def obtener_corte(self, fecha: date, es_programado: bool = False) -> tuple[date, list[dict[str, Any]]]:
         corte = self.db.execute(text("""
             WITH Sistema AS (
                 SELECT MIN(CS.FECHASISTEMA) AS fecha_sistema
@@ -113,7 +114,7 @@ class SqlResumenAhorroVistaRepository:
                 FROM AHORROS.CUENTA {temporal} AS CU
                 INNER JOIN AHORROS.TIPO_CUENTA AS TipoCuenta
                     ON TipoCuenta.CODIGO = CU.CODIGOTIPOCUENTA
-                   AND TipoCuenta.ESPROGRAMADO = 0
+                   AND TipoCuenta.ESPROGRAMADO = :es_programado
                 WHERE CU.CODIGOESTADO IN (N'A', N'I', N'B')
                   AND CU.CODIGOTIPOCUENTA <> N'001'
                   AND EXISTS (
@@ -157,5 +158,5 @@ class SqlResumenAhorroVistaRepository:
             FROM Hechos
             GROUP BY agencia, asesor, estado, producto_ahorro, tasa_decimal
         """
-        filas = self.db.execute(text(query), {"cierre": corte["cierre"]}).mappings().all()
+        filas = self.db.execute(text(query), {"cierre": corte["cierre"], "es_programado": es_programado}).mappings().all()
         return fecha_corte, [dict(fila) for fila in filas]

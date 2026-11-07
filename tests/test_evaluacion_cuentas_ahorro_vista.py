@@ -124,7 +124,7 @@ def test_rango_no_filtra_aperturas_y_enero_compara_diciembre():
 
 @pytest.mark.parametrize("cambios", [
     {"fecha_inicio": "2026-11-07"}, {"fecha_inicio": "2026-10-31"},
-    {"id_agencia": -1}, {"cargos": ["CAPTADOR"]}, {"es_programado": True},
+    {"id_agencia": -1}, {"cargos": ["CAPTADOR"]}, {"es_programado": "invalido"},
 ])
 def test_request_rechaza_rangos_y_parametros_invalidos(cambios):
     with pytest.raises(ValidationError):
@@ -203,21 +203,23 @@ class SessionFake:
 
 @pytest.mark.parametrize("en_linea", [True, False])
 @pytest.mark.parametrize("id_agencia", [0, 2])
-def test_sql_corte_temporal_mismo_universo_y_filtro_temprano(en_linea, id_agencia):
+@pytest.mark.parametrize("es_programado", [False, True])
+def test_sql_corte_temporal_mismo_universo_y_filtro_temprano(en_linea, id_agencia, es_programado):
     fecha = date(2026, 11, 6) if en_linea else date(2026, 10, 31)
     cierre = datetime(2026, 11, 1, 3)
     db = SessionFake({"fecha": datetime.combine(fecha, datetime.min.time()), "cerrado": not en_linea, "cierre": cierre})
     resultado = SqlEvaluacionCuentasAhorroVistaRepository(db).obtener_corte(
         fecha=fecha, fecha_sistema=date(2026, 11, 6), id_agencia=id_agencia,
+        es_programado=es_programado,
     )
     sql, params = db.calls[1]
     assert resultado.fecha == fecha
     assert sql.count("FOR SYSTEM_TIME AS OF :cierre") == (0 if en_linea else 4)
-    assert "TC.ESPROGRAMADO = 0" in sql
+    assert "TC.ESPROGRAMADO = :es_programado" in sql
     assert "IN (N'A', N'I', N'B')" in sql
     assert "CU.CODIGOTIPOCUENTA <> N'001'" in sql
     assert ("AND CU.IDAGENCIA = :id_agencia" in sql) == bool(id_agencia)
-    assert params == {"cierre": cierre, "id_agencia": id_agencia}
+    assert params == {"cierre": cierre, "id_agencia": id_agencia, "es_programado": es_programado}
     assert db.calls[0][1]["hasta_exclusivo"] == (date(2026, 11, 7) if en_linea else date(2026, 11, 1))
 
 
@@ -236,3 +238,33 @@ def test_token_antiguo_y_fecha_cerrada_usan_historia():
         fecha=date(2026, 11, 5), fecha_sistema=date(2026, 11, 5), id_agencia=0,
     )
     assert "FOR SYSTEM_TIME AS OF :cierre" in db.calls[1][0]
+
+
+@pytest.mark.parametrize("es_programado", [False, True])
+def test_programado_se_propaga_al_actual_y_cierre_mensual(es_programado):
+    fuente = Fuente()
+    resultado = EvaluacionCuentasAhorroVistaService(fuente, fuente).obtener(
+        request(es_programado=es_programado), auth(),
+    )
+    assert len(fuente.calls) == 2
+    assert all(c["es_programado"] is es_programado for c in fuente.calls)
+    assert resultado.fecha_corte_actual == date(2026, 11, 6)
+    assert resultado.fecha_corte_cierre_mes_anterior == date(2026, 10, 31)
+
+
+@pytest.mark.parametrize("es_programado", [False, True])
+def test_endpoint_admite_programados_y_conserva_false_por_defecto(es_programado):
+    fuente = Fuente()
+    app.dependency_overrides[get_current_auth_context] = auth
+    app.dependency_overrides[get_evaluacion_cuentas_ahorro_vista_service] = lambda: EvaluacionCuentasAhorroVistaService(fuente, fuente)
+    try:
+        client = TestClient(app)
+        body = {"fecha_inicio": "2026-11-01", "fecha_fin": "2026-11-06", "id_agencia": 2}
+        assert client.post(URL, json=body).status_code == 200
+        assert all(c["es_programado"] is False for c in fuente.calls)
+        fuente.calls.clear()
+        assert client.post(URL, json=body | {"es_programado": es_programado}).status_code == 200
+        assert len(fuente.calls) == 2
+        assert all(c["es_programado"] is es_programado for c in fuente.calls)
+    finally:
+        app.dependency_overrides.clear()

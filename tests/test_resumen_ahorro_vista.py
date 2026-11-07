@@ -48,11 +48,11 @@ class Sql:
         self.solicitudes = []
         self.solicitudes_diario = []
 
-    def obtener_corte(self, fecha):
+    def obtener_corte(self, fecha, es_programado=False):
         self.solicitudes.append(fecha)
         return fecha, self.filas
 
-    def obtener_saldos_diarios(self, fecha_inicio, fecha_fin, agencias):
+    def obtener_saldos_diarios(self, fecha_inicio, fecha_fin, agencias, es_programado=False):
         self.solicitudes_diario.append((fecha_inicio, fecha_fin, agencias))
         return []
 
@@ -62,7 +62,7 @@ class Mongo:
         self.filas = filas
         self.solicitudes = []
 
-    def obtener_corte(self, fecha):
+    def obtener_corte(self, fecha, es_programado=False):
         self.solicitudes.append(fecha)
         return self.filas
 
@@ -104,7 +104,7 @@ def test_historico_faltante_o_mongo_caido_se_reconstruye_en_sql():
 
 
 class MongoCaido:
-    def obtener_corte(self, fecha):
+    def obtener_corte(self, fecha, es_programado=False):
         raise ConnectionFailure("unavailable")
 
 
@@ -116,9 +116,9 @@ def test_sin_cuentas_tiene_cero_y_tasa_nula_pero_sin_cierre_no_inventa_cero():
     assert result.por_agencia == []
 
     class SqlSinHistorico(Sql):
-        def obtener_corte(self, fecha):
+        def obtener_corte(self, fecha, es_programado=False):
             if fecha == date(2026, 8, 20):
-                return super().obtener_corte(fecha)
+                return super().obtener_corte(fecha, es_programado=es_programado)
             raise CorteAhorroVistaNoDisponible("Falta el cierre histórico")
 
     result = ResumenAhorroVistaService(SqlSinHistorico(), Mongo()).obtener_resumen(request(), auth())
@@ -128,7 +128,7 @@ def test_sin_cuentas_tiene_cero_y_tasa_nula_pero_sin_cierre_no_inventa_cero():
 
 def test_corte_actual_no_disponible_y_fecha_futura():
     class SinCorte(Sql):
-        def obtener_corte(self, fecha):
+        def obtener_corte(self, fecha, es_programado=False):
             raise CorteAhorroVistaNoDisponible("Falta cierre")
 
     with pytest.raises(HTTPException) as error:
@@ -152,7 +152,7 @@ def test_enero_consulta_una_sola_vez_el_cierre_compartido():
 
 def test_saldo_diario_cubre_rango_inclusivo_y_reutiliza_saldo_final():
     class Fuente(Sql):
-        def obtener_saldos_diarios(self, inicio, fin, agencias):
+        def obtener_saldos_diarios(self, inicio, fin, agencias, es_programado=False):
             self.solicitudes_diario.append((inicio, fin, agencias))
             return [
                 {"fecha": date(2026, 8, 17), "saldo": 700.25},
@@ -183,7 +183,7 @@ def test_rango_de_un_dia_solo_devuelve_el_corte_seleccionado():
 
 def test_diario_no_presenta_un_corte_anterior_como_saldo_del_dia_final():
     class Fuente(Sql):
-        def obtener_corte(self, fecha):
+        def obtener_corte(self, fecha, es_programado=False):
             return date(2026, 8, 19), self.filas
 
     resultado = ResumenAhorroVistaService(Fuente(), Mongo()).obtener_resumen(
@@ -193,7 +193,8 @@ def test_diario_no_presenta_un_corte_anterior_como_saldo_del_dia_final():
     assert resultado.saldo_diario[0].saldo is None
 
 
-def test_sql_diario_consulta_cierres_en_bloque_y_parametriza_agencias():
+@pytest.mark.parametrize("es_programado", [False, True])
+def test_sql_diario_consulta_cierres_en_bloque_y_parametriza_agencias(es_programado):
     cierres = [
         {"fecha": date(2026, 11, 1), "cierre": datetime(2026, 11, 2, 3)},
         {"fecha": date(2026, 11, 3), "cierre": datetime(2026, 11, 4, 3)},
@@ -216,12 +217,13 @@ def test_sql_diario_consulta_cierres_en_bloque_y_parametriza_agencias():
 
     db = DB()
     resultado = SqlResumenAhorroVistaRepository(db).obtener_saldos_diarios(
-        date(2026, 11, 1), date(2026, 11, 3), ["MATRIZ"],
+        date(2026, 11, 1), date(2026, 11, 3), ["MATRIZ"], es_programado=es_programado,
     )
     assert resultado == dias
     assert len(db.consultas) == 2
     query, parametros = db.consultas[1]
-    assert query.count("TC.ESPROGRAMADO = 0") == 2
+    assert query.count("TC.ESPROGRAMADO = :es_programado") == 2
+    assert parametros["es_programado"] is es_programado
     assert query.count("FOR SYSTEM_TIME AS OF") == 4
     assert " UNION ALL " in query
     assert "MATRIZ" not in query
@@ -266,7 +268,8 @@ def test_mongo_no_equivale_documentos_a_cuentas(incompletas):
     assert result is None if incompletas else result[0]["numero_cuentas"] == 3
 
 
-def test_mongo_excluye_programados_y_documentos_sin_clasificacion():
+@pytest.mark.parametrize("es_programado, saldo, cuentas", [(False, 900, 3), (True, 8000, 20)])
+def test_mongo_filtra_programados_y_excluye_documentos_sin_clasificacion(es_programado, saldo, cuentas):
     documentos = [
         fila(es_programado=False, fecha_corte="20260731"),
         # El nombre no determina el universo: se usa el booleano del analítico.
@@ -290,14 +293,15 @@ def test_mongo_excluye_programados_y_documentos_sin_clasificacion():
 
     filas = MongoResumenAhorroVistaRepository({
         "ReporteAnaliticoAhorrosVistaMensual": Collection(),
-    }).obtener_corte(date(2026, 7, 31))
+    }).obtener_corte(date(2026, 7, 31), es_programado=es_programado)
     assert len(filas) == 1
-    assert sum(f["numero_cuentas"] for f in filas) == 3
-    assert sum(f["saldo"] for f in filas) == 900
+    assert sum(f["numero_cuentas"] for f in filas) == cuentas
+    assert sum(f["saldo"] for f in filas) == saldo
 
 
 @pytest.mark.parametrize("historico", [False, True])
-def test_sql_filtra_no_programados_en_corte_actual_e_historico(historico):
+@pytest.mark.parametrize("es_programado", [False, True])
+def test_sql_filtra_programados_en_corte_actual_e_historico(historico, es_programado):
     fecha = date(2026, 10, 31) if historico else date(2026, 11, 6)
     cierre = datetime(2026, 11, 1, 1, 30) if historico else None
 
@@ -319,15 +323,15 @@ def test_sql_filtra_no_programados_en_corte_actual_e_historico(historico):
             return [fila()]
 
     db = DB()
-    corte, filas = SqlResumenAhorroVistaRepository(db).obtener_corte(fecha)
+    corte, filas = SqlResumenAhorroVistaRepository(db).obtener_corte(fecha, es_programado=es_programado)
     assert corte == fecha
     assert filas == [fila()]
     query, parametros = db.consultas[1]
-    assert "TipoCuenta.ESPROGRAMADO = 0" in query
+    assert "TipoCuenta.ESPROGRAMADO = :es_programado" in query
     assert "CUENTA_PROGRAMADO" not in query
     assert "COALESCE(T.tasa, 0)" in query
     assert ("FOR SYSTEM_TIME AS OF :cierre" in query) is historico
-    assert parametros == {"cierre": cierre}
+    assert parametros == {"cierre": cierre, "es_programado": es_programado}
 
 
 def test_sql_no_sustituye_un_cierre_faltante_con_saldos_actuales():
@@ -367,8 +371,61 @@ def test_endpoint_contrato_validaciones_y_bearer():
             {"fecha_inicio": "2026-08-01", "fecha_fin": "2026-09-02"},
             {"fecha_inicio": "2026-08-20", "fecha_fin": "2026-08-01"},
             {"fecha_inicio": "2026-08-01", "fecha_fin": "2026-08-20", "agencias": [""]},
-            {"fecha_inicio": "2026-08-01", "fecha_fin": "2026-08-20", "es_programado": True},
+            {"fecha_inicio": "2026-08-01", "fecha_fin": "2026-08-20", "es_programado": "invalido"},
         ):
             assert client.post(URL, json=body).status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("es_programado", [False, True])
+@pytest.mark.parametrize("reconstruir", [False, True])
+def test_programado_se_propaga_a_actual_comparativos_fallback_y_diario(es_programado, reconstruir):
+    class FuenteSql(Sql):
+        def obtener_corte(self, fecha, es_programado=False):
+            self.solicitudes.append((fecha, es_programado))
+            return fecha, [fila(saldo=500 if es_programado else 100)]
+
+        def obtener_saldos_diarios(self, inicio, fin, agencias, es_programado=False):
+            self.solicitudes_diario.append((inicio, fin, agencias, es_programado))
+            return [{"fecha": inicio, "saldo": 300 if es_programado else 50}]
+
+    class FuenteMongo(Mongo):
+        def obtener_corte(self, fecha, es_programado=False):
+            self.solicitudes.append((fecha, es_programado))
+            return None if reconstruir else [fila(saldo=400 if es_programado else 80)]
+
+    sql, mongo = FuenteSql(), FuenteMongo()
+    resultado = ResumenAhorroVistaService(sql, mongo).obtener_resumen(
+        request(es_programado=es_programado), auth(),
+    )
+    assert resultado.actual.saldo == (500 if es_programado else 100)
+    assert resultado.mes_anterior.saldo == (
+        (500 if es_programado else 100) if reconstruir else (400 if es_programado else 80)
+    )
+    assert all(programado is es_programado for _, programado in sql.solicitudes + mongo.solicitudes)
+    assert len(sql.solicitudes) == (3 if reconstruir else 1)
+    assert sql.solicitudes_diario[0][-1] is es_programado
+    assert resultado.saldo_diario[0].saldo == (300 if es_programado else 50)
+    assert resultado.saldo_diario[-1].saldo == resultado.actual.saldo
+
+
+@pytest.mark.parametrize("es_programado", [False, True])
+def test_endpoint_acepta_filtro_programado_y_conserva_false_por_defecto(es_programado):
+    recibidos = []
+
+    class Service:
+        def obtener_resumen(self, body, contexto):
+            recibidos.append(body.es_programado)
+            return ResumenAhorroVistaService(Sql(), Mongo()).obtener_resumen(body, contexto)
+
+    app.dependency_overrides[get_current_auth_context] = auth
+    app.dependency_overrides[get_resumen_ahorro_vista_service] = Service
+    try:
+        client = TestClient(app)
+        body = {"fecha_inicio": "2026-08-01", "fecha_fin": "2026-08-20"}
+        assert client.post(URL, json=body).status_code == 200
+        assert client.post(URL, json={**body, "es_programado": es_programado}).status_code == 200
+        assert recibidos == [False, es_programado]
     finally:
         app.dependency_overrides.clear()
