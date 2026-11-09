@@ -538,3 +538,31 @@ conserva el rango/corte y agrega `fecha` (null para el período), `codigo_usuari
 con cuenta, cliente principal, producto, agencia, asesor, fecha y monto de salida.
 Los nombres/cargos corresponden al catálogo actual. No se reutilizan condiciones
 nuevo/renovado, préstamos, tasas ni intereses de los depósitos a plazo.
+
+## Control de vencimiento de ahorro restringido
+
+`POST /negocios/ahorro-restringido/control-vencimiento-restringido` requiere Bearer
+y recibe `fecha_inicio`, `fecha_fin` e `id_agencia` (`0` para consolidado). El rango
+filtra vencimientos, incluye ambos días y admite fechas futuras y varios meses.
+Devuelve `saldo_total` y `filas` por agencia, asesor y producto, con responsables
+actuales. Sirve a `/dashboard/negocios/ahorro-restringido/control-vencimiento-restringido`.
+
+El universo incluye `TIPO_CUENTA.ESPROGRAMADO=1`, estados de cuenta `A/I/B` y
+contratos con `CUENTA_PROGRAMADO.ACTIVO=1`. Si hubiera varios contratos activos
+para una cuenta, se elige el de mayor `FECHAINICIO` e `ID` antes de filtrar fechas.
+Las cuentas sin contrato activo quedan fuera, incluso cuando conservan saldo.
+El saldo actual suma únicamente ítems con `ITEMSALDO.SUMASALDO=1`, redondeado a
+centavos por cuenta. Se mantienen cuentas con saldo cero. No es saldo proyectado
+al vencimiento ni reconstrucción de un corte histórico.
+
+`POST /negocios/ahorro-restringido/control-vencimiento-restringido/detalle`
+comparte el universo del resumen y agrega `codigo_usuario`, `productos` (códigos de tipo de cuenta), `pagina`,
+`tamano_pagina` y `sin_paginacion`. Devuelve `total_registros`, `total_saldo` e
+`items` con cliente principal, agencia, asesor, producto, cuenta, saldo actual,
+tasa del contrato, vencimiento, estado e indicador de préstamo no cancelado.
+`sin_paginacion=true` devuelve todas las filas para filtrar y ordenar en Angular.
+
+La ruta Angular conserva `menuRouteGuard`: el nodo de tipo ruta debe estar activo
+en el menú administrado, bajo Negocios > Ahorro restringido, con el título
+`Control vencimiento restringido` y los roles que se definan en la administración
+de permisos. No se conceden permisos por el mero registro de la ruta.

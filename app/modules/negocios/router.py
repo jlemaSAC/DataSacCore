@@ -2,6 +2,9 @@ from fastapi import APIRouter
 from app.modules.negocios.ahorro_restringido.control_diario_cancelacion.router import (
     router as cancelacion_restringidos_router,
 )
+from app.modules.negocios.ahorro_restringido.control_vencimiento_restringido.router import (
+    router as control_vencimiento_restringido_router,
+)
 from app.modules.negocios.ahorro_vista.depositos_y_retiros_diarios.router import router as depositos_y_retiros_diarios_router
 from app.modules.negocios.ahorro_vista.evaluacion_cuentas_ahorro_vista.router import router as evaluacion_cuentas_ahorro_vista_router
 from app.modules.negocios.ahorro_vista.resumen_ahorro_vista.router import router as resumen_ahorro_vista_router
@@ -50,6 +53,7 @@ from app.modules.negocios.cartera_de_credito.control_diario_cartera.router impor
 
 
 router = APIRouter(prefix="/negocios")
+router.include_router(control_vencimiento_restringido_router)
 router.include_router(cancelacion_restringidos_router)
 router.include_router(depositos_y_retiros_diarios_router)
 router.include_router(evaluacion_cuentas_ahorro_vista_router)
