@@ -2,6 +2,8 @@
 
 `POST /analytic/contabilidad/saldos-diarios` requiere autenticación Bearer.
 
+`POST /analytic/contabilidad/saldos-mensuales` acepta el mismo cuerpo. Python consulta el fin de cada mes cerrado del rango y, para el mes actual, la fecha de hoy en Ecuador. Usa el mismo repositorio SQL del endpoint diario y devuelve una sola respuesta.
+
 ```json
 {
   "fecha_desde": "2026-10-01",

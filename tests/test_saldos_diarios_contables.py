@@ -68,6 +68,31 @@ def test_conserva_saldo_cero_resultante_del_neteo():
     assert resultado.datos[0].saldo == Decimal("0.00")
 
 
+def test_mensual_usa_hoy_para_el_mes_actual(monkeypatch):
+    monkeypatch.setattr(
+        "app.modules.contabilidad.saldos_diarios.service.fecha_actual_ecuador",
+        lambda: date(2026, 11, 10),
+    )
+    class Repo(Repositorio):
+        def __init__(self):
+            self.consultas = []
+
+        def obtener_saldos(self, **kwargs):
+            self.consultas.append(kwargs)
+            return [
+                {"fecha": kwargs["fecha_desde"], "codigo_cuenta": "1", "saldo": Decimal("100.00")},
+                {"fecha": kwargs["fecha_desde"], "codigo_cuenta": "1908", "saldo": Decimal("20.00")},
+            ]
+
+    repo = Repo()
+    consulta = ConsultaSaldosDiarios(fecha_desde="2026-09-15", fecha_hasta="2026-12-31", id_agencia=0, neteo=1)
+    respuesta = SaldosDiariosService(repo).consultar_mensual(consulta)
+    assert [call["fecha_desde"] for call in repo.consultas] == [date(2026, 9, 30), date(2026, 10, 31), date(2026, 11, 10)]
+    assert all(call["fecha_desde"] == call["fecha_hasta"] for call in repo.consultas)
+    assert [item.saldo for item in respuesta.datos] == [Decimal("80.00")] * 3
+    assert respuesta.total_registros == 3
+
+
 def test_endpoint_devuelve_mas_de_mil_registros():
     class RepositorioGrande(Repositorio):
         def obtener_cuentas_activas(self, empresa):

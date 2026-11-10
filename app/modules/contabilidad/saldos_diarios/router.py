@@ -17,3 +17,13 @@ def consultar_saldos_diarios(
     service: SaldosDiariosService = Depends(get_saldos_diarios_service),
 ) -> SaldosDiariosResponse:
     return service.consultar(body)
+
+
+@router.post("/contabilidad/saldos-mensuales", response_model=SaldosDiariosResponse,
+             summary="Consultar cuentas contables en fechas de fin de mes")
+def consultar_saldos_mensuales(
+    body: ConsultaSaldosDiarios,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: SaldosDiariosService = Depends(get_saldos_diarios_service),
+) -> SaldosDiariosResponse:
+    return service.consultar_mensual(body)
