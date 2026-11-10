@@ -27,6 +27,7 @@ from app.modules.analytic.indicadores_financieros.solvencia.router import (
 from app.modules.analytic.menu.router import router as menu_router
 from app.modules.analytic.ahorro_vista.router import router as ahorro_vista_router
 from app.modules.analytic.inversiones.router import router as inversiones_router
+from app.modules.contabilidad.saldos_diarios.router import router as saldos_diarios_router
 from app.modules.analytic.recuperacion.recuperacion_historico.router import (
     router as recuperacion_historico_router,
 )
@@ -46,3 +47,4 @@ router.include_router(indicadores_de_liquidez_router)
 router.include_router(indicadores_de_eficiencia_router)
 router.include_router(rentabilidad_router)
 router.include_router(solvencia_router)
+router.include_router(saldos_diarios_router)
