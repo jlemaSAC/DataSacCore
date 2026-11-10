@@ -44,14 +44,13 @@ class SqlCastigoRepository:
                 GROUP BY CC.IDCLIENTE
             )
             SELECT P.NUMERO AS NumeroPrestamo,
-                   CAST(COALESCE(D.TOTAL, 0) AS INT) AS DepositosMes
+                   COALESCE(D.TOTAL, 0) AS DepositosMes
             FROM PrestamosElegibles AS P
             LEFT JOIN DepositosMes AS D ON D.IDCLIENTE = P.IDCLIENTE
         """).bindparams(
             bindparam("numeros", expanding=True),
             bindparam("transacciones_excluidas", expanding=True),
         )
-        # Conserva la precisión entera de los cortes históricos existentes.
         resultado = {}
         for offset in range(0, len(numeros), 500):
             filas = self.db.execute(statement, {

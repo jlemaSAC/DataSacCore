@@ -107,6 +107,142 @@ Auth:
 
 La respuesta de `POST /data-sac-web/auth/login` no incluye el campo `menu`. El menu se obtiene por separado desde `GET /data-sac-web/auth/menu`, usando la base MongoDB `DataSacWebAppMenu`: cruza los roles SQL del usuario con las asignaciones activas y construye el arbol del estado de menús vigente.
 
+## Evaluación de cuentas de Ahorro Vista
+
+`POST /negocios/ahorro-vista/evaluacion-cuentas-ahorro-vista` requiere
+`Authorization: Bearer <token>` y sirve a la pantalla
+`/dashboard/negocios/ahorro-vista/evaluacion-cuentas-ahorro-vista`.
+
+```json
+{
+  "fecha_inicio": "2026-11-01",
+  "fecha_fin": "2026-11-06",
+  "id_agencia": 0
+}
+```
+
+Las fechas deben pertenecer al mismo mes y `fecha_fin` no puede superar la fecha
+del sistema. `id_agencia=0` obtiene el consolidado. Se compara el saldo al corte
+final con el cierre del mes anterior; `fecha_inicio` no filtra aperturas ni suma
+saldos diarios. La respuesta informa las fechas operativas efectivamente usadas.
+
+`comparacion` contiene una fila por usuario oficial, agencia y producto, con clave
+`usuario::agencia::producto`. `CodigoProducto` es `AHORROS.TIPO_CUENTA.CODIGO`
+(por ejemplo, `002`), y `ProductoAhorro` es su nombre. Estos campos permiten
+construir el filtro de productos después de cargar los datos, incluyendo productos
+presentes solo en uno de los cortes. No se devuelve cargo ni se filtra por cargo.
+
+`ValoresActual` y `ValoresCierreMesAnterior` contienen `Saldo`, `Cuentas`,
+`TasaPromedio` y `SumaTasas`. Después de filtrar, sumar saldo y cuentas y calcular
+la tasa como `SUM(SumaTasas) / SUM(Cuentas)`; con cero cuentas, la tasa es `null`.
+Así se pueden agrupar los resultados por asesor, agencia o producto sin promediar
+promedios. `DiferenciasCierreMesAnterior` resta saldo y cuentas; las diferencias
+de tasas son puntos porcentuales y son `null` si falta uno de los valores.
+
+Incluye cuentas activas, inactivas y bloqueadas, excluyendo aportaciones (tipo `001`).
+El booleano opcional `es_programado` conserva `false` por defecto para Ahorro Vista.
+Con `true` sirve a `/dashboard/negocios/ahorro-restringido/evaluacion-cuentas-restringidas`,
+aplicando el mismo filtro al corte actual y al cierre del mes anterior. La tasa por cuenta es
+la máxima configurada para su saldo en `ITEMSALDO_TASA`, o cero si no hay una
+tasa configurada. Los cortes cerrados consultan las versiones temporales de
+cuentas, saldos y tasas usando `FECHACIERREVISTA`; los nombres de asesores,
+agencias y productos y los gerentes corresponden al catálogo actual.
+
+Un grupo ausente en un corte tiene valores `null` y aparece en
+`faltantes_en_actual` o `faltantes_en_cierre_mes_anterior`. Un corte disponible
+sin cuentas devuelve una lista vacía; un corte sin cierre disponible devuelve
+`404`. También devuelve `agencias_gerentes_oficina` para el resumen por agencia.
+
+## Depósitos y retiros diarios de Ahorro Vista
+
+`POST /negocios/ahorro-vista/depositos-y-retiros-diarios` requiere Bearer y sirve a
+la pantalla `/dashboard/negocios/ahorro-vista/depositos-y-retiros-diarios`.
+
+```json
+{
+  "fecha_inicio": "2026-11-01",
+  "fecha_fin": "2026-11-06",
+  "id_agencia": 0
+}
+```
+
+El rango debe pertenecer a un mismo mes y no superar la fecha del sistema.
+`id_agencia=0` consulta el consolidado. No acepta filtros de productos ni cargos:
+los productos se filtran localmente sobre la respuesta.
+
+Incluye todos los tipos de operación que agreguen o quiten saldo de una cuenta.
+No existe una lista fija de IDs de transacción. Abarca depósitos, retiros,
+transferencias, intereses, notas de crédito/débito, cobros, aperturas y cierres
+si generan una variación neta distinta de cero en la cuenta.
+
+Se calcula `SUM(créditos) - SUM(débitos)` usando
+`MOVIMIENTO_TRANSACCION_DETALLE.VALOR` y `DEBITO`, exclusivamente en los detalles
+vinculados a la misma operación (`MOVIMIENTO_TRANSACCION.ID`) y cuenta.
+Una variación positiva se suma en `depositos`; una negativa se suma en `retiros`
+por su magnitud. Una operación con variación cero queda fuera: así los bloqueos,
+desbloqueos y otros traslados internos entre saldos no inflan las dos columnas.
+La compensación es por operación y cuenta, no por día: un depósito de 100 y un
+retiro posterior de 100 sí aparecen como 100 en cada columna. Una transferencia
+entre dos cuentas aparece como salida de la primera y entrada de la segunda;
+estos importes representan flujos de cuentas, no solo efectivo externo.
+
+Excluye ahorros programados y aportaciones (`001`). No filtra el estado actual
+de la cuenta, para conservar movimientos válidos de cuentas que luego se cerraron.
+
+La fecha de cada flujo es `MOVIMIENTO_TRANSACCION.FECHASISTEMA`. La agencia, el
+asesor oficial y el producto pertenecen a la cuenta al corte final consultado;
+en fechas cerradas se lee `CUENTA FOR SYSTEM_TIME AS OF FECHACIERREVISTA`.
+Los nombres provienen del catálogo actual. Las tablas de movimientos se consultan
+directamente por el rango, sin reconstruir saldos ni tasas. La relación
+`MOVIMIENTO_TRANSACCION_REVERSO` excluye los movimientos de reversión y los
+originales revertidos hasta el corte. Si la reversión tiene fecha posterior al
+corte, se conserva el original; no se usa `ESREVERSO=0` como único criterio.
+
+La respuesta incluye `dias` en orden cronológico y `filas` por
+`codigo_usuario + id_agencia + codigo_producto`. Cada fila tiene `nombre_asesor`,
+`agencia`, `producto_ahorro` y una lista `valores` con el mismo tamaño y orden de
+`dias`. Cada elemento contiene `depositos` y `retiros`, sin acumular, completando
+ceros. El frontend puede agrupar por agencia para Resumen y por asesor para
+Detalle, sumando los productos seleccionados. No hay duplicados adicionales de
+resúmenes ni un endpoint para el diálogo de operaciones.
+
+Cada día incluye también `transacciones`, agrupadas por tipo y sentido dentro
+del mismo asesor, agencia y producto. `id_transaccion` identifica el tipo en
+`FINANCIERO.TRANSACCION`, no una operación individual; `tipo_transaccion` es su
+nombre del catálogo actual. `valor` siempre es positivo y `es_debito=true`
+indica salida; `false`, crédito o entrada. El sentido se deriva de la variación
+real de la cuenta, no del campo `DEBITO` del catálogo de tipos. Un mismo tipo
+puede aparecer dos veces en el día si hubo entradas y salidas, sin compensarlas.
+Los días sin movimientos contienen `transacciones: []`. Por ejemplo, un
+elemento de `valores` puede ser:
+
+```json
+{
+  "depositos": 100,
+  "retiros": 40,
+  "transacciones": [
+    {"id_transaccion": 2, "tipo_transaccion": "DEPOSITO", "valor": 100, "es_debito": false},
+    {"id_transaccion": 3, "tipo_transaccion": "RETIRO", "valor": 40, "es_debito": true}
+  ]
+}
+```
+
+Un rango disponible sin movimientos devuelve `filas: []` y conserva `dias`.
+Si falta el cierre necesario, responde `404`. `fecha_corte` identifica el último
+corte operativo usado. Si este es anterior al final solicitado, los ceros
+posteriores no representan actividad confirmada de esos días.
+
+Ante un deadlock de SQL Server (error nativo `1205`), el repositorio hace
+`rollback` y repite la lectura completa, incluido el corte, hasta tres intentos
+en total, con una espera breve y aleatoria entre intentos. Otros errores SQL no
+se reintentan. Si el deadlock persiste, responde `503` con `Retry-After: 2`.
+Es una recuperación ante conflictos transitorios; no elimina su causa en SQL
+Server ni cambia el aislamiento de lectura o la configuración de la base.
+
+La consulta filtra primero fechas y reversos, calcula la variación por operación
+y cuenta, agrega por cuenta/día y luego por asesor/agencia/producto. No utiliza tablas temporales,
+funciones de ventana ni un `ORDER BY` final; el servicio ordena la respuesta.
+
 ## Ejecutar pruebas
 
 ```bash
@@ -366,3 +502,67 @@ Validación específica:
 Las pruebas incluyen fallos antes de publicar, conflictos de versión, preservación
 de accesos históricos, autorización y ambas perspectivas. El guardado se puede
 validar en una base de prueba aislada de la misma instancia independiente.
+
+
+## Resúmenes de ahorro vista y restringido
+
+`POST /negocios/ahorro-vista/resumen-ahorro-vista` requiere Bearer y recibe
+`fecha_inicio`, `fecha_fin` (del mismo mes), `agencias` y el booleano opcional
+`es_programado`. El valor predeterminado `false` conserva el resumen de ahorro
+vista; `true` sirve al resumen de ahorro restringido en
+`/dashboard/negocios/ahorro-restringido/resumen-ahorro-restringido`.
+
+El filtro se aplica al corte actual, los comparativos SQL/Mongo y los saldos
+diarios. Se mantienen las dimensiones por agencia, asesor, estado y producto,
+la tasa ponderada por cuentas y los cierres faltantes como `null`.
+
+## Control diario de cancelación de ahorro restringido
+
+`POST /negocios/ahorro-restringido/control-diario-cancelacion-restringidos` requiere
+Bearer y recibe `fecha_inicio`, `fecha_fin` del mismo mes e `id_agencia` (`0` para
+consolidado). Devuelve `fecha_corte`, `dias` y `filas` por asesor, agencia y producto;
+cada día contiene `monto` y `cuentas`. Sirve a la ruta frontend del mismo nombre.
+
+El universo son cuentas con `TIPO_CUENTA.ESPROGRAMADO=1` y estado `C` al corte.
+Se toma el último cierre válido por cuenta (transacción `30`, CIERRE DE CUENTAS),
+excluyendo reversos vigentes al corte. El monto suma los débitos de ítems con
+`ITEMSALDO.SUMASALDO=1`; los débitos internos de provisiones de interés no se
+vuelven a sumar. El estado guardado en el movimiento puede seguir siendo `A`.
+No se determina una cancelación por `CUENTA_PROGRAMADO.ACTIVO` ni por solicitudes
+de anulación del contrato. Se utiliza `FECHACIERREVISTA` para cuentas e ítems
+históricos; sin cierre se devuelve `404`, y un corte vacío devuelve `filas: []`.
+
+`POST /negocios/ahorro-restringido/control-diario-cancelacion-restringidos/detalle`
+conserva el rango/corte y agrega `fecha` (null para el período), `codigo_usuario`,
+`cargos` y códigos `productos`. Devuelve `total_registros`, `total_monto` e `items`
+con cuenta, cliente principal, producto, agencia, asesor, fecha y monto de salida.
+Los nombres/cargos corresponden al catálogo actual. No se reutilizan condiciones
+nuevo/renovado, préstamos, tasas ni intereses de los depósitos a plazo.
+
+## Control de vencimiento de ahorro restringido
+
+`POST /negocios/ahorro-restringido/control-vencimiento-restringido` requiere Bearer
+y recibe `fecha_inicio`, `fecha_fin` e `id_agencia` (`0` para consolidado). El rango
+filtra vencimientos, incluye ambos días y admite fechas futuras y varios meses.
+Devuelve `saldo_total` y `filas` por agencia, asesor y producto, con responsables
+actuales. Sirve a `/dashboard/negocios/ahorro-restringido/control-vencimiento-restringido`.
+
+El universo incluye `TIPO_CUENTA.ESPROGRAMADO=1`, estados de cuenta `A/I/B` y
+contratos con `CUENTA_PROGRAMADO.ACTIVO=1`. Si hubiera varios contratos activos
+para una cuenta, se elige el de mayor `FECHAINICIO` e `ID` antes de filtrar fechas.
+Las cuentas sin contrato activo quedan fuera, incluso cuando conservan saldo.
+El saldo actual suma únicamente ítems con `ITEMSALDO.SUMASALDO=1`, redondeado a
+centavos por cuenta. Se mantienen cuentas con saldo cero. No es saldo proyectado
+al vencimiento ni reconstrucción de un corte histórico.
+
+`POST /negocios/ahorro-restringido/control-vencimiento-restringido/detalle`
+comparte el universo del resumen y agrega `codigo_usuario`, `productos` (códigos de tipo de cuenta), `pagina`,
+`tamano_pagina` y `sin_paginacion`. Devuelve `total_registros`, `total_saldo` e
+`items` con cliente principal, agencia, asesor, producto, cuenta, saldo actual,
+tasa del contrato, vencimiento, estado e indicador de préstamo no cancelado.
+`sin_paginacion=true` devuelve todas las filas para filtrar y ordenar en Angular.
+
+La ruta Angular conserva `menuRouteGuard`: el nodo de tipo ruta debe estar activo
+en el menú administrado, bajo Negocios > Ahorro restringido, con el título
+`Control vencimiento restringido` y los roles que se definan en la administración
+de permisos. No se conceden permisos por el mero registro de la ruta.

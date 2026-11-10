@@ -207,10 +207,10 @@ def test_sql_solo_consulta_el_universo_mediante_parametros_y_replica_depositos_m
         def execute(self, statement, params):
             self.statement = statement
             self.params = params
-            return Filas([{'NumeroPrestamo': 'P1', 'DepositosMes': 125}])
+            return Filas([{'NumeroPrestamo': 'P1', 'DepositosMes': Decimal('20.14')}])
     db = Db()
     valores = SqlCastigoRepository(db).obtener_depositos_mes(['P1'], date(2026, 10, 20))
-    assert valores == {'P1': Decimal(125)}
+    assert valores == {'P1': Decimal('20.14')}
     assert db.params == {
         'numeros': ['P1'], 'inicio_mes': date(2026, 10, 1),
         'fin_exclusivo': date(2026, 10, 21),
@@ -219,7 +219,7 @@ def test_sql_solo_consulta_el_universo_mediante_parametros_y_replica_depositos_m
     assert 'P1' not in str(db.statement)
     assert 'MD.DEBITO = 0' in str(db.statement)
     assert 'CC.PRINCIPAL = 1' in str(db.statement)
-    assert 'CAST(COALESCE(D.TOTAL, 0) AS INT)' in str(db.statement)
+    assert 'COALESCE(D.TOTAL, 0) AS DepositosMes' in str(db.statement)
 
 
 def test_endpoint_conserva_alias_diarios_y_autenticacion_bearer():
@@ -340,9 +340,9 @@ def test_bloqueos_antiguos_no_generan_depositos_ficticios_en_el_corte_actual():
                 connection.execute(text("INSERT INTO AHORROS.CUENTA_MOVIMIENTOTRANSACCIONDETALLE VALUES (:id, 'C1')"), {'id': indice})
             with Session(bind=connection) as session:
                 repo = SqlCastigoRepository(session)
-                assert repo.obtener_depositos_mes(['P1'], date(2026, 10, 20)) == {'P1': Decimal(323)}
+                assert repo.obtener_depositos_mes(['P1'], date(2026, 10, 20)) == {'P1': Decimal('323.33')}
                 service, _ = servicio(
-                    [documento('P1', 19, 323)],
+                    [documento('P1', 19, 323.33)],
                     [documento('P1', 20, None, as_of=datetime(2026, 10, 20, 12, tzinfo=timezone.utc))],
                     repo,
                 )
