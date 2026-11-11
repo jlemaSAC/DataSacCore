@@ -12,7 +12,8 @@
 
 El módulo pertenece a `app/modules/analytic/analisis_contable/cuentas_contables`,
 porque entrega un resumen analítico; usa la sesión principal `get_db` y repositorio
-SQL local al módulo. Se registra mediante el router agrupador de análisis contable
+SQL compartido en `app/modules/contabilidad/repositories/sql_resumen_contable_repository.py`.
+Se registra mediante el router agrupador de análisis contable
 y el router existente de Analytic.
 
 `id_agencia` es opcional y vale `0` (consolidado) por defecto. `0` consulta solamente
