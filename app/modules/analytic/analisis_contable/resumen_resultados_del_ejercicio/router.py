@@ -4,7 +4,7 @@ from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.auth.schemas import AuthContext
 from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.dependencies import get_resultados_ejercicio_service
 from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.schemas import (
-    ConsultaCorteResultados, ConsultaHistoricoResultados, ResultadosEjercicioResponse,
+    ConsultaCorteResultados, ConsultaHistoricoResultados, ConsultaHistoricoMensualResultados, ResultadosEjercicioResponse,
 )
 from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.service import ResultadosEjercicioService
 
@@ -19,7 +19,7 @@ def consultar_corte(body: ConsultaCorteResultados,
 
 
 @router.post("/historico-mensual", response_model=ResultadosEjercicioResponse, summary="Estado de resultados por cierre mensual")
-def consultar_mensual(body: ConsultaHistoricoResultados,
+def consultar_mensual(body: ConsultaHistoricoMensualResultados,
                       auth_context: AuthContext = Depends(get_current_auth_context),
                       service: ResultadosEjercicioService = Depends(get_resultados_ejercicio_service)) -> ResultadosEjercicioResponse:
     return service.consultar_mensual(body)

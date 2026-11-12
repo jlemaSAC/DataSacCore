@@ -38,10 +38,51 @@ class SqlComparativaCuentasRepository:
         """), {"id_empresa": id_empresa}).mappings()
         return [dict(row) for row in rows]
 
-    def obtener_saldos(self, *, fechas: Sequence[date], id_agencia: int, id_empresa: int) -> list[dict]:
+    def obtener_saldos(self, *, fechas: Sequence[date], id_agencia: int, id_empresa: int, rango_continuo: bool = False) -> list[dict]:
         if not fechas:
             return []
-        return self.saldos.obtener_saldos(
-            fecha_desde=min(fechas), fecha_hasta=max(fechas), id_agencia=id_agencia,
-            fechas=fechas, id_empresa=id_empresa,
-        )
+        if rango_continuo:
+            return self.saldos.obtener_saldos(
+                fecha_desde=min(fechas), fecha_hasta=max(fechas), id_agencia=id_agencia,
+                id_empresa=id_empresa,
+            )
+        # SQL Server limita a 1000 filas el constructor VALUES usado para los cortes.
+        resultado = []
+        for inicio in range(0, len(fechas), 1000):
+            lote = fechas[inicio:inicio + 1000]
+            resultado.extend(self.saldos.obtener_saldos(
+                fecha_desde=min(lote), fecha_hasta=max(lote), id_agencia=id_agencia,
+                fechas=lote, id_empresa=id_empresa,
+            ))
+        return resultado
+
+    def obtener_movimientos_mensuales(self, *, fechas: Sequence[date], id_agencia: int, id_empresa: int) -> list[dict]:
+        """Movimiento neto del día 1 al corte; un rango incompleto conserva null."""
+        cortes = sorted(set(fechas))
+        resultado = []
+        for inicio in range(0, len(cortes), 500):
+            lote = cortes[inicio:inicio + 500]
+            valores = ", ".join(f"(CAST(:corte_{i} AS date))" for i in range(len(lote)))
+            parametros = {f"corte_{i}": fecha for i, fecha in enumerate(lote)}
+            parametros.update(id_agencia=id_agencia, id_empresa=id_empresa)
+            rows = self.db.execute(text(f"""
+                SELECT cortes.fecha, sc.CODIGOCUENTA AS codigo_cuenta,
+                       CASE WHEN COUNT(DISTINCT CAST(sc.FECHA AS date)) = DAY(cortes.fecha)
+                            THEN SUM(CASE WHEN LEFT(c.CODIGO, 1) NOT IN ('6', '7') AND c.ESDEBITO = 0
+                                          THEN -1 ELSE 1 END *
+                                     (COALESCE(sf.TOTALDEBITO, sc.TOTALDEBITO)
+                                      - COALESCE(sf.TOTALCREDITO, sc.TOTALCREDITO)))
+                            ELSE NULL END AS saldo
+                FROM (VALUES {valores}) cortes(fecha)
+                INNER JOIN CONTABILIDAD.SALDOCONTABLE sc
+                  ON sc.FECHA >= DATEFROMPARTS(YEAR(cortes.fecha), MONTH(cortes.fecha), 1)
+                 AND sc.FECHA < DATEADD(day, 1, cortes.fecha)
+                INNER JOIN CONTABILIDAD.CUENTACONTABLE c ON c.CODIGO = sc.CODIGOCUENTA
+                LEFT JOIN CONTABILIDAD.SALDOCONTABLE_FINANIO sf
+                  ON sf.CODIGOCUENTA = sc.CODIGOCUENTA AND sf.FECHA = sc.FECHA
+                 AND sf.IDAGENCIA = sc.IDAGENCIA AND sf.IDMONEDA = sc.IDMONEDA
+                WHERE sc.IDAGENCIA = :id_agencia AND c.IDEMPRESA = :id_empresa
+                GROUP BY cortes.fecha, sc.CODIGOCUENTA
+            """), parametros).mappings()
+            resultado.extend(dict(row) for row in rows)
+        return resultado

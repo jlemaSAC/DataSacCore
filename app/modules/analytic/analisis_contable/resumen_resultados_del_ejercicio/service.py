@@ -9,7 +9,7 @@ from app.modules.contabilidad.repositories.sql_saldo_contable_repository import 
 from app.modules.analytic.analisis_contable.calculos_resultados import calcular_indicador
 from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.domain import CUENTAS, FILAS
 from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.schemas import (
-    ConsultaCorteResultados, ConsultaHistoricoResultados, ResultadosEjercicioResponse,
+    ConsultaCorteResultados, ConsultaHistoricoResultados, ConsultaHistoricoMensualResultados, ResultadosEjercicioResponse,
 )
 
 
@@ -29,7 +29,7 @@ class ResultadosEjercicioService:
                   for i in range((consulta.fecha_hasta - consulta.fecha_desde).days + 1)]
         return self._consultar(consulta, fechas, consulta.fecha_desde, consulta.fecha_hasta)
 
-    def consultar_mensual(self, consulta: ConsultaHistoricoResultados) -> ResultadosEjercicioResponse:
+    def consultar_mensual(self, consulta: ConsultaHistoricoMensualResultados) -> ResultadosEjercicioResponse:
         fechas = []
         hoy = fecha_actual_ecuador()
         cursor = consulta.fecha_desde.replace(day=1)

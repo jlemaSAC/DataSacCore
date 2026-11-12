@@ -9,7 +9,7 @@ from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.analytic.analisis_contable.router import router
 from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.dependencies import get_resultados_ejercicio_service
 from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.domain import FILAS
-from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.schemas import ConsultaCorteResultados, ConsultaHistoricoResultados
+from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.schemas import ConsultaCorteResultados, ConsultaHistoricoResultados, ConsultaHistoricoMensualResultados
 from app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.service import ResultadosEjercicioService
 
 
@@ -142,7 +142,8 @@ def test_endpoints_bearer_contratos_y_validacion(ruta, monkeypatch):
         assert client.post(url, json=invalido).status_code == 422
     if ruta != "fecha-corte":
         assert client.post(url, json={**body, "fecha_hasta": "2026-09-29"}).status_code == 422
-        assert client.post(url, json={**body, "fecha_hasta": "2027-10-01"}).status_code == 422
+        if ruta == "historico-diario":
+            assert client.post(url, json={**body, "fecha_hasta": "2027-10-01"}).status_code == 422
     else:
         assert client.post(url, json={**body, "fecha_corte": "2026-02-30"}).status_code == 422
 
@@ -152,3 +153,20 @@ def test_diario_hasta_366_dias_no_trunca_resultados():
     respuesta = ResultadosEjercicioService(Repositorio({})).consultar_diario(ConsultaHistoricoResultados(fecha_desde=desde, fecha_hasta=desde+timedelta(days=365)))
     assert len(respuesta.fechas) == 366
     assert respuesta.total_registros == 366 * 22
+
+
+def test_historico_mensual_acepta_48_meses_y_rechaza_49(monkeypatch):
+    monkeypatch.setattr('app.modules.analytic.analisis_contable.resumen_resultados_del_ejercicio.service.fecha_actual_ecuador', lambda: date(2026, 11, 11))
+    app = FastAPI()
+    app.include_router(router, prefix="/analytic")
+    app.dependency_overrides[get_current_auth_context] = lambda: object()
+    app.dependency_overrides[get_resultados_ejercicio_service] = lambda: ResultadosEjercicioService(Repositorio({}))
+    client = TestClient(app)
+    url = "/analytic/analisis-contable/resumen-resultados-del-ejercicio/historico-mensual"
+    body = {"fecha_desde": "2022-12-01", "fecha_hasta": "2026-11-30"}
+    response = client.post(url, json=body)
+    assert response.status_code == 200
+    assert len(response.json()["fechas"]) == 48
+    assert response.json()["total_registros"] == 48 * 22
+    assert client.post(url, json={**body, "fecha_desde": "2022-11-01"}).status_code == 422
+    assert client.post(url.replace("historico-mensual", "historico-diario"), json=body).status_code == 422

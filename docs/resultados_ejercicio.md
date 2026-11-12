@@ -32,7 +32,8 @@ Cuerpo de los históricos:
 
 `id_agencia` es opcional, por defecto `0`, y consulta exclusivamente la agencia
 contable `1`, CONSOLIDADO. Los demás IDs consultan esa agencia. `neteo` acepta
-`0` o `1` y por defecto está activado. Se admiten hasta 366 días inclusivos.
+`0` o `1` y por defecto está activado. El histórico diario admite hasta 366 días
+inclusivos; el histórico mensual admite hasta 48 meses inclusivos (4 años).
 Los cierres mensuales fuera del rango o en meses futuros se omiten. Las reglas
 coinciden con Cuentas contables, incluyendo el uso de la fecha actual de Ecuador
 para el mes en curso.
