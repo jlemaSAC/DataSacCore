@@ -22,11 +22,11 @@ class ConsultaComparativaCuentas(BaseModel):
                 raise ValueError("La comparación diaria requiere fecha de inicio.")
             if self.fecha_inicio < date(1753, 1, 1) or self.fecha_inicio > self.fecha_corte:
                 raise ValueError("La fecha de inicio debe ser válida y no posterior a la fecha de fin.")
-            anio, mes_cero = divmod(self.fecha_inicio.year * 12 + self.fecha_inicio.month - 1 + 3, 12)
+            anio, mes_cero = divmod(self.fecha_inicio.year * 12 + self.fecha_inicio.month - 1 + 6, 12)
             if anio <= 9999:
                 limite = date(anio, mes_cero + 1, min(self.fecha_inicio.day, monthrange(anio, mes_cero + 1)[1]))
                 if self.fecha_corte > limite:
-                    raise ValueError("La comparación diaria admite hasta tres meses calendario.")
+                    raise ValueError("La comparación diaria admite hasta seis meses calendario.")
             return self
         if self.fecha_inicio is not None:
             raise ValueError("La fecha de inicio solo corresponde a la comparación diaria.")

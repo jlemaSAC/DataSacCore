@@ -58,8 +58,7 @@ class ComparativaCuentasService:
         parametros = dict(fechas=sorted(set(fechas + fechas_anteriores)), id_agencia=id_contable, id_empresa=agencia["id_empresa"])
         if consulta.periodicidad == "diaria":
             parametros["rango_continuo"] = True
-        filas = (self.repository.obtener_movimientos_mensuales(**parametros) if anual_meses
-                 else self.repository.obtener_saldos(**parametros))
+        filas = self.repository.obtener_saldos(**parametros)
         saldos = {(fila["fecha"], fila["codigo_cuenta"]): fila["saldo"] for fila in filas}
         padres = {c["codigo_cuenta"]: c["codigo_padre"] for c in catalogo}
 

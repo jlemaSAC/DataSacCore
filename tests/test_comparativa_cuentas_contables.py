@@ -193,12 +193,13 @@ def test_comparativa_diaria_fechas_unicas_variacion_ausencias_y_neteo():
 
 
 @pytest.mark.parametrize('inicio,fin,valido', [
-    ('2024-01-31', '2024-04-30', True), ('2024-01-31', '2024-05-01', False),
-    ('2024-11-30', '2025-02-28', True), ('2024-11-30', '2025-03-01', False),
+    ('2024-01-31', '2024-07-31', True), ('2024-01-31', '2024-08-01', False),
+    ('2023-08-31', '2024-02-29', True), ('2023-08-31', '2024-03-01', False),
+    ('2024-08-31', '2025-02-28', True), ('2024-08-31', '2025-03-01', False),
     ('2024-02-29', '2024-02-29', True), ('2024-02-29', '2024-02-28', False),
     ('1752-12-31', '1753-01-01', False),
 ])
-def test_intervalo_diario_tres_meses_calendario(inicio, fin, valido):
+def test_intervalo_diario_seis_meses_calendario(inicio, fin, valido):
     datos = dict(periodicidad='diaria', fecha_inicio=inicio, fecha_corte=fin)
     if valido:
         ConsultaComparativaCuentas(**datos)
@@ -238,19 +239,26 @@ def test_repositorio_diario_consulta_rango_sin_lista_de_cortes():
     assert repo.saldos.kwargs == dict(fecha_desde=fechas[0], fecha_hasta=fechas[-1], id_agencia=1, id_empresa=2)
 
 
-class RepositorioMovimientos(Repositorio):
-    def obtener_movimientos_mensuales(self, **kwargs):
-        self.consultas.append(kwargs)
-        return self.filas
+def test_anual_por_meses_usa_saldos_de_cada_corte_y_resta_el_anterior():
+    from app.modules.analytic.analisis_contable.comparativa_cuentas_contables.schemas import ConsultaComparativaAnualMeses
 
-    def obtener_saldos(self, **kwargs):
-        raise AssertionError('La variación anual por meses debe consultar movimientos, no saldos.')
+    class Repo(Repositorio):
+        def obtener_movimientos_mensuales(self, **kwargs):
+            raise AssertionError("Debe consultar saldos, no movimientos mensuales")
+
+    repo = Repo([fila('2023-01-15', '14', '1000.00'), fila('2024-01-15', '14', '800.00')])
+    respuesta = ComparativaCuentasService(repo).consultar(
+        ConsultaComparativaAnualMeses(anio_inicio=2024, fecha_corte='2024-01-15', neteo=0))
+    valor = next(c.valores[0] for c in respuesta.cuentas if c.codigo_cuenta == '14')
+    assert (valor.saldo, valor.saldo_anterior, valor.variacion_absoluta) == (
+        Decimal('800.00'), Decimal('1000.00'), Decimal('-200.00'))
+    assert repo.consultas[0]['fechas'] == [date(2023, 1, 15), date(2024, 1, 15)]
 
 
 def test_anual_por_meses_compara_cada_mes_con_su_anio_anterior_desde_enero():
     from app.modules.analytic.analisis_contable.comparativa_cuentas_contables.schemas import ConsultaComparativaAnualMeses
 
-    repo = RepositorioMovimientos([
+    repo = Repositorio([
         fila('2023-01-15', '14', '100.00'), fila('2024-01-15', '14', '120.01'),
         fila('2023-02-15', '14', '-50.00'), fila('2024-02-15', '14', '0.00'),
         fila('2024-03-15', '14', '99.00'), fila('2025-01-15', '14', '140.03'),
@@ -267,6 +275,7 @@ def test_anual_por_meses_compara_cada_mes_con_su_anio_anterior_desde_enero():
     assert valores[0].saldo_anterior == Decimal('100.00')
     assert valores[0].variacion_absoluta == Decimal('20.01')
     assert valores[1].saldo == Decimal('0.00')
+    assert valores[1].saldo_anterior == Decimal('-50.00')
     assert valores[1].variacion_absoluta == Decimal('50.00')
     assert valores[2].saldo_anterior is None and valores[2].variacion_absoluta is None
     assert valores[12].saldo_anterior == Decimal('120.01')
@@ -284,7 +293,7 @@ def test_anual_por_meses_compara_cada_mes_con_su_anio_anterior_desde_enero():
 def test_anual_por_meses_ajusta_cada_febrero_independientemente_y_netea_ambos_anios():
     from app.modules.analytic.analisis_contable.comparativa_cuentas_contables.schemas import ConsultaComparativaAnualMeses
 
-    repo = RepositorioMovimientos([
+    repo = Repositorio([
         fila('2024-02-29', '1', '150.05'), fila('2024-02-29', '1908', '10.01'),
         fila('2025-02-28', '1', '200.10'), fila('2025-02-28', '1908', '20.02'),
     ])
@@ -300,23 +309,23 @@ def test_anual_por_meses_ajusta_cada_febrero_independientemente_y_netea_ambos_an
     assert valor.variacion_absoluta == Decimal('40.04')
     assert repo.filas[0]['saldo'] == Decimal('150.05')
     # Corte 29: febrero bisiesto conserva 29 y el año anterior se ajusta a 28.
-    respuesta = ComparativaCuentasService(RepositorioMovimientos()).consultar(
+    respuesta = ComparativaCuentasService(Repositorio()).consultar(
         ConsultaComparativaAnualMeses(anio_inicio=2024, fecha_corte='2024-02-29'))
     assert not respuesta.periodos[1].fecha_ajustada
     assert respuesta.periodos[1].fecha_anterior == date(2023, 2, 28)
     assert respuesta.periodos[1].fecha_anterior_ajustada
 
 
-def test_anual_por_meses_conserva_ausencias_y_rangos_incompletos():
+def test_anual_por_meses_conserva_ausencias_en_los_cortes():
     from app.modules.analytic.analisis_contable.comparativa_cuentas_contables.schemas import ConsultaComparativaAnualMeses
 
     filas = [fila('2023-01-15', '1', '100.00'), fila('2024-01-15', '1', '120.00'),
              dict(fecha=date(2024, 1, 15), codigo_cuenta='1908', saldo=None),
              fila('2023-01-15', '14', '0.00')]
-    respuesta = ComparativaCuentasService(RepositorioMovimientos(filas)).consultar(
+    respuesta = ComparativaCuentasService(Repositorio(filas)).consultar(
         ConsultaComparativaAnualMeses(anio_inicio=2024, fecha_corte='2024-01-15'))
     cuentas = {c.codigo_cuenta: c for c in respuesta.cuentas}
-    assert cuentas['1'].valores[0].saldo is None  # Ajuste con días ausentes.
+    assert cuentas['1'].valores[0].saldo is None  # Ajuste sin saldo en el corte.
     assert cuentas['1'].valores[0].saldo_anterior == Decimal('100.00')
     assert cuentas['1'].valores[0].variacion_absoluta is None
     assert cuentas['14'].valores[0].saldo is None
@@ -328,7 +337,7 @@ def test_anual_por_meses_conserva_ausencias_y_rangos_incompletos():
 def test_endpoint_anual_por_meses_bearer_contrato_y_validacion():
     app = FastAPI()
     app.include_router(router, prefix='/analytic')
-    repo = RepositorioMovimientos([fila('2023-01-15', '14', '10.01'), fila('2024-01-15', '14', '20.03')])
+    repo = Repositorio([fila('2023-01-15', '14', '10.01'), fila('2024-01-15', '14', '20.03')])
     app.dependency_overrides[get_comparativa_cuentas_service] = lambda: ComparativaCuentasService(repo)
     client = TestClient(app)
     url = '/analytic/analisis-contable/comparativa-cuentas-contables/anual-por-meses'

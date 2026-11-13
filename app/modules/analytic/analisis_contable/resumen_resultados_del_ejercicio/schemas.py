@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 from typing import Literal
@@ -27,8 +28,12 @@ class ConsultaRangoResultados(BaseModel):
 class ConsultaHistoricoResultados(ConsultaRangoResultados):
     @model_validator(mode="after")
     def validar_rango_diario(self):
-        if (self.fecha_hasta - self.fecha_desde).days >= 366:
-            raise ValueError("El rango no puede superar 366 días.")
+        anio_limite = self.fecha_desde.year + 3
+        if anio_limite <= date.max.year:
+            dia_limite = min(self.fecha_desde.day, monthrange(anio_limite, self.fecha_desde.month)[1])
+            aniversario = date(anio_limite, self.fecha_desde.month, dia_limite)
+            if self.fecha_hasta >= aniversario:
+                raise ValueError("El rango diario no puede superar 3 años.")
         return self
 
 

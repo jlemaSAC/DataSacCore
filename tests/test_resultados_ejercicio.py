@@ -143,16 +143,29 @@ def test_endpoints_bearer_contratos_y_validacion(ruta, monkeypatch):
     if ruta != "fecha-corte":
         assert client.post(url, json={**body, "fecha_hasta": "2026-09-29"}).status_code == 422
         if ruta == "historico-diario":
-            assert client.post(url, json={**body, "fecha_hasta": "2027-10-01"}).status_code == 422
+            assert client.post(url, json={**body, "fecha_hasta": "2029-09-30"}).status_code == 422
     else:
         assert client.post(url, json={**body, "fecha_corte": "2026-02-30"}).status_code == 422
 
 
-def test_diario_hasta_366_dias_no_trunca_resultados():
+def test_diario_hasta_tres_anios_no_trunca_resultados():
     desde = date(2024, 1, 1)
-    respuesta = ResultadosEjercicioService(Repositorio({})).consultar_diario(ConsultaHistoricoResultados(fecha_desde=desde, fecha_hasta=desde+timedelta(days=365)))
-    assert len(respuesta.fechas) == 366
-    assert respuesta.total_registros == 366 * 22
+    hasta = date(2026, 12, 31)
+    respuesta = ResultadosEjercicioService(Repositorio({})).consultar_diario(ConsultaHistoricoResultados(fecha_desde=desde, fecha_hasta=hasta))
+    assert len(respuesta.fechas) == 1096
+    assert respuesta.fechas[-1] == hasta
+    assert respuesta.total_registros == 1096 * 22
+
+
+@pytest.mark.parametrize("desde,hasta", [("2024-01-01", "2027-01-01"), ("2024-02-29", "2027-02-28")])
+def test_diario_rechaza_aniversario_de_tres_anios(desde, hasta):
+    with pytest.raises(ValueError, match="3 años"):
+        ConsultaHistoricoResultados(fecha_desde=desde, fecha_hasta=hasta)
+
+
+def test_diario_acepta_limite_desde_dia_bisiesto():
+    consulta = ConsultaHistoricoResultados(fecha_desde="2024-02-29", fecha_hasta="2027-02-27")
+    assert consulta.fecha_hasta == date(2027, 2, 27)
 
 
 def test_historico_mensual_acepta_48_meses_y_rechaza_49(monkeypatch):
