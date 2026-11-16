@@ -11,7 +11,7 @@ from app.modules.analytic.spread_tasa.constants import (
     INTERESES_CARTERA, CUENTAS_CORTE, MICROCREDITO_POR_VENCER, CARTERA_POR_VENCER,
     FUENTES_FONDEO, CUENTAS_PROMEDIO, ZERO,
 )
-from app.modules.analytic.spread_tasa.calculos import componentes_costos, componentes_rendimientos
+from app.modules.analytic.spread_tasa.calculos import componentes_costos, componentes_rendimientos, componentes_spread
 
 
 def fechas_promedio(fecha_corte: date) -> list[date]:
@@ -26,10 +26,9 @@ def fechas_promedio(fecha_corte: date) -> list[date]:
 
 
 def calcular_spread(saldos: dict[str, Decimal], promedios: dict[str, Decimal], mes: int):
-    rendimiento = componentes_rendimientos(saldos, promedios, mes)['cartera']['rendimiento']
-    costo = componentes_costos(saldos, promedios, mes)['promedio_fondeo']['costo']
-    spread = rendimiento - costo if rendimiento is not None and costo is not None else None
-    return rendimiento, costo, spread
+    componentes = componentes_spread(saldos, promedios, mes)
+    return (componentes['rendimiento_cartera_por_vencer']['valor'],
+            componentes['costo_promedio_fondeo']['valor'], componentes['spread_tasa']['valor'])
 
 
 class ResumenSpreadTasaService:

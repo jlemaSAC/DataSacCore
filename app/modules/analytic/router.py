@@ -30,6 +30,7 @@ from app.modules.analytic.menu.router import router as menu_router
 from app.modules.analytic.spread_tasa.resumen_spread_tasa.router import router as resumen_spread_tasa_router
 from app.modules.analytic.spread_tasa.historico_rendimientos.router import router as historico_rendimientos_router
 from app.modules.analytic.spread_tasa.costo_de_fondeo.router import router as costo_fondeo_router
+from app.modules.analytic.spread_tasa.historico_spread_tasa.router import router as historico_spread_tasa_router
 from app.modules.analytic.ahorro_vista.router import router as ahorro_vista_router
 from app.modules.analytic.inversiones.router import router as inversiones_router
 from app.modules.contabilidad.saldos_diarios.router import router as saldos_diarios_router
@@ -44,6 +45,7 @@ router.include_router(menu_router)
 router.include_router(resumen_spread_tasa_router)
 router.include_router(historico_rendimientos_router)
 router.include_router(costo_fondeo_router)
+router.include_router(historico_spread_tasa_router)
 router.include_router(analisis_contable_router)
 router.include_router(ahorro_vista_router)
 router.include_router(inversiones_router)
