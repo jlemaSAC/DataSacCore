@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from app.modules.analytic.spread_tasa.constants import (
-    CARTERA_POR_VENCER, INTERESES_CARTERA, MICROCREDITO_POR_VENCER, ZERO,
+    CARTERA_POR_VENCER, FUENTES_FONDEO, INTERESES_CARTERA, MICROCREDITO_POR_VENCER, ZERO,
 )
 
 PRODUCTOS_RENDIMIENTO = {
@@ -11,14 +11,29 @@ PRODUCTOS_RENDIMIENTO = {
     'cartera': ('Cartera por Vencer', INTERESES_CARTERA, CARTERA_POR_VENCER),
 }
 
+TIPOS_COSTO = {
+    'ahorro_plazo': ('Costo Ahorro Plazo', ('410130',), ('2103',)),
+    'ahorro_vista': ('Costo Ahorro Vista', ('410115',), ('2101',)),
+    'obligaciones_financieras': ('Costo Obligaciones Financieras', ('4103',), ('26',)),
+    'promedio_fondeo': ('Costo Promedio de Fondeo', ('41',), FUENTES_FONDEO),
+}
 
-def componentes_rendimientos(saldos: dict, promedios: dict, mes: int) -> dict:
+
+def _componentes(saldos: dict, promedios: dict, mes: int, definiciones: dict, campo_valor: str) -> dict:
     resultado = {}
-    for producto, (_, cuentas_interes, cuentas_cartera) in PRODUCTOS_RENDIMIENTO.items():
+    for indicador, (_, cuentas_interes, cuentas_promedio) in definiciones.items():
         intereses = sum((saldos.get(c, ZERO) for c in cuentas_interes), ZERO)
-        promedio = sum((promedios.get(c, ZERO) for c in cuentas_cartera), ZERO)
-        resultado[producto] = {
+        promedio = sum((promedios.get(c, ZERO) for c in cuentas_promedio), ZERO)
+        resultado[indicador] = {
             'intereses': intereses, 'saldo_promedio': promedio,
-            'rendimiento': intereses / promedio * Decimal(12) / Decimal(mes) if promedio else None,
+            campo_valor: intereses / promedio * Decimal(12) / Decimal(mes) if promedio else None,
         }
     return resultado
+
+
+def componentes_rendimientos(saldos: dict, promedios: dict, mes: int) -> dict:
+    return _componentes(saldos, promedios, mes, PRODUCTOS_RENDIMIENTO, 'rendimiento')
+
+
+def componentes_costos(saldos: dict, promedios: dict, mes: int) -> dict:
+    return _componentes(saldos, promedios, mes, TIPOS_COSTO, 'costo')

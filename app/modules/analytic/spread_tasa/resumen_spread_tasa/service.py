@@ -11,7 +11,7 @@ from app.modules.analytic.spread_tasa.constants import (
     INTERESES_CARTERA, CUENTAS_CORTE, MICROCREDITO_POR_VENCER, CARTERA_POR_VENCER,
     FUENTES_FONDEO, CUENTAS_PROMEDIO, ZERO,
 )
-from app.modules.analytic.spread_tasa.calculos import componentes_rendimientos
+from app.modules.analytic.spread_tasa.calculos import componentes_costos, componentes_rendimientos
 
 
 def fechas_promedio(fecha_corte: date) -> list[date]:
@@ -26,10 +26,8 @@ def fechas_promedio(fecha_corte: date) -> list[date]:
 
 
 def calcular_spread(saldos: dict[str, Decimal], promedios: dict[str, Decimal], mes: int):
-    factor = Decimal(12) / Decimal(mes)
-    fondeo = sum((promedios.get(c, ZERO) for c in FUENTES_FONDEO), ZERO)
     rendimiento = componentes_rendimientos(saldos, promedios, mes)['cartera']['rendimiento']
-    costo = saldos.get('41', ZERO) / fondeo * factor if fondeo else None
+    costo = componentes_costos(saldos, promedios, mes)['promedio_fondeo']['costo']
     spread = rendimiento - costo if rendimiento is not None and costo is not None else None
     return rendimiento, costo, spread
 
@@ -68,21 +66,15 @@ class ResumenSpreadTasaService:
         cantidad = Decimal(len(por_fecha))
         promedios = {codigo: sum((dia.get(codigo, ZERO) for dia in por_fecha.values()), ZERO) / cantidad for codigo in CUENTAS_PROMEDIO}
         cartera_vencer = sum((promedios[c] for c in CARTERA_POR_VENCER), ZERO)
-        factor = Decimal(12) / Decimal(fecha_corte.month)
-
-        def ratio(numerador, denominador):
-            return numerador / denominador * factor if denominador else None
-
-        def saldo(codigo):
-            return saldos.get(codigo, ZERO)
 
         promedio_fondeo = sum((promedios[c] for c in FUENTES_FONDEO), ZERO)
         rendimiento, costo_fondeo, spread = calcular_spread(saldos, promedios, fecha_corte.month)
         rendimientos = componentes_rendimientos(saldos, promedios, fecha_corte.month)
+        costos = componentes_costos(saldos, promedios, fecha_corte.month)
         indicadores = {
-            "costo_ahorro_plazo": ratio(saldo("410130"), promedios["2103"]),
-            "costo_ahorro_vista": ratio(saldo("410115"), promedios["2101"]),
-            "costo_obligaciones_financieras": ratio(saldo("4103"), promedios["26"]),
+            "costo_ahorro_plazo": costos['ahorro_plazo']['costo'],
+            "costo_ahorro_vista": costos['ahorro_vista']['costo'],
+            "costo_obligaciones_financieras": costos['obligaciones_financieras']['costo'],
             "costo_promedio_fondeo": costo_fondeo,
             "spread_tasa": spread,
             "rendimiento_microcredito_por_vencer": rendimientos['microcredito']['rendimiento'],
