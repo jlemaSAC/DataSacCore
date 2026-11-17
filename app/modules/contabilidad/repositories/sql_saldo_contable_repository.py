@@ -33,6 +33,7 @@ class SqlSaldoContableRepository:
         id_agencia: int,
         codigos_cuenta: Sequence[str],
         neteo: int | bool = 1,
+        preservar_decimal: bool = False,
     ) -> list[dict[str, Any]]:
         codigos_normalizados = normalizar_codigos_cuenta(codigos_cuenta)
         if not codigos_normalizados:
@@ -114,7 +115,7 @@ class SqlSaldoContableRepository:
                 "SaldoOriginal": to_float(row.get("SaldoOriginal")),
                 "CuentaNeteada": row.get("CuentaNeteada"),
                 "SaldoCuentaNeteada": to_float(row.get("SaldoCuentaNeteada")),
-                "SaldoFinal": to_float(row.get("SaldoFinal")),
+                "SaldoFinal": row.get("SaldoFinal") if preservar_decimal else to_float(row.get("SaldoFinal")),
             }
             for row in rows
         ]
@@ -144,6 +145,7 @@ class SqlSaldoContableRepository:
         id_agencia: int,
         codigos_cuenta: Sequence[str],
         neteo: int | bool = 1,
+        preservar_decimal: bool = False,
     ) -> list[dict[str, Any]]:
         codigos_normalizados = normalizar_codigos_cuenta(codigos_cuenta)
         fechas_normalizadas = list(dict.fromkeys(fechas))
@@ -226,7 +228,7 @@ class SqlSaldoContableRepository:
             {
                 "Fecha": row.get("Fecha"),
                 "CodigoCuenta": row.get("CodigoCuenta"),
-                "SaldoFinal": to_float(row.get("SaldoFinal")),
+                "SaldoFinal": row.get("SaldoFinal") if preservar_decimal else to_float(row.get("SaldoFinal")),
             }
             for row in rows
         ]
