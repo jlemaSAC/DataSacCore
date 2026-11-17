@@ -26,10 +26,10 @@ mediante `get_current_auth_context`. El router del dominio está registrado en
   30/09, 31/10 y 17/11. El último corte se identifica con `parcial: true` hasta
   que corresponda al fin de mes. No se sustituyen fechas por días con saldo.
   Si el rango no contiene ningún cierre ni el día actual, devuelve 422.
-- Diario: fechas inclusivas, con `fecha_hasta` anterior a `fecha_desde + 6 meses`.
+- Diario: hasta un año, con fechas inclusivas y `fecha_hasta` anterior a `fecha_desde + 12 meses`.
   El límite se ajusta al último día del mes destino si ese día no existe.
-  Por ejemplo, del 18 de mayo al 17 de noviembre; desde el 31 de agosto,
-  hasta el 27 de febrero de un año no bisiesto.
+  Por ejemplo, del 18 de noviembre de 2025 al 17 de noviembre de 2026;
+  desde el 29 de febrero de 2024, hasta el 27 de febrero de 2025.
 - No permite fechas futuras; la fecha actual se calcula en Ecuador.
 - Agencia 0 corresponde a la agencia contable 1 (CONSOLIDADO). No se suman
   agencias ni cuentas hijas. Agencias inexistentes devuelven 404.

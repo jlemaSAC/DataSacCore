@@ -76,17 +76,17 @@ def test_diario_inclusivo_con_ceros_ausencias_y_neteo_exacto():
     assert sin_neteo.datos[0].activos == Decimal("100.01")
 
 
-def test_48_meses_y_seis_meses_calendario():
+def test_48_meses_y_un_ano_diario():
     mensual = ConsultaEvolucionBalance(fecha_desde="2022-11-01", fecha_hasta="2026-10-31")
     assert len(EvolucionBalanceService(Repositorio()).consultar(mensual).datos) == 48
     mensual_actual = ConsultaEvolucionBalance(fecha_desde="2022-12-01", fecha_hasta="2026-11-17")
     assert len(EvolucionBalanceService(Repositorio()).consultar(mensual_actual).datos) == 48
-    diario = ConsultaEvolucionBalance(frecuencia="diario", fecha_desde="2026-05-18", fecha_hasta="2026-11-17")
-    assert len(EvolucionBalanceService(Repositorio()).consultar(diario).datos) == 184
+    diario = ConsultaEvolucionBalance(frecuencia="diario", fecha_desde="2025-11-18", fecha_hasta="2026-11-17")
+    assert len(EvolucionBalanceService(Repositorio()).consultar(diario).datos) == 365
     # El límite se ajusta al último día del mes destino.
-    ConsultaEvolucionBalance(frecuencia="diario", fecha_desde="2025-08-31", fecha_hasta="2026-02-27")
-    with pytest.raises(ValidationError, match="6 meses"):
-        ConsultaEvolucionBalance(frecuencia="diario", fecha_desde="2025-08-31", fecha_hasta="2026-02-28")
+    ConsultaEvolucionBalance(frecuencia="diario", fecha_desde="2024-02-29", fecha_hasta="2025-02-27")
+    with pytest.raises(ValidationError, match="un año"):
+        ConsultaEvolucionBalance(frecuencia="diario", fecha_desde="2024-02-29", fecha_hasta="2025-02-28")
 
 
 @pytest.mark.parametrize("cambios", [
@@ -95,7 +95,7 @@ def test_48_meses_y_seis_meses_calendario():
     {"fecha_hasta": "2026-11-18"},
     {"fecha_hasta": "2026-02-30"},
     {"id_agencia": -1}, {"neteo": 2}, {"frecuencia": "anual"},
-    {"frecuencia": "diario", "fecha_desde": "2026-04-30"},
+    {"frecuencia": "diario", "fecha_desde": "2025-10-31"},
 ])
 def test_rechaza_rangos_y_parametros_invalidos(cambios):
     with pytest.raises(ValidationError):

@@ -27,11 +27,11 @@ class ConsultaEvolucionBalance(BaseModel):
             if meses >= 48:
                 raise ValueError("El histórico mensual admite como máximo 48 meses (4 años).")
         else:
-            indice = self.fecha_desde.year * 12 + self.fecha_desde.month - 1 + 6
+            indice = self.fecha_desde.year * 12 + self.fecha_desde.month - 1 + 12
             anio, mes = divmod(indice, 12)
             limite = date(anio, mes + 1, min(self.fecha_desde.day, monthrange(anio, mes + 1)[1]))
             if self.fecha_hasta >= limite:
-                raise ValueError("El histórico diario admite como máximo 6 meses, con límite final exclusivo.")
+                raise ValueError("El histórico diario admite como máximo un año, con límite final exclusivo.")
         return self
 
 
