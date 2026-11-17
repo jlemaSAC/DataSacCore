@@ -42,7 +42,10 @@ class CorteVariacion(BaseModel):
     cuentas_sin_saldo: list[str]
 
 
-class VariacionResponse(ConsultaVariacion):
+class VariacionMetadata(ConsultaVariacion):
     id_agencia_contable: int
     nombre_agencia: str
+
+
+class VariacionResponse(VariacionMetadata):
     datos: list[CorteVariacion]

@@ -44,7 +44,7 @@ class CorteBalance(BaseModel):
     cuentas_sin_saldo: list[str]
 
 
-class EvolucionBalanceResponse(BaseModel):
+class EvolucionBalanceMetadata(BaseModel):
     frecuencia: Literal["mensual", "diario"]
     fecha_desde: date
     fecha_hasta: date
@@ -52,4 +52,7 @@ class EvolucionBalanceResponse(BaseModel):
     neteo: Literal[0, 1]
     id_agencia_contable: int
     nombre_agencia: str
+
+
+class EvolucionBalanceResponse(EvolucionBalanceMetadata):
     datos: list[CorteBalance]

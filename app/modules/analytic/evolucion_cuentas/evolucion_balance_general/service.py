@@ -14,11 +14,33 @@ from app.modules.contabilidad.repositories.sql_saldo_contable_repository import 
 CUENTAS = (("1", "activos"), ("2", "pasivos"), ("3", "patrimonio"))
 
 
-class EvolucionBalanceService:
+class IndicadoresBalance:
+    cuentas = CUENTAS
+
+    @property
+    def indicadores(self):
+        return self.cuentas
+
+    def valores_corte(self, saldos, fecha, ajustes):
+        valores = {}
+        for codigo, campo in self.cuentas:
+            saldo = saldos.get((fecha, codigo))
+            if saldo is not None and codigo in ajustes:
+                saldo -= saldos.get((fecha, ajustes[codigo]), Decimal("0.00"))
+            valores[campo] = saldo
+        return valores
+
+    def completar_corte(self, corte: dict) -> None:
+        pass
+
+
+class EvolucionBalanceService(IndicadoresBalance):
+    response_model = EvolucionBalanceResponse
+
     def __init__(self, repository):
         self.repository = repository
 
-    def consultar(self, consulta: ConsultaEvolucionBalance) -> EvolucionBalanceResponse:
+    def consultar(self, consulta: ConsultaEvolucionBalance):
         id_contable = 1 if consulta.id_agencia == 0 else consulta.id_agencia
         agencia = self.repository.obtener_agencia(id_contable)
         if agencia is None:
@@ -38,9 +60,9 @@ class EvolucionBalanceService:
                 cursor += timedelta(days=1)
         if not fechas:
             raise HTTPException(status_code=422, detail="El rango no contiene ningún fin de mes ni el corte del día actual.")
-        ajustes = {codigo: MAPA_NETEO_CUENTAS[codigo] for codigo, _ in CUENTAS
+        ajustes = {codigo: MAPA_NETEO_CUENTAS[codigo] for codigo, _ in self.cuentas
                    if consulta.neteo and codigo in MAPA_NETEO_CUENTAS}
-        codigos = tuple(dict.fromkeys([codigo for codigo, _ in CUENTAS] + list(ajustes.values())))
+        codigos = tuple(dict.fromkeys([codigo for codigo, _ in self.cuentas] + list(ajustes.values())))
         filas = self.repository.obtener_saldos_fechas(
             fechas=fechas, id_agencia=id_contable, id_empresa=agencia["id_empresa"], codigos_cuenta=codigos,
         )
@@ -48,18 +70,17 @@ class EvolucionBalanceService:
         datos = []
         for fecha in fechas:
             corte = {
-                "fecha": fecha, "cuentas_sin_saldo": [],
+                "fecha": fecha,
                 "parcial": consulta.frecuencia == "mensual" and fecha.day < monthrange(fecha.year, fecha.month)[1],
             }
-            for codigo, nombre in CUENTAS:
-                saldo = saldos.get((fecha, codigo))
-                if saldo is None:
-                    corte["cuentas_sin_saldo"].append(codigo)
-                elif codigo in ajustes:
-                    saldo -= saldos.get((fecha, ajustes[codigo]), Decimal("0.00"))
-                corte[nombre] = saldo
+            valores = self.valores_corte(saldos, fecha, ajustes)
+            corte.update(valores)
+            corte["cuentas_sin_saldo"] = [
+                codigo for codigo, campo in self.indicadores if valores[campo] is None
+            ]
+            self.completar_corte(corte)
             datos.append(corte)
-        return EvolucionBalanceResponse(
+        return self.response_model(
             **consulta.model_dump(), id_agencia_contable=id_contable,
             nombre_agencia=agencia["nombre"], datos=datos,
         )

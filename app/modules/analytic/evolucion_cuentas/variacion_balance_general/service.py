@@ -1,8 +1,7 @@
 from calendar import monthrange
 from datetime import date, timedelta
-from decimal import Decimal
 from fastapi import HTTPException
-from app.modules.analytic.evolucion_cuentas.evolucion_balance_general.service import CUENTAS
+from app.modules.analytic.evolucion_cuentas.evolucion_balance_general.service import IndicadoresBalance
 from app.modules.analytic.evolucion_cuentas.variacion_balance_general.schemas import VariacionResponse
 from app.modules.contabilidad.repositories.sql_saldo_contable_repository import MAPA_NETEO_CUENTAS
 
@@ -13,7 +12,9 @@ def fecha_anterior(fecha, tipo):
     return date(anio, mes + 1, min(fecha.day, monthrange(anio, mes + 1)[1]))
 
 
-class VariacionBalanceService:
+class VariacionBalanceService(IndicadoresBalance):
+    response_model = VariacionResponse
+
     def __init__(self, repository):
         self.repository = repository
 
@@ -48,8 +49,8 @@ class VariacionBalanceService:
         else:
             comparaciones = [fecha_anterior(fecha, consulta.tipo) for fecha in fechas]
         fechas_consulta = sorted(set(fechas + comparaciones))
-        ajustes = {codigo: MAPA_NETEO_CUENTAS[codigo] for codigo, _ in CUENTAS if consulta.neteo and codigo in MAPA_NETEO_CUENTAS}
-        codigos = tuple(dict.fromkeys([codigo for codigo, _ in CUENTAS] + list(ajustes.values())))
+        ajustes = {codigo: MAPA_NETEO_CUENTAS[codigo] for codigo, _ in self.cuentas if consulta.neteo and codigo in MAPA_NETEO_CUENTAS}
+        codigos = tuple(dict.fromkeys([codigo for codigo, _ in self.cuentas] + list(ajustes.values())))
         saldos = {}
         # SQL Server limita los parámetros por sentencia; distribuir los cortes en lotes.
         for inicio in range(0, len(fechas_consulta), 500):
@@ -58,15 +59,15 @@ class VariacionBalanceService:
         datos = []
         for fecha, anterior in zip(fechas, comparaciones):
             corte = dict(fecha=fecha, fecha_comparacion=anterior, cuentas_sin_saldo=[])
-            for codigo, nombre in CUENTAS:
-                actual, previo = saldos.get((fecha, codigo)), saldos.get((anterior, codigo))
+            valores_actuales = self.valores_corte(saldos, fecha, ajustes)
+            valores_previos = self.valores_corte(saldos, anterior, ajustes)
+            for codigo, campo in self.indicadores:
+                actual, previo = valores_actuales[campo], valores_previos[campo]
                 if actual is None or previo is None:
                     corte['cuentas_sin_saldo'].append(codigo)
-                    corte[nombre] = None
-                    continue
-                if codigo in ajustes:
-                    actual -= saldos.get((fecha, ajustes[codigo]), Decimal('0'))
-                    previo -= saldos.get((anterior, ajustes[codigo]), Decimal('0'))
-                corte[nombre] = actual - previo
+                    corte[campo] = None
+                else:
+                    corte[campo] = actual - previo
+            self.completar_corte(corte)
             datos.append(corte)
-        return VariacionResponse(**consulta.model_dump(), id_agencia_contable=agencia_id, nombre_agencia=agencia['nombre'], datos=datos)
+        return self.response_model(**consulta.model_dump(), id_agencia_contable=agencia_id, nombre_agencia=agencia['nombre'], datos=datos)
