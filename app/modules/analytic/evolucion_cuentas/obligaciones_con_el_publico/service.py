@@ -9,7 +9,6 @@ CUENTAS_OBLIGACIONES = (
     ("2103", "depositos_plazo"),
     ("2101", "depositos_vista"),
     ("2105", "depositos_restringidos"),
-    ("2106", "cuenta_2106"),
     ("21", "obligaciones_publico"),
 )
 

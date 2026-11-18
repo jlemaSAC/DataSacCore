@@ -63,4 +63,4 @@ def test_consulta_obligaciones_con_el_publico(operacion, consulta, dependencia, 
     assert tuple(Decimal(corte[campo]) if corte[campo] is not None else None for campo in campos) == esperado
     if operacion == "historico":
         assert corte["fecha_comparacion"] == "2024-02-29"
-        assert corte["cuentas_sin_saldo"] == ["2105"]
+    assert corte["cuentas_sin_saldo"] == (["2105"] if operacion == "historico" else [])
