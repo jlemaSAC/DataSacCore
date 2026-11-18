@@ -353,6 +353,8 @@ class MongoColocacionHistoricoRepository:
                     "agencia": _texto_normalizado("Agencia"),
                     "tipo_prestamo": _texto_normalizado("TipoPrestamo"),
                     "asesor": _texto_normalizado("NombreAsesor", "CodigoAsesor"),
+                    "tasa_nominal": _numero_valido("TasaNominal"),
+                    "tasa_real": _numero_valido("TasaAnual"),
                     "fecha_adjudicacion": {
                         "$convert": {
                             "input": "$FechaAdjudicacion",
@@ -876,4 +878,6 @@ def _prestamo_adjudicado_desde_documento(row: MongoDocument) -> PrestamoAdjudica
         tipo_prestamo=str(row.get("tipo_prestamo") or "SIN DATOS"),
         asesor=str(row.get("asesor") or "SIN DATOS"),
         fecha_adjudicacion=fecha,
+        tasa_nominal=_numero_detalle(row.get("tasa_nominal")),
+        tasa_real=_numero_detalle(row.get("tasa_real")),
     )

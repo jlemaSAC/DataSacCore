@@ -304,6 +304,8 @@ class SqlColocacionHistoricoRepository:
                 TipoPrestamo.nombre.label("tipo_prestamo"),
                 func.coalesce(Usuario.nombre, Prestamo.codigo_usuario).label("asesor"),
                 Prestamo.fecha_adjudicacion.label("fecha_adjudicacion"),
+                Prestamo.tasa.label("tasa_nominal"),
+                Prestamo.tea.label("tasa_real"),
             )
             .select_from(Prestamo)
             .join(PrestamoCliente, PrestamoCliente.id_prestamo == Prestamo.id)
@@ -339,6 +341,8 @@ class SqlColocacionHistoricoRepository:
                 fecha_adjudicacion=row.fecha_adjudicacion.date()
                 if isinstance(row.fecha_adjudicacion, datetime)
                 else row.fecha_adjudicacion,
+                tasa_nominal=float(row.tasa_nominal) if row.tasa_nominal is not None else None,
+                tasa_real=float(row.tasa_real) if row.tasa_real is not None else None,
             )
             for row in self.db.execute(statement)
         ]
