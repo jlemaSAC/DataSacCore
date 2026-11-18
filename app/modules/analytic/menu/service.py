@@ -7,6 +7,8 @@ from app.modules.analytic.menu.repositories.mongo_menu_repository import (
     MongoMenuAnalyticAdminRepository,
 )
 from app.modules.analytic.menu.schemas import (
+    CambiosAccesoAnalytic,
+    EstadoAccesosAnalytic,
     MenuAnalyticAdminResponse,
     MenuAnalyticAdminTreeResponse,
     MenuAnalyticCreateRequest,
@@ -18,6 +20,8 @@ from app.modules.analytic.menu.schemas import (
     RolPermisoAnalyticAdminResponse,
     RolPermisoAnalyticCreateRequest,
 )
+from app.modules.seguridad.roles.repositories.sql_rol_repository import SqlRolRepository
+from app.modules.seguridad.roles.schemas import RolResponse
 
 
 class MenuAnalyticAdminService:
@@ -32,6 +36,30 @@ class MenuAnalyticAdminService:
         self.db = db
         self.repository = repository
         self.sql_repository = sql_repository or SqlAuthRepository(db)
+
+    def get_access_state(self, auth_context: AuthContext) -> EstadoAccesosAnalytic:
+        self._validate_admin_user(auth_context)
+        cargos = self._list_roles()
+        menu, asignaciones = self.repository.get_access_state()
+        return EstadoAccesosAnalytic(menu=menu, cargos=cargos, asignaciones=asignaciones)
+
+    def save_access_changes(
+        self, auth_context: AuthContext, data: CambiosAccesoAnalytic,
+    ) -> EstadoAccesosAnalytic:
+        self._validate_admin_user(auth_context)
+        cargos = self._list_roles()
+        roles = {cargo.codigo: cargo for cargo in cargos}
+        for cambio in data.cambios:
+            rol = roles.get(cambio.rol_codigo)
+            if cambio.conceder and (rol is None or not rol.activo):
+                raise HTTPException(status_code=422, detail=f"El cargo {cambio.rol_codigo} no está activo.")
+
+        self.repository.save_access_changes(data.cambios, {cargo.codigo: cargo.nombre for cargo in cargos})
+        menu, asignaciones = self.repository.get_access_state()
+        return EstadoAccesosAnalytic(menu=menu, cargos=cargos, asignaciones=asignaciones)
+
+    def _list_roles(self) -> list[RolResponse]:
+        return [RolResponse.model_validate(rol) for rol in SqlRolRepository(self.db).list_roles()]
 
     def get_menu(
         self,

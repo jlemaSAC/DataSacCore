@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends
 
 from app.modules.analytic.menu.dependencies import get_analytic_menu_service
 from app.modules.analytic.menu.schemas import (
+    CambiosAccesoAnalytic,
+    EstadoAccesosAnalytic,
     MenuAnalyticAdminResponse,
     MenuAnalyticAdminTreeResponse,
     MenuAnalyticCreateRequest,
@@ -19,6 +21,23 @@ from app.modules.auth.schemas import AuthContext
 
 
 router = APIRouter()
+
+
+@router.get("/accesos", response_model=EstadoAccesosAnalytic, tags=["Analytic Sac - Admin"])
+def consultar_accesos(
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: MenuAnalyticAdminService = Depends(get_analytic_menu_service),
+) -> EstadoAccesosAnalytic:
+    return service.get_access_state(auth_context)
+
+
+@router.patch("/accesos", response_model=EstadoAccesosAnalytic, tags=["Analytic Sac - Admin"])
+def guardar_accesos(
+    body: CambiosAccesoAnalytic,
+    auth_context: AuthContext = Depends(get_current_auth_context),
+    service: MenuAnalyticAdminService = Depends(get_analytic_menu_service),
+) -> EstadoAccesosAnalytic:
+    return service.save_access_changes(auth_context, body)
 
 
 @router.get(
