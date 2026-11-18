@@ -1,7 +1,8 @@
 # Evolución del balance general
 
 Pantalla: `/dashboard/evolucion-de-cuentas/evolucion-balance-general`.
-Frontend: `src/app/features/evolucion-cuentas/evolucion-balance-general`.
+Frontend: configuración en `src/app/features/evolucion-cuentas/balance-general` y
+componentes compartidos en `src/app/features/evolucion-cuentas/shared/evolucion`.
 Backend: `app/modules/analytic/evolucion_cuentas/evolucion_balance_general`.
 
 `POST /analytic/evolucion-de-cuentas/evolucion-balance-general` requiere Bearer

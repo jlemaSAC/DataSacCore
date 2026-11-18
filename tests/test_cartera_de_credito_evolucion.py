@@ -34,8 +34,8 @@ class Repositorio:
                 "1401": 0,
             },
         }
-        assert len(codigos_cuenta) == len(set(codigos_cuenta)) == 40
-        assert "1499" not in codigos_cuenta
+        assert len(codigos_cuenta) == len(set(codigos_cuenta))
+        assert "1499" in codigos_cuenta
         return [
             {"fecha": fecha, "codigo_cuenta": codigo, "saldo": Decimal(importe)}
             for fecha in fechas
@@ -47,8 +47,8 @@ class Repositorio:
 @pytest.mark.parametrize(
     "ruta,modo,esperado",
     [
-        ("evolucion", {"frecuencia": "mensual"}, (300, 49, 6, 34, 0)),
-        ("historico", {"tipo": "mensual"}, (100, 40, 3, None, 0)),
+        ("evolucion", {"frecuencia": "mensual"}, (325, 54, 8, 35, 0)),
+        ("historico", {"tipo": "mensual"}, (115, 45, 5, None, 0)),
     ],
 )
 def test_endpoints_cartera(ruta, modo, esperado):
@@ -62,6 +62,9 @@ def test_endpoints_cartera(ruta, modo, esperado):
     assert cliente.post(url, json=body).status_code == 401
     app.dependency_overrides[get_current_auth_context] = lambda: object()
     respuesta = cliente.post(url, json=body)
+    if 'historico-' in url:
+        nueva_ruta = url.replace('historico-', 'variacion-')
+        assert cliente.post(nueva_ruta, json=body).json() == respuesta.json()
     assert respuesta.status_code == 200
     corte, = respuesta.json()["datos"]
     claves = ("cartera_total", "consumo", "inmobiliario", "microcredito", "productivo")
@@ -69,3 +72,11 @@ def test_endpoints_cartera(ruta, modo, esperado):
     if ruta == "historico":
         assert corte["fecha_comparacion"] == "2024-02-29"
         assert corte["cuentas_sin_saldo"] == ["microcredito"]
+
+
+def test_cartera_total_sin_ajuste_o_sin_cuenta_principal():
+    servicio = EvolucionCarteraService(Repositorio())
+    fecha = date(2024, 3, 31)
+    assert servicio.valores_corte({(fecha, "14"): Decimal("100")}, fecha, {})["cartera_total"] == 100
+    assert servicio.valores_corte({(fecha, "14"): Decimal("100"), (fecha, "1499"): Decimal("20")}, fecha, {})["cartera_total"] == 80
+    assert servicio.valores_corte({(fecha, "1499"): Decimal("20")}, fecha, {})["cartera_total"] is None

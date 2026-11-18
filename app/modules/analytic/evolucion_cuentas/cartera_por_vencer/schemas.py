@@ -11,10 +11,15 @@ from app.modules.analytic.evolucion_cuentas.variacion_balance_general.schemas im
 
 class CorteCarteraPorVencer(BaseModel):
     fecha: date
+    cartera_total: Decimal | None
     consumo: Decimal | None
     inmobiliario: Decimal | None
     microcredito: Decimal | None
     productivo: Decimal | None
+    consumo_refinanciado: Decimal | None
+    consumo_reestructurado: Decimal | None
+    microcredito_refinanciado: Decimal | None
+    microcredito_reestructurado: Decimal | None
     cuentas_sin_saldo: list[str]
 
 

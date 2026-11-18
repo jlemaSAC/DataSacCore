@@ -30,7 +30,8 @@ def consultar_evolucion_obligaciones_con_el_publico(
     return service.consultar(body)
 
 
-@router.post("/historico-obligaciones-con-el-publico", response_model=HistoricoObligacionesConElPublicoResponse)
+@router.post("/variacion-obligaciones-con-el-publico", response_model=HistoricoObligacionesConElPublicoResponse)
+@router.post("/historico-obligaciones-con-el-publico", response_model=HistoricoObligacionesConElPublicoResponse, include_in_schema=False)
 def consultar_historico_obligaciones_con_el_publico(
     body: ConsultaVariacion,
     service: HistoricoObligacionesConElPublicoService = Depends(get_historico_obligaciones_con_el_publico_service),

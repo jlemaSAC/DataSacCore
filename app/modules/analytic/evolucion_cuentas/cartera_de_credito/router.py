@@ -30,7 +30,8 @@ def consultar_evolucion_cartera(
     return service.consultar(body)
 
 
-@router.post("/historico-cartera-de-credito", response_model=HistoricoCarteraResponse)
+@router.post("/variacion-cartera-de-credito", response_model=HistoricoCarteraResponse)
+@router.post("/historico-cartera-de-credito", response_model=HistoricoCarteraResponse, include_in_schema=False)
 def consultar_historico_cartera(
     body: ConsultaVariacion,
     service: HistoricoCarteraService = Depends(get_historico_cartera_service),

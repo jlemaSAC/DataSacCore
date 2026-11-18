@@ -14,6 +14,7 @@ class CorteObligacionesConElPublico(BaseModel):
     depositos_plazo: Decimal | None
     depositos_vista: Decimal | None
     depositos_restringidos: Decimal | None
+    obligaciones_publico: Decimal | None
     cuentas_sin_saldo: list[str]
 
 

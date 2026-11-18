@@ -23,10 +23,10 @@ class Repositorio:
         return {"id_empresa": 1, "nombre": "CONSOLIDADO"}
 
     def obtener_saldos_fechas(self, *, fechas, id_agencia, id_empresa, codigos_cuenta):
-        assert codigos_cuenta == ("2103", "2101", "2105")
+        assert codigos_cuenta == ("2103", "2101", "2105", "21")
         saldos = {
-            date(2024, 2, 29): {"2103": 75, "2101": 20},
-            date(2024, 3, 31): {"2103": 100, "2101": 0, "2105": 32},
+            date(2024, 2, 29): {"2103": 75, "2101": 20, "21": 100},
+            date(2024, 3, 31): {"2103": 100, "2101": 0, "2105": 32, "21": 140},
         }
         return [
             {"fecha": fecha, "codigo_cuenta": codigo, "saldo": Decimal(importe)}
@@ -39,9 +39,9 @@ class Repositorio:
     "operacion,consulta,dependencia,servicio,esperado",
     [
         ("evolucion", {"frecuencia": "mensual"}, get_evolucion_obligaciones_con_el_publico_service,
-         EvolucionObligacionesConElPublicoService, (100, 0, 32)),
+         EvolucionObligacionesConElPublicoService, (100, 0, 32, 140)),
         ("historico", {"tipo": "mensual"}, get_historico_obligaciones_con_el_publico_service,
-         HistoricoObligacionesConElPublicoService, (25, -20, None)),
+         HistoricoObligacionesConElPublicoService, (25, -20, None, 40)),
     ],
 )
 def test_consulta_obligaciones_con_el_publico(operacion, consulta, dependencia, servicio, esperado):
@@ -54,9 +54,12 @@ def test_consulta_obligaciones_con_el_publico(operacion, consulta, dependencia, 
     assert cliente.post(url, json=body).status_code == 401
     app.dependency_overrides[get_current_auth_context] = lambda: object()
     respuesta = cliente.post(url, json=body)
+    if 'historico-' in url:
+        nueva_ruta = url.replace('historico-', 'variacion-')
+        assert cliente.post(nueva_ruta, json=body).json() == respuesta.json()
     assert respuesta.status_code == 200
     corte, = respuesta.json()["datos"]
-    campos = ("depositos_plazo", "depositos_vista", "depositos_restringidos")
+    campos = ("depositos_plazo", "depositos_vista", "depositos_restringidos", "obligaciones_publico")
     assert tuple(Decimal(corte[campo]) if corte[campo] is not None else None for campo in campos) == esperado
     if operacion == "historico":
         assert corte["fecha_comparacion"] == "2024-02-29"
