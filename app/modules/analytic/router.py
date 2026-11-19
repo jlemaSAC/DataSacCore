@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.modules.analytic.analisis_contable.router import router as analisis_contable_router
+from app.modules.analytic.evolucion_cuentas.router import router as evolucion_cuentas_router
 
 from app.modules.analytic.cartera_de_credito.comparativo_cartera.router import (
     router as comparativo_cartera_router,
@@ -47,6 +48,7 @@ router.include_router(historico_rendimientos_router)
 router.include_router(costo_fondeo_router)
 router.include_router(historico_spread_tasa_router)
 router.include_router(analisis_contable_router)
+router.include_router(evolucion_cuentas_router)
 router.include_router(ahorro_vista_router)
 router.include_router(inversiones_router)
 router.include_router(comparativo_cartera_router)

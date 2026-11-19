@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 
 from fastapi.testclient import TestClient
@@ -128,6 +129,35 @@ class _FakeColocacionHistoricoService:
         ]
 
 
+class _FakeAdjudicadosConTasas(_FakeColocacionHistoricoService):
+    def obtener_prestamos_adjudicados_resumen_por_rango(
+        self, fecha_inicio, fecha_fin, fecha_hoy, agencias
+    ):
+        prestamo, = super().obtener_prestamos_adjudicados_resumen_por_rango(
+            fecha_inicio, fecha_fin, fecha_hoy, agencias
+        )
+        return [
+            replace(prestamo, tasa_nominal=10.0, tasa_real=12.0),
+            replace(
+                prestamo,
+                numero_operacion="segunda",
+                valor=400.0,
+                tasa_nominal=20.0,
+                tipo_prestamo="EXTRAORDINARIO",
+            ),
+            replace(
+                prestamo,
+                numero_operacion="tercera",
+                valor=100.0,
+                agencia="NORTE",
+                asesor="ANA PEREZ",
+                producto="CONSUMO",
+                tasa_nominal=-1.0,
+                tasa_real=0.0,
+            ),
+        ]
+
+
 def test_resumen_actual_con_adjudicados_retorna_el_detalle_directamente() -> None:
     service = ResumenColocacionService(_FakeColocacionHistoricoService())  # type: ignore[arg-type]
 
@@ -231,6 +261,7 @@ def test_endpoint_resumen_actual_adjudicados_retorna_detalle_por_agencia() -> No
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert response.json()["resumen_por_dimension"]["agencia"][0]["campo"] == "MATRIZ"
     assert response.json()["prestamos_adjudicados"] == [
         {
             "producto": "MICROCREDITO",
@@ -241,3 +272,31 @@ def test_endpoint_resumen_actual_adjudicados_retorna_detalle_por_agencia() -> No
             "fecha_adjudicacion": "2026-08-17",
         }
     ]
+
+
+def test_resumen_por_dimension_calcula_promedios_por_operacion_con_tasa_valida() -> None:
+    service = ResumenColocacionService(_FakeAdjudicadosConTasas())  # type: ignore[arg-type]
+
+    respuesta = service.obtener_resumen_actual_con_adjudicados(
+        InputResumenActualColocacion(
+            fecha_inicio=date(2026, 8, 15),
+            fecha_fin=date(2026, 8, 25),
+        ),
+        _auth_context(),
+    )
+
+    resumen = respuesta.resumen_por_dimension
+    matriz, norte = resumen["agencia"]
+    assert matriz.model_dump() == {
+        "campo": "MATRIZ",
+        "monto_colocado": 1400.0,
+        "numero_operaciones": 2,
+        "tasa_promedio_colocacion": 15.0,
+        "tasa_real_promedio_colocacion": 12.0,
+        "monto_promedio": 700.0,
+    }
+    assert norte.tasa_promedio_colocacion is None
+    assert norte.tasa_real_promedio_colocacion == 0.0
+    assert resumen["asesor"][0].campo == "JUAN PEREZ"
+    assert resumen["producto"][0].campo == "MICROCREDITO"
+    assert resumen["tipo_prestamo"][0].numero_operaciones == 2

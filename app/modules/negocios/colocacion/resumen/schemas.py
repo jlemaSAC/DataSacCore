@@ -156,6 +156,18 @@ class PrestamoAdjudicadoResponse(BaseModel):
     fecha_adjudicacion: date
 
 
+DimensionResumenActualColocacion = Literal["agencia", "asesor", "producto", "tipo_prestamo"]
+
+
+class FilaResumenActualColocacion(BaseModel):
+    campo: str
+    monto_colocado: float
+    numero_operaciones: int
+    tasa_promedio_colocacion: float | None
+    tasa_real_promedio_colocacion: float | None
+    monto_promedio: float
+
+
 class ResumenActualColocacionResponse(BaseModel):
     fecha_inicio: date
     fecha_fin: date
@@ -181,6 +193,7 @@ class ResumenActualColocacionConAdjudicadosResponse(BaseModel):
     actual: RangoResumenActualColocacion
     mes_anterior: RangoResumenActualColocacion
     anio_anterior: RangoResumenActualColocacion
+    resumen_por_dimension: dict[DimensionResumenActualColocacion, list[FilaResumenActualColocacion]]
     prestamos_adjudicados: list[PrestamoAdjudicadoResponse] = Field(
         default_factory=list,
         description="Préstamos adjudicados del rango actual, sin paginación.",

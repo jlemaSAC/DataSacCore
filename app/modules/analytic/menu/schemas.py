@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.modules.seguridad.roles.schemas import RolResponse
 
 
 class MenuAnalyticResponse(BaseModel):
@@ -101,6 +103,26 @@ class MenuAnalyticDeleteResponse(BaseModel):
     permisos_eliminados: int
     rol_permisos_eliminados: int
     detail: str
+
+
+class CambioAccesoAnalytic(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    menu_id: str = Field(min_length=1)
+    rol_codigo: str = Field(min_length=1)
+    conceder: bool
+
+
+class CambiosAccesoAnalytic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cambios: list[CambioAccesoAnalytic] = Field(min_length=1, max_length=10000)
+
+
+class EstadoAccesosAnalytic(BaseModel):
+    menu: list[MenuAnalyticAdminTreeResponse]
+    cargos: list[RolResponse]
+    asignaciones: dict[str, list[str]]
 
 
 MenuAnalyticAdminTreeResponse.model_rebuild()

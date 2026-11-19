@@ -1,14 +1,17 @@
 import calendar
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from math import floor
+from math import floor, fsum, isfinite
+from statistics import fmean
 
 from fastapi import HTTPException
 
 from app.modules.analytic.colocacion.colocacion_historico.domain import (
     ColocacionAgrupada,
     DimensionesColocacion,
+    PrestamoAdjudicado,
     TotalesResumenColocacion,
 )
 from app.modules.analytic.colocacion.colocacion_historico.service import (
@@ -18,9 +21,11 @@ from app.modules.auth.schemas import AuthContext
 from app.modules.negocios.colocacion.resumen.schemas import (
     AgrupacionesResumenColocacion,
     DetalleResumenColocacionResponse,
+    DimensionResumenActualColocacion,
     FilaAgrupacionColocacion,
     FilaDetalleColocacion,
     FilaComparativaColocacion,
+    FilaResumenActualColocacion,
     ColocacionPorAgencia,
     InputDetalleResumenColocacion,
     InputResumenActualColocacion,
@@ -215,6 +220,7 @@ class ResumenColocacionService:
             )
             return ResumenActualColocacionConAdjudicadosResponse(
                 **resumen.model_dump(exclude={"colocacion_por_agencia"}),
+                resumen_por_dimension=_resumir_adjudicados_por_dimension(prestamos),
                 prestamos_adjudicados=[
                     PrestamoAdjudicadoResponse(
                         producto=prestamo.producto,
@@ -538,55 +544,45 @@ def _monto(valor: float) -> float:
     return round(valor, 2)
 
 
-def _resumir_rango_actual_colocacion(
-    fecha_inicio: date,
-    fecha_fin: date,
-    agrupaciones: dict[DimensionesColocacion, ColocacionAgrupada],
-) -> RangoResumenActualColocacion:
-    filas = list(agrupaciones.values())
-    numero_operaciones = sum(fila.operaciones for fila in filas)
-    suma_tasa_nominal = sum(
-        fila.dimensiones.tasa_valor * fila.operaciones
-        for fila in filas
-        if fila.dimensiones.tasa_valor is not None
+def _resumir_adjudicados_por_dimension(
+    prestamos: list[PrestamoAdjudicado],
+) -> dict[DimensionResumenActualColocacion, list[FilaResumenActualColocacion]]:
+    dimensiones: tuple[DimensionResumenActualColocacion, ...] = (
+        "agencia",
+        "asesor",
+        "producto",
+        "tipo_prestamo",
     )
-    operaciones_tasa_nominal = sum(
-        fila.operaciones
-        for fila in filas
-        if fila.dimensiones.tasa_valor is not None
-    )
-    suma_tasa_real = sum(
-        fila.dimensiones.tasa_real_valor * fila.operaciones
-        for fila in filas
-        if fila.dimensiones.tasa_real_valor is not None
-    )
-    operaciones_tasa_real = sum(
-        fila.operaciones
-        for fila in filas
-        if fila.dimensiones.tasa_real_valor is not None
-    )
-    tasa_nominal = (
-        suma_tasa_nominal / operaciones_tasa_nominal
-        if operaciones_tasa_nominal
-        else None
-    )
-    tasa_real = (
-        suma_tasa_real / operaciones_tasa_real
-        if operaciones_tasa_real
-        else None
-    )
-    colocacion_general = sum(fila.saldo_inicial for fila in filas)
-    return RangoResumenActualColocacion(
-        fecha_inicio=fecha_inicio,
-        fecha_fin=fecha_fin,
-        colocacion_general=round(colocacion_general, 2),
-        monto_promedio=round(colocacion_general / numero_operaciones, 2) if numero_operaciones else 0.0,
-        tasa_promedio_colocacion=(
-            round(tasa_nominal, 4) if tasa_nominal is not None else None
-        ),
-        tasa_real_promedio_colocacion=(round(tasa_real, 4) if tasa_real is not None else None),
-        numero_operaciones=numero_operaciones,
-    )
+    resultado: dict[DimensionResumenActualColocacion, list[FilaResumenActualColocacion]] = {}
+    for dimension in dimensiones:
+        grupos: dict[str, list[PrestamoAdjudicado]] = defaultdict(list)
+        for prestamo in prestamos:
+            grupos[getattr(prestamo, dimension)].append(prestamo)
+
+        filas: list[FilaResumenActualColocacion] = []
+        for campo, operaciones in grupos.items():
+            monto = fsum(prestamo.valor for prestamo in operaciones)
+            filas.append(
+                FilaResumenActualColocacion(
+                    campo=campo,
+                    monto_colocado=_monto(monto),
+                    numero_operaciones=len(operaciones),
+                    tasa_promedio_colocacion=_promediar_tasas(
+                        [prestamo.tasa_nominal for prestamo in operaciones]
+                    ),
+                    tasa_real_promedio_colocacion=_promediar_tasas(
+                        [prestamo.tasa_real for prestamo in operaciones]
+                    ),
+                    monto_promedio=_monto(monto / len(operaciones)),
+                )
+            )
+        resultado[dimension] = sorted(filas, key=lambda fila: (-fila.monto_colocado, fila.campo))
+    return resultado
+
+
+def _promediar_tasas(tasas: list[float | None]) -> float | None:
+    validas = [tasa for tasa in tasas if tasa is not None and isfinite(tasa) and tasa >= 0]
+    return round(fmean(validas), 4) if validas else None
 
 
 def _resumir_totales_rango_actual_colocacion(
@@ -654,8 +650,3 @@ def _totales_por_agencia(
             operaciones_actuales + fila.operaciones,
         )
     return totales
-
-
-def _mover_anio(fecha: date, cantidad_anios: int) -> date:
-    anio = fecha.year + cantidad_anios
-    return date(anio, fecha.month, min(fecha.day, calendar.monthrange(anio, fecha.month)[1]))

@@ -87,6 +87,8 @@ class PrestamoAdjudicado:
     tipo_prestamo: str
     asesor: str
     fecha_adjudicacion: date
+    tasa_nominal: float | None = None
+    tasa_real: float | None = None
 
 
 @dataclass(frozen=True)

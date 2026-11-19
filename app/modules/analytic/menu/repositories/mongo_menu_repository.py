@@ -1,13 +1,16 @@
 from collections import defaultdict
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Any
 
 from bson import ObjectId, errors
 from fastapi import HTTPException
-from pymongo import ReturnDocument
+from pymongo import ReturnDocument, UpdateMany, UpdateOne
 from pymongo.database import Database
+from pymongo.errors import PyMongoError
 
 from app.modules.analytic.menu.schemas import (
+    CambioAccesoAnalytic,
     MenuAnalyticAdminResponse,
     MenuAnalyticAdminTreeResponse,
     MenuAnalyticCreateRequest,
@@ -61,6 +64,111 @@ class MongoMenuAnalyticAdminRepository:
             for permiso in permisos
             if permiso.get("codigo")
         }
+
+    def get_access_state(self) -> tuple[list[MenuAnalyticAdminTreeResponse], dict[str, list[str]]]:
+        tree = self._access_tree()
+        nodes = self._access_nodes(tree)
+        roles_by_permission: dict[str, set[str]] = defaultdict(set)
+        for row in self.rol_permisos_collection.find({
+            "permiso_codigo": {"$in": list({node.permiso_requerido for node in nodes.values()})},
+            "activo": True,
+        }):
+            roles_by_permission[row["permiso_codigo"]].add(row["rol_codigo"])
+        return tree, {
+            node.id: sorted(roles_by_permission[node.permiso_requerido])
+            for node in nodes.values()
+        }
+
+    def save_access_changes(self, changes: list[CambioAccesoAnalytic], role_names: dict[str, str]) -> None:
+        nodes = self._access_nodes(self._access_tree())
+        assignments: dict[tuple[str, str], bool] = {}
+        for change in changes:
+            node = nodes.get(change.menu_id)
+            if node is None:
+                raise HTTPException(status_code=409, detail="Un módulo o pantalla ya no está disponible. Actualiza los accesos.")
+            key = (node.permiso_requerido, change.rol_codigo)
+            if key in assignments and assignments[key] != change.conceder:
+                raise HTTPException(status_code=422, detail="El lote incluye decisiones opuestas para el mismo permiso y cargo.")
+            assignments[key] = change.conceder
+
+        codes = sorted({permission for permission, _ in assignments})
+        rows_by_key: dict[tuple[str, str], list[MongoDocument]] = defaultdict(list)
+        for row in self.rol_permisos_collection.find({"permiso_codigo": {"$in": codes}}):
+            rows_by_key[(row["permiso_codigo"], row["rol_codigo"])].append(row)
+
+        operations: list[UpdateOne | UpdateMany] = []
+        now = self._fecha_actual_utc()
+        for (permission, role), grant in assignments.items():
+            pair = {"permiso_codigo": permission, "rol_codigo": role}
+            rows = rows_by_key[(permission, role)]
+            if grant:
+                if any(row.get("activo") is True for row in rows):
+                    continue
+                if rows:
+                    operations.append(UpdateOne(
+                        {**pair, "_id": rows[0]["_id"]},
+                        {"$set": {"activo": True, "updated_at": now}},
+                    ))
+                else:
+                    # Stable ID prevents duplicate inserts when the same grant is retried concurrently.
+                    relation_id = ObjectId(sha256(f"{permission}\0{role}".encode()).digest()[:12])
+                    operations.append(UpdateOne(pair, {
+                        "$set": {"activo": True, "updated_at": now},
+                        "$setOnInsert": {
+                            "_id": relation_id, "created_at": now, "rol_nombre": role_names[role],
+                        },
+                    }, upsert=True))
+            else:
+                operations.append(UpdateMany(
+                    {**pair, "activo": True},
+                    {"$set": {"activo": False, "updated_at": now}},
+                ))
+
+        if operations:
+            try:
+                self.rol_permisos_collection.bulk_write(operations, ordered=True)
+            except PyMongoError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="El guardado se interrumpió. Algunas asignaciones pueden haberse aplicado. Reintenta para completar el borrador.",
+                ) from exc
+
+        active = {
+            (row["permiso_codigo"], row["rol_codigo"])
+            for row in self.rol_permisos_collection.find({"permiso_codigo": {"$in": codes}, "activo": True})
+        }
+        if any((key in active) != grant for key, grant in assignments.items()):
+            raise HTTPException(
+                status_code=409,
+                detail="Algunas asignaciones cambiaron durante el guardado. Revisa el borrador antes de reintentar.",
+            )
+
+    def _access_tree(self) -> list[MenuAnalyticAdminTreeResponse]:
+        permissions = {
+            row["codigo"]
+            for row in self.permisos_collection.find({"activo": True}, {"codigo": 1})
+        }
+
+        def visible(nodes: list[MenuAnalyticAdminTreeResponse]) -> list[MenuAnalyticAdminTreeResponse]:
+            return [
+                node.model_copy(update={"children": visible(node.children)})
+                for node in nodes
+                if node.activo and node.permiso_requerido in permissions
+            ]
+
+        return visible([node for node in self.list_menu_tree() if node.id_padre is None])
+
+    @staticmethod
+    def _access_nodes(
+        tree: list[MenuAnalyticAdminTreeResponse],
+    ) -> dict[str, MenuAnalyticAdminTreeResponse]:
+        nodes: dict[str, MenuAnalyticAdminTreeResponse] = {}
+        pending = tree.copy()
+        while pending:
+            node = pending.pop()
+            nodes[node.id] = node
+            pending.extend(node.children)
+        return nodes
 
     def get_permission_documents_by_roles(
         self,
