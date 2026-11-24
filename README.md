@@ -2,6 +2,11 @@
 
 Proyecto base mínimo con FastAPI.
 
+## Documentación para el equipo
+
+- [Guía de arquitectura y desarrollo de DataSacCore y DataSacWebApp](docs/GUIA_DESARROLLO_EQUIPO.md).
+- [Revisión técnica y resultados de validación](docs/REVISION_TECNICA_PROYECTOS.md).
+
 ## Requisitos
 
 - Python 3.10 o superior
