@@ -3,10 +3,23 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ..schemas import FiltroSaldo, TiempoInactividad
+from ...schemas import FiltroSaldo
+from ...sql_cuentas import (
+    AGENCIA_EXPANDIBLE,
+    CARGO_OFICIAL,
+    NOMBRE_CARGO,
+    PREDICADOS_SALDO,
+    RESUMEN,
+    SALDO_TOTAL_CENTAVOS,
+    SALDOS_POR_CUENTA,
+    TABLAS_CUENTA_BASE,
+    TITULAR_PRINCIPAL,
+    filtros_detalle,
+)
+from ..schemas import TiempoInactividad
 
 
 # Cada registro conserva el estado anterior. El anterior del siguiente cambio
@@ -41,14 +54,7 @@ _SECUENCIA_INACTIVACION = """
 """
 _HISTORIAL_INACTIVACION = _SECUENCIA_INACTIVACION.format(fuente_cuentas="AHORROS.CUENTA")
 
-_TABLAS_CUENTA_BASE = """
-    FROM AHORROS.CUENTA AS C
-    INNER JOIN AHORROS.TIPO_CUENTA AS TC
-        ON TC.CODIGO = C.CODIGOTIPOCUENTA
-    INNER JOIN GENERAL.MONEDA AS M
-        ON M.ID = C.IDMONEDA AND M.CODIGO = N'USD'
-"""
-_TABLAS_CUENTA = _TABLAS_CUENTA_BASE + """
+_TABLAS_CUENTA = TABLAS_CUENTA_BASE + """
     LEFT JOIN UltimaInactivacion AS UI ON UI.NUMEROCUENTA = C.NUMERO
 """
 
@@ -68,48 +74,6 @@ _CUENTAS_CANDIDATAS = """
         {filtros_cuentas} {filtros_seleccion}
     )
 """
-
-_AGENCIA_EXPANDIBLE = bindparam("ids_agencia", expanding=True)
-
-_CARGO_OFICIAL = """
-    OUTER APPLY (
-        SELECT TOP (1) CARGO.NOMBRE
-        FROM NOMINA.EMPLEADO_USUARIO AS EU
-        INNER JOIN NOMINA.EMPLEADO AS E ON E.ID = EU.IDEMPLEADO
-        INNER JOIN NOMINA.CARGO AS CARGO ON CARGO.ID = E.IDCARGO
-        WHERE EU.CODIGOUSUARIO = {usuario}
-        ORDER BY E.FECHAPROCESO DESC, E.ID DESC
-    ) AS Cargo
-"""
-_NOMBRE_CARGO = "COALESCE(NULLIF(LTRIM(RTRIM(Cargo.NOMBRE)), N''), N'SIN CARGO')"
-
-_TITULAR_PRINCIPAL = """
-    OUTER APPLY (
-        SELECT TOP (1) P.NOMBRE AS titular
-        FROM AHORROS.CUENTA_CLIENTE AS CC
-        INNER JOIN CLIENTES.CLIENTE AS CL ON CL.ID = CC.IDCLIENTE
-        INNER JOIN SUJETO.PERSONA AS P ON P.ID = CL.IDPERSONA
-        WHERE CC.NUMEROCUENTA = C.NUMERO AND CC.PRINCIPAL = 1
-        ORDER BY CC.IDCLIENTE
-    ) AS T
-"""
-_SALDOS_POR_CUENTA = """
-    OUTER APPLY (
-        SELECT SUM(CASE WHEN TI.ESDISPONIBLE = 1 THEN CI.SALDO ELSE 0 END) AS disponible,
-               SUM(CI.SALDO) AS total
-        FROM AHORROS.CUENTA_ITEMSALDO AS CI
-        INNER JOIN AHORROS.ITEMSALDO AS I ON I.ID = CI.IDITEM
-        INNER JOIN AHORROS.TIPO_ITEMSALDO AS TI ON TI.ID = I.IDTIPOITEM
-        WHERE CI.NUMEROCUENTA = C.NUMERO AND I.SUMASALDO = 1
-    ) AS S
-"""
-
-_SALDO_TOTAL_CENTAVOS = "ROUND(COALESCE(S.total, 0), 2)"
-_PREDICADOS_SALDO = {
-    None: "",
-    "cero": f" AND {_SALDO_TOTAL_CENTAVOS} = 0",
-    "con_saldo": f" AND {_SALDO_TOTAL_CENTAVOS} <> 0",
-}
 
 _RANGOS_INACTIVIDAD = {
     "0_1": (0, 1),
@@ -168,29 +132,6 @@ def _filtro_cuentas(
     return filtros, params
 
 
-_RESUMEN = """
-    WITH {ctes_cuentas},
-    Agrupados AS (
-    SELECT C.IDAGENCIA AS id_agencia, A.NOMBRE AS agencia,
-           C.CODIGOUSUARIOOFICIAL AS codigo_oficial, U.NOMBRE AS oficial,
-           C.CODIGOTIPOCUENTA AS codigo_tipo_cuenta, C.tipo_cuenta,
-           COUNT_BIG(*) AS cantidad_cuentas,
-           SUM(COALESCE(S.disponible, 0)) AS valor_disponible,
-           SUM({valor_total_cuenta}) AS valor_total
-    FROM {fuente_cuentas} AS C
-    INNER JOIN GENERAL.AGENCIA AS A ON A.ID = C.IDAGENCIA
-    INNER JOIN SEGURIDAD.USUARIO AS U ON U.USUARIO = C.CODIGOUSUARIOOFICIAL
-    {saldos_por_cuenta}
-    WHERE 1 = 1 {predicado_saldo}
-    GROUP BY C.IDAGENCIA, A.NOMBRE, C.CODIGOUSUARIOOFICIAL,
-             U.NOMBRE, C.CODIGOTIPOCUENTA, C.tipo_cuenta
-    )
-    SELECT X.*, {nombre_cargo} AS cargo
-    FROM Agrupados AS X
-    {cargo_oficial}
-"""
-
-
 class SqlControlCuentasInactivasRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -203,7 +144,7 @@ class SqlControlCuentasInactivasRepository:
             ids_agencia, inactividad, fecha_sistema, incluir_filtro_cuentas=False,
         )
         ctes_cuentas = _CUENTAS_CANDIDATAS.format(
-            tablas_cuenta=_TABLAS_CUENTA_BASE, fuente_cargo="",
+            tablas_cuenta=TABLAS_CUENTA_BASE, fuente_cargo="",
             filtros_cuentas=_CUENTAS_INACTIVAS, filtros_seleccion="",
         )
         fuente_cuentas = "CuentasCandidatas"
@@ -219,15 +160,15 @@ class SqlControlCuentasInactivasRepository:
                 )
             """
             fuente_cuentas = "CuentasFiltradas"
-        consulta = text(_RESUMEN.format(
+        consulta = text(RESUMEN.format(
             ctes_cuentas=ctes_cuentas,
             fuente_cuentas=fuente_cuentas,
-            saldos_por_cuenta=_SALDOS_POR_CUENTA,
-            predicado_saldo=_PREDICADOS_SALDO[saldo],
-            valor_total_cuenta=_SALDO_TOTAL_CENTAVOS if saldo else "COALESCE(S.total, 0)",
-            nombre_cargo=_NOMBRE_CARGO,
-            cargo_oficial=_CARGO_OFICIAL.format(usuario="X.codigo_oficial"),
-        )).bindparams(_AGENCIA_EXPANDIBLE)
+            saldos_por_cuenta=SALDOS_POR_CUENTA,
+            predicado_saldo=PREDICADOS_SALDO[saldo],
+            valor_total_cuenta=SALDO_TOTAL_CENTAVOS if saldo else "COALESCE(S.total, 0)",
+            nombre_cargo=NOMBRE_CARGO,
+            cargo_oficial=CARGO_OFICIAL.format(usuario="X.codigo_oficial"),
+        )).bindparams(AGENCIA_EXPANDIBLE)
         return self.db.execute(consulta, params).mappings().all()
 
     def obtener_detalle(
@@ -238,26 +179,12 @@ class SqlControlCuentasInactivasRepository:
     ) -> tuple[int, Sequence[Mapping[str, Any]]]:
         # Solo se agregan predicados constantes. Los datos se pasan como parámetros.
         filtros, params = _filtro_cuentas(ids_agencia, inactividad, fecha_sistema)
-        parametros_expandibles = [_AGENCIA_EXPANDIBLE]
-        fuente_cargo = ""
-        filtros_seleccion = ""
-        if cargos:
-            fuente_cargo = _CARGO_OFICIAL.format(usuario="C.CODIGOUSUARIOOFICIAL")
-            filtros_seleccion += f" AND {_NOMBRE_CARGO} IN :cargos"
-            params["cargos"] = cargos
-            parametros_expandibles.append(bindparam("cargos", expanding=True))
-        if asesores:
-            filtros_seleccion += " AND C.CODIGOUSUARIOOFICIAL IN :asesores"
-            params["asesores"] = asesores
-            parametros_expandibles.append(bindparam("asesores", expanding=True))
-        if codigo_oficial is not None:
-            filtros_seleccion += " AND C.CODIGOUSUARIOOFICIAL = :codigo_oficial"
-            params["codigo_oficial"] = codigo_oficial
-        if codigo_tipo_cuenta is not None:
-            filtros_seleccion += " AND C.CODIGOTIPOCUENTA = :codigo_tipo_cuenta"
-            params["codigo_tipo_cuenta"] = codigo_tipo_cuenta
+        fuente_cargo, filtros_seleccion, parametros_expandibles = filtros_detalle(
+            params, codigo_oficial=codigo_oficial, codigo_tipo_cuenta=codigo_tipo_cuenta,
+            cargos=cargos, asesores=asesores,
+        )
 
-        predicado_saldo = _PREDICADOS_SALDO[saldo]
+        predicado_saldo = PREDICADOS_SALDO[saldo]
         if sin_paginacion:
             filtro_fecha, _ = _filtro_cuentas(
                 ids_agencia, inactividad, fecha_sistema, incluir_filtro_cuentas=False,
@@ -265,7 +192,7 @@ class SqlControlCuentasInactivasRepository:
             # Una sola consulta. El histórico se reconstruye únicamente para las
             # cuentas candidatas y los saldos se agregan una vez por cuenta.
             candidatas = _CUENTAS_CANDIDATAS.format(
-                tablas_cuenta=_TABLAS_CUENTA_BASE, fuente_cargo=fuente_cargo,
+                tablas_cuenta=TABLAS_CUENTA_BASE, fuente_cargo=fuente_cargo,
                 filtros_cuentas=_CUENTAS_INACTIVAS, filtros_seleccion=filtros_seleccion,
             )
             consulta = text(f"""
@@ -276,7 +203,7 @@ class SqlControlCuentasInactivasRepository:
                            S.disponible, S.total
                     FROM CuentasCandidatas AS C
                     LEFT JOIN UltimaInactivacion AS UI ON UI.NUMEROCUENTA = C.NUMERO
-                    {_SALDOS_POR_CUENTA}
+                    {SALDOS_POR_CUENTA}
                     {filtro_fecha} {predicado_saldo}
                 )
                 SELECT C.NUMERO AS numero_cuenta, A.NOMBRE AS agencia,
@@ -289,7 +216,7 @@ class SqlControlCuentasInactivasRepository:
                 FROM Seleccion AS C
                 INNER JOIN GENERAL.AGENCIA AS A ON A.ID = C.IDAGENCIA
                 INNER JOIN SEGURIDAD.USUARIO AS U ON U.USUARIO = C.CODIGOUSUARIOOFICIAL
-                {_TITULAR_PRINCIPAL}
+                {TITULAR_PRINCIPAL}
                 ORDER BY C.NUMERO
             """).bindparams(*parametros_expandibles)
             filas = self.db.execute(consulta, {**params, "fecha_sistema": fecha_sistema}).mappings().all()
@@ -298,13 +225,13 @@ class SqlControlCuentasInactivasRepository:
         filtros += filtros_seleccion
         # Con filtro de saldo se evalúan todas las candidatas antes de paginar.
         # En la consulta normal solo se calculan los saldos de la página.
-        fuente = _TABLAS_CUENTA + fuente_cargo + (_SALDOS_POR_CUENTA if predicado_saldo else "")
+        fuente = _TABLAS_CUENTA + fuente_cargo + (SALDOS_POR_CUENTA if predicado_saldo else "")
         filtros += predicado_saldo
         fuente_conteo = fuente
         historial_conteo = f"WITH {_HISTORIAL_INACTIVACION}"
         if not inactividad:
-            fuente_conteo = _TABLAS_CUENTA_BASE + fuente_cargo + (
-                _SALDOS_POR_CUENTA if predicado_saldo else ""
+            fuente_conteo = TABLAS_CUENTA_BASE + fuente_cargo + (
+                SALDOS_POR_CUENTA if predicado_saldo else ""
             )
             historial_conteo = ""
         conteo = text(f"""
@@ -318,7 +245,7 @@ class SqlControlCuentasInactivasRepository:
 
         columnas_saldo = ", S.disponible, S.total" if predicado_saldo else ""
         alias_saldo = "C" if predicado_saldo else "S"
-        saldos_pagina = "" if predicado_saldo else _SALDOS_POR_CUENTA
+        saldos_pagina = "" if predicado_saldo else SALDOS_POR_CUENTA
         consulta = text(f"""
             WITH {_HISTORIAL_INACTIVACION},
             CuentasPagina AS (
@@ -339,7 +266,7 @@ class SqlControlCuentasInactivasRepository:
             FROM CuentasPagina AS C
             INNER JOIN GENERAL.AGENCIA AS A ON A.ID = C.IDAGENCIA
             INNER JOIN SEGURIDAD.USUARIO AS U ON U.USUARIO = C.CODIGOUSUARIOOFICIAL
-            {_TITULAR_PRINCIPAL}
+            {TITULAR_PRINCIPAL}
             {saldos_pagina}
             ORDER BY C.NUMERO
         """).bindparams(*parametros_expandibles)

@@ -76,7 +76,6 @@ class SqlAuthRepository:
             .filter(UsuarioRol.usuario_registro == codigo_usuario)
             .filter(UsuarioRol.activo)
             .filter(Rol.activo) 
-            .order_by(Rol.nivel.asc(), Rol.codigo.asc())
             .all()
         )
 

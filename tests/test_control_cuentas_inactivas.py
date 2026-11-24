@@ -12,13 +12,13 @@ from app.modules.negocios.cuentas.control_cuentas_inactivas.dependencies import 
 )
 from app.modules.negocios.cuentas.control_cuentas_inactivas.repositories.sql_control_cuentas_inactivas_repository import (
     _HISTORIAL_INACTIVACION,
-    _PREDICADOS_SALDO,
     _filtro_cuentas,
     SqlControlCuentasInactivasRepository,
 )
 from app.modules.negocios.cuentas.control_cuentas_inactivas.service import (
     ControlCuentasInactivasService,
 )
+from app.modules.negocios.cuentas.sql_cuentas import PREDICADOS_SALDO
 
 
 URL = "/negocios/cuentas/control-cuentas-inactivas"
@@ -403,7 +403,7 @@ def test_los_rangos_de_inactividad_no_se_solapan_y_se_combinan_con_el_saldo():
                 LEFT JOIN UltimaInactivacion AS UI ON UI.NUMEROCUENTA = C.numero
                 INNER JOIN cuentas AS S ON S.numero = C.numero
                 CROSS JOIN (SELECT 0 AS ESCERTIFICADOAPORTACION) AS TC
-                {filtros} {_PREDICADOS_SALDO[saldo]}
+                {filtros} {PREDICADOS_SALDO[saldo]}
             """, dict(params, id_agencia=2)).fetchall()
             return {fila[0] for fila in filas}
 
