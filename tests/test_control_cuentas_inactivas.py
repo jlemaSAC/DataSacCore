@@ -283,6 +283,54 @@ def test_carga_completa_ejecuta_una_consulta_y_limita_el_historico_a_las_candida
     assert parametros["codigo_tipo_cuenta"] == "002"
 
 
+@pytest.mark.parametrize("inactividad", [None, [], ["3_6", "36_60"]])
+def test_resumen_consulta_el_historico_solo_cuando_el_filtro_lo_necesita(inactividad):
+    from sqlalchemy.dialects.mssql import pyodbc
+
+    class Sesion:
+        def execute(self, consulta, parametros):
+            compilada = consulta.params(**parametros).compile(
+                dialect=pyodbc.dialect(paramstyle="qmark"),
+                compile_kwargs={"render_postcompile": True},
+            )
+            self.sql = str(compilada)
+            self.parametros = compilada.params
+            return self
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return []
+
+        def scalar_one(self):
+            return 0
+
+    db = Sesion()
+    repo = SqlControlCuentasInactivasRepository(db)
+    repo.obtener_desglose(
+        [2, 17], fecha_sistema=date(2026, 11, 24), inactividad=inactividad, saldo=None,
+    )
+    assert "TC.ESCERTIFICADOAPORTACION = 0" in db.sql
+    assert "M.CODIGO = N'USD'" in db.sql
+    if inactividad:
+        assert "INNER JOIN CuentasCandidatas AS ACTUAL" in db.sql
+        assert "estado_anterior <> N'I' AND estado_resultante = N'I'" in db.sql
+        assert db.parametros["fecha_hasta_exclusiva_0"] == date(2026, 8, 25)
+        assert db.parametros["fecha_hasta_exclusiva_1"] == date(2023, 11, 25)
+    else:
+        assert "CUENTAESTADO_HISTORICO" not in db.sql
+        assert "UltimaInactivacion" not in db.sql
+        total, filas = repo.obtener_detalle(
+            ids_agencia=[2, 17], codigo_oficial=None, codigo_tipo_cuenta=None,
+            pagina=1, tamano_pagina=25, fecha_sistema=date(2026, 11, 24),
+            inactividad=inactividad, saldo=None, cargos=[], asesores=[],
+        )
+        assert total == 0 and filas == []
+        assert "COUNT_BIG(*)" in db.sql
+        assert "CUENTAESTADO_HISTORICO" not in db.sql
+
+
 def test_los_rangos_de_inactividad_no_se_solapan_y_se_combinan_con_el_saldo():
     with connect(":memory:") as db:
         db.execute("""

@@ -58,6 +58,17 @@ _CUENTAS_INACTIVAS = """
       AND C.IDAGENCIA IN :ids_agencia
 """
 
+_CUENTAS_CANDIDATAS = """
+    CuentasCandidatas AS (
+        SELECT C.NUMERO, C.IDAGENCIA, C.CODIGOESTADO, C.CODIGOUSUARIOOFICIAL,
+               C.CODIGOTIPOCUENTA, C.FECHAULTIMATRANSACCIONACTIVA,
+               TC.NOMBRE AS tipo_cuenta
+        {tablas_cuenta}
+        {fuente_cargo}
+        {filtros_cuentas} {filtros_seleccion}
+    )
+"""
+
 _AGENCIA_EXPANDIBLE = bindparam("ids_agencia", expanding=True)
 
 _CARGO_OFICIAL = """
@@ -158,13 +169,7 @@ def _filtro_cuentas(
 
 
 _RESUMEN = """
-    WITH {historial_inactivacion},
-    Cuentas AS (
-        SELECT C.NUMERO, C.IDAGENCIA, C.CODIGOUSUARIOOFICIAL,
-               C.CODIGOTIPOCUENTA, TC.NOMBRE AS tipo_cuenta
-        {tablas_cuenta}
-        {filtros}
-    ),
+    WITH {ctes_cuentas},
     Agrupados AS (
     SELECT C.IDAGENCIA AS id_agencia, A.NOMBRE AS agencia,
            C.CODIGOUSUARIOOFICIAL AS codigo_oficial, U.NOMBRE AS oficial,
@@ -172,7 +177,7 @@ _RESUMEN = """
            COUNT_BIG(*) AS cantidad_cuentas,
            SUM(COALESCE(S.disponible, 0)) AS valor_disponible,
            SUM({valor_total_cuenta}) AS valor_total
-    FROM Cuentas AS C
+    FROM {fuente_cuentas} AS C
     INNER JOIN GENERAL.AGENCIA AS A ON A.ID = C.IDAGENCIA
     INNER JOIN SEGURIDAD.USUARIO AS U ON U.USUARIO = C.CODIGOUSUARIOOFICIAL
     {saldos_por_cuenta}
@@ -194,11 +199,29 @@ class SqlControlCuentasInactivasRepository:
         self, ids_agencia: list[int], *, fecha_sistema: date,
         inactividad: TiempoInactividad | list[TiempoInactividad] | None, saldo: FiltroSaldo | None,
     ) -> Sequence[Mapping[str, Any]]:
-        filtros, params = _filtro_cuentas(ids_agencia, inactividad, fecha_sistema)
+        filtros, params = _filtro_cuentas(
+            ids_agencia, inactividad, fecha_sistema, incluir_filtro_cuentas=False,
+        )
+        ctes_cuentas = _CUENTAS_CANDIDATAS.format(
+            tablas_cuenta=_TABLAS_CUENTA_BASE, fuente_cargo="",
+            filtros_cuentas=_CUENTAS_INACTIVAS, filtros_seleccion="",
+        )
+        fuente_cuentas = "CuentasCandidatas"
+        # Sin rango de inactividad, el resumen no necesita consultar el histórico.
+        if inactividad:
+            ctes_cuentas += f""",
+                {_SECUENCIA_INACTIVACION.format(fuente_cuentas="CuentasCandidatas")},
+                CuentasFiltradas AS (
+                    SELECT C.*
+                    FROM CuentasCandidatas AS C
+                    LEFT JOIN UltimaInactivacion AS UI ON UI.NUMEROCUENTA = C.NUMERO
+                    {filtros}
+                )
+            """
+            fuente_cuentas = "CuentasFiltradas"
         consulta = text(_RESUMEN.format(
-            historial_inactivacion=_HISTORIAL_INACTIVACION,
-            tablas_cuenta=_TABLAS_CUENTA,
-            filtros=filtros,
+            ctes_cuentas=ctes_cuentas,
+            fuente_cuentas=fuente_cuentas,
             saldos_por_cuenta=_SALDOS_POR_CUENTA,
             predicado_saldo=_PREDICADOS_SALDO[saldo],
             valor_total_cuenta=_SALDO_TOTAL_CENTAVOS if saldo else "COALESCE(S.total, 0)",
@@ -241,15 +264,12 @@ class SqlControlCuentasInactivasRepository:
             )
             # Una sola consulta. El histórico se reconstruye únicamente para las
             # cuentas candidatas y los saldos se agregan una vez por cuenta.
+            candidatas = _CUENTAS_CANDIDATAS.format(
+                tablas_cuenta=_TABLAS_CUENTA_BASE, fuente_cargo=fuente_cargo,
+                filtros_cuentas=_CUENTAS_INACTIVAS, filtros_seleccion=filtros_seleccion,
+            )
             consulta = text(f"""
-                WITH CuentasCandidatas AS (
-                    SELECT C.NUMERO, C.IDAGENCIA, C.CODIGOESTADO, C.CODIGOUSUARIOOFICIAL,
-                           C.CODIGOTIPOCUENTA, C.FECHAULTIMATRANSACCIONACTIVA,
-                           TC.NOMBRE AS tipo_cuenta
-                    {_TABLAS_CUENTA_BASE}
-                    {fuente_cargo}
-                    {_CUENTAS_INACTIVAS} {filtros_seleccion}
-                ),
+                WITH {candidatas},
                 {_SECUENCIA_INACTIVACION.format(fuente_cuentas="CuentasCandidatas")},
                 Seleccion AS (
                     SELECT C.*, UI.FECHA AS fecha_inactivacion,
@@ -280,9 +300,16 @@ class SqlControlCuentasInactivasRepository:
         # En la consulta normal solo se calculan los saldos de la página.
         fuente = _TABLAS_CUENTA + fuente_cargo + (_SALDOS_POR_CUENTA if predicado_saldo else "")
         filtros += predicado_saldo
+        fuente_conteo = fuente
+        historial_conteo = f"WITH {_HISTORIAL_INACTIVACION}"
+        if not inactividad:
+            fuente_conteo = _TABLAS_CUENTA_BASE + fuente_cargo + (
+                _SALDOS_POR_CUENTA if predicado_saldo else ""
+            )
+            historial_conteo = ""
         conteo = text(f"""
-            WITH {_HISTORIAL_INACTIVACION}
-            SELECT COUNT_BIG(*) {fuente} {filtros}
+            {historial_conteo}
+            SELECT COUNT_BIG(*) {fuente_conteo} {filtros}
         """).bindparams(*parametros_expandibles)
         total = self.db.execute(conteo, params).scalar_one()
         desplazamiento = (pagina - 1) * tamano_pagina
