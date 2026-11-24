@@ -8,18 +8,21 @@ from pydantic import BaseModel, Field, model_validator
 FiltroSaldo = Literal["cero", "con_saldo"]
 
 
-class ConsultaCuentas(BaseModel):
+class AgenciasConsulta(BaseModel):
     id_agencia: int = Field(ge=0, description="0 consulta el consolidado de las agencias indicadas.")
     ids_agencia: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list, max_length=2000)
-    saldo: FiltroSaldo | None = Field(
-        default=None, description="Saldo total de la cuenta redondeado a centavos."
-    )
 
     @model_validator(mode="after")
-    def requerir_agencias_para_consolidado(self) -> "ConsultaCuentas":
+    def requerir_agencias_para_consolidado(self) -> "AgenciasConsulta":
         if self.id_agencia == 0 and not self.ids_agencia:
             raise ValueError("Indica las agencias que se incluirán en el consolidado.")
         return self
+
+
+class ConsultaCuentas(AgenciasConsulta):
+    saldo: FiltroSaldo | None = Field(
+        default=None, description="Saldo total de la cuenta redondeado a centavos."
+    )
 
 
 class FiltrosDetalleCuentas(BaseModel):

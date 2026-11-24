@@ -18,41 +18,12 @@ from ...sql_cuentas import (
     TABLAS_CUENTA_BASE,
     TITULAR_PRINCIPAL,
     filtros_detalle,
+    secuencia_inactivacion,
 )
 from ..schemas import TiempoInactividad
 
 
-# Cada registro conserva el estado anterior. El anterior del siguiente cambio
-# revela el estado resultante; el último se resuelve con el estado actual.
-_SECUENCIA_INACTIVACION = """
-    CambiosCuenta AS (
-        SELECT H.NUMEROCUENTA, H.FECHA, H.FECHAPROCESO, H.ID,
-               H.CODIGOESTADOCAMBIO AS estado_anterior,
-               LEAD(H.CODIGOESTADOCAMBIO, 1, ACTUAL.CODIGOESTADO) OVER (
-                   PARTITION BY H.NUMEROCUENTA
-                   ORDER BY H.FECHAPROCESO, H.ID
-               ) AS estado_resultante
-        FROM AHORROS.CUENTAESTADO_HISTORICO AS H
-        INNER JOIN {fuente_cuentas} AS ACTUAL ON ACTUAL.NUMERO = H.NUMEROCUENTA
-        WHERE ACTUAL.CODIGOESTADO = N'I'
-          AND ACTUAL.IDAGENCIA IN :ids_agencia
-    ),
-    Inactivaciones AS (
-        SELECT NUMEROCUENTA, FECHA,
-               ROW_NUMBER() OVER (
-                   PARTITION BY NUMEROCUENTA
-                   ORDER BY FECHAPROCESO DESC, ID DESC
-               ) AS orden
-        FROM CambiosCuenta
-        WHERE estado_anterior <> N'I' AND estado_resultante = N'I'
-    ),
-    UltimaInactivacion AS (
-        SELECT NUMEROCUENTA, FECHA
-        FROM Inactivaciones
-        WHERE orden = 1
-    )
-"""
-_HISTORIAL_INACTIVACION = _SECUENCIA_INACTIVACION.format(fuente_cuentas="AHORROS.CUENTA")
+_HISTORIAL_INACTIVACION = secuencia_inactivacion("AHORROS.CUENTA", filtrar_agencias=True)
 
 _TABLAS_CUENTA = TABLAS_CUENTA_BASE + """
     LEFT JOIN UltimaInactivacion AS UI ON UI.NUMEROCUENTA = C.NUMERO
@@ -151,7 +122,7 @@ class SqlControlCuentasInactivasRepository:
         # Sin rango de inactividad, el resumen no necesita consultar el histórico.
         if inactividad:
             ctes_cuentas += f""",
-                {_SECUENCIA_INACTIVACION.format(fuente_cuentas="CuentasCandidatas")},
+                {secuencia_inactivacion("CuentasCandidatas")},
                 CuentasFiltradas AS (
                     SELECT C.*
                     FROM CuentasCandidatas AS C
@@ -197,7 +168,7 @@ class SqlControlCuentasInactivasRepository:
             )
             consulta = text(f"""
                 WITH {candidatas},
-                {_SECUENCIA_INACTIVACION.format(fuente_cuentas="CuentasCandidatas")},
+                {secuencia_inactivacion("CuentasCandidatas")},
                 Seleccion AS (
                     SELECT C.*, UI.FECHA AS fecha_inactivacion,
                            S.disponible, S.total

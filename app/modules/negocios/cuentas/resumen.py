@@ -5,7 +5,7 @@ from app.modules.negocios.cartera_de_credito.situacion_crediticia_asesores.repos
     SqlSituacionCrediticiaAsesoresRepository,
 )
 
-from .schemas import ConsultaCuentas, IndicadoresCuentas, ResumenAgencia, ResumenOficialTipoCuenta
+from .schemas import AgenciasConsulta, IndicadoresCuentas, ResumenAgencia, ResumenOficialTipoCuenta
 
 
 def resumir_por_agencia(
@@ -35,7 +35,7 @@ def resumir_por_agencia(
     return list(resumen.values()), total
 
 
-def ids_agencia(body: ConsultaCuentas) -> list[int]:
+def ids_agencia(body: AgenciasConsulta) -> list[int]:
     return sorted(set(body.ids_agencia)) if body.id_agencia == 0 else [body.id_agencia]
 
 
