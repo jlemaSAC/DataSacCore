@@ -119,11 +119,14 @@ def test_etiqueta_columnas_de_cobro_sin_lookup() -> None:
     assert not any("$lookup" in stage or "$group" in stage for stage in collection.pipeline)
     assert any(stage == {"$unwind": "$cobros"} for stage in collection.pipeline)
     assert not any("$sort" in stage for stage in collection.pipeline)
-    cobros = collection.pipeline[1]["$project"]["cobros"]
+    proyeccion_cobros = next(
+        etapa["$project"] for etapa in collection.pipeline if "$project" in etapa
+    )
+    cobros = proyeccion_cobros["cobros"]
     assert cobros[0]["valor"] == {
         "$convert": {"input": "$CAPITAL", "to": "double", "onError": 0, "onNull": 0}
     }
-    assert collection.pipeline[1]["$project"]["cargo_asesor_cobro"] == "$CARGO_ASESOR_COBRO"
+    assert proyeccion_cobros["cargo_asesor_cobro"] == "$CARGO_ASESOR_COBRO"
     proyeccion_final = next(
         etapa["$project"]
         for etapa in collection.pipeline

@@ -7,12 +7,12 @@ from pymongo.database import Database
 from app.modules.negocios.recuperacion.recaudacion_acumulada.domain import (
     RecuperacionPrestamo,
 )
+from app.repositories.mongo.recuperacion import filtro_transacciones_recuperacion
 
 
 MongoDocument = dict[str, Any]
 COLECCION_RECUPERACION = "RecuperacionCrediticia"
 COLECCION_RECUPERACION_ACTUAL = "RecuperacionCrediticiaActual"
-TIPO_TRANSACCION_EXCLUIDA = "CASTIGO DE PRÉSTAMO"
 COLECCION_SITUACION = "SituacionCrediticia"
 COLECCION_SITUACION_ACTUAL = "SituacionCrediticiaActual"
 
@@ -183,12 +183,7 @@ class MongoRecaudacionAcumuladaRepository:
             {
                 "$match": {
                     "fecha_corte": {"$gte": desde, "$lte": hasta},
-                    "$expr": {
-                        "$ne": [
-                            {"$ifNull": ["$TIPO_TRANSACCION", "$TipoTransaccion"]},
-                            TIPO_TRANSACCION_EXCLUIDA,
-                        ]
-                    },
+                    **filtro_transacciones_recuperacion(),
                     "$or": [
                         {"NUMERO_PRESTAMO": {"$in": numeros_prestamo}},
                         {"NumeroPrestamo": {"$in": numeros_prestamo}},
