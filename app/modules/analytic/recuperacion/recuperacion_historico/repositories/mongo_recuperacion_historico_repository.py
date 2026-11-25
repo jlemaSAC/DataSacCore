@@ -664,9 +664,26 @@ class MongoRecuperacionHistoricoRepository:
         incluir_desglose_cobros: bool = False,
         incluir_cubos_filtro: bool = False,
     ) -> list[dict[str, Any]]:
+        filtro_agencia_origen: list[dict[str, Any]] = []
+        if len(agencias) == 1:
+            # La situación crediticia completa la agencia de los movimientos sin ese dato.
+            filtro_agencia_origen.append(
+                {
+                    "$match": {
+                        "$expr": {
+                            "$in": [
+                                _texto_mongo("$AGENCIA"),
+                                {"$literal": [agencias[0], "SIN DATOS"]},
+                            ]
+                        }
+                    }
+                }
+            )
+
         pipeline: list[dict[str, Any]] = [
             {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
             _match_sin_castigo(),
+            *filtro_agencia_origen,
             {
                 "$project": {
                     "movimiento": "$_id",

@@ -15,6 +15,7 @@ from app.modules.analytic.recuperacion.recuperacion_historico.domain import (
 )
 from app.modules.analytic.recuperacion.recuperacion_historico.repositories.mongo_recuperacion_historico_repository import (
     MongoRecuperacionHistoricoRepository,
+    _texto_mongo,
 )
 from app.modules.auth.dependencies import get_current_auth_context
 from app.modules.auth.schemas import AuthContext, UsuarioTokenPayload
@@ -496,6 +497,34 @@ def test_repositorio_agrupa_dimensiones_en_un_solo_facet() -> None:
     assert historico.pipeline[0] == {
         "$match": {"fecha_corte": {"$gte": "20260801", "$lte": "20260825"}}
     }
+
+
+@pytest.mark.parametrize("fecha_corte", ["20260825", "20260831"])
+@pytest.mark.parametrize("agencias", [["MATRIZ"], ["MATRIZ", "CUENCA"], []])
+def test_resumen_adelanta_el_filtro_solo_para_una_agencia(
+    fecha_corte: str, agencias: list[str]
+) -> None:
+    pipeline = MongoRecuperacionHistoricoRepository._construir_pipeline_resumen_negocios(
+        "20260801", fecha_corte, fecha_corte, "20260831", agencias
+    )
+    if len(agencias) == 1:
+        assert pipeline[2] == {
+            "$match": {
+                "$expr": {
+                    "$in": [
+                        _texto_mongo("$AGENCIA"),
+                        {"$literal": ["MATRIZ", "SIN DATOS"]},
+                    ]
+                }
+            }
+        }
+        assert "$project" in pipeline[3]
+    else:
+        assert "$project" in pipeline[2]
+
+    if agencias:
+        assert pipeline[-2] == {"$match": {"agencia": {"$in": agencias}}}
+    assert "$facet" in pipeline[-1]
 
 
 def test_repositorio_totales_por_tipo_no_hace_lookup_de_situacion() -> None:
