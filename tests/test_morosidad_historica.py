@@ -94,16 +94,20 @@ class FakeRepository:
         self.datos = datos or []
         self.cortes: dict[str, tuple[int, int]] = {}
         self.corte_actual: CorteActualMorosidad | None = None
+        self.filtros_diferidos: list[bool | None] = []
         self.calls = 0
 
     def obtener_morosidad_agrupada(
         self,
         cortes: dict[str, tuple[int, int]],
         corte_actual: CorteActualMorosidad | None = None,
+        *,
+        filtrar_diferidos: bool | None = None,
     ) -> list[MorosidadAgrupada]:
         self.calls += 1
         self.cortes = cortes
         self.corte_actual = corte_actual
+        self.filtros_diferidos.append(filtrar_diferidos)
         return list(self.datos)
 
 
@@ -116,7 +120,7 @@ class FakeCache:
         self.periodos_guardados: dict[str, list[MorosidadHistoricaAgrupacion]] = {}
 
     def obtener_meses(
-        self, periodos: Iterable[str]
+        self, periodos: Iterable[str], *, filtrar_diferidos: bool | None = None
     ) -> dict[str, list[MorosidadHistoricaAgrupacion]]:
         self.periodos_solicitados = list(periodos)
         return {
@@ -126,7 +130,11 @@ class FakeCache:
         }
 
     def guardar_mes(
-        self, periodo: str, agrupaciones: list[MorosidadHistoricaAgrupacion]
+        self,
+        periodo: str,
+        agrupaciones: list[MorosidadHistoricaAgrupacion],
+        *,
+        filtrar_diferidos: bool | None = None,
     ) -> None:
         self.periodos_guardados[periodo] = agrupaciones
 
@@ -134,6 +142,12 @@ class FakeCache:
 class FakeRedisClient:
     def __init__(self, valores: dict[str, str]) -> None:
         self.valores = valores
+
+    def mget(self, claves: list[str]) -> list[str | None]:
+        return [self.valores.get(clave) for clave in claves]
+
+    def set(self, clave: str, valor: str) -> None:
+        self.valores[clave] = valor
 
     def scan_iter(self, *, match: str, count: int) -> Iterable[str]:
         _ = count
@@ -230,6 +244,7 @@ def test_repositorio_consulta_solo_cortes_de_fin_de_mes() -> None:
     match = collection.pipeline[0]["$match"]
     assert match["fecha_corte"] == {"$in": ["20260131", "20260228"]}
     assert match["EstadoPrestamo"] == {"$ne": "CANCELADO"}
+    assert "ESDIFERIDO" not in match
     project = collection.pipeline[1]["$project"]
     assert project["saldo_capital"]["$convert"]["input"] == "$SaldoCapital"
     sumandos = project["cartera_improductiva"]["$add"]
@@ -398,13 +413,15 @@ def test_servicio_no_consulta_mongo_cuando_todos_los_meses_cerrados_estan_cachea
     assert cache.periodos_guardados == {}
 
 
-def test_servicio_no_cachea_el_mes_actual() -> None:
+def test_servicio_filtra_diferidos_sin_cachear_el_mes_actual() -> None:
     cache = FakeCache({"2026-07": MorosidadHistoricaService._construir_agrupaciones([])})
     repository = FakeRepository([agrupacion(periodo="2026-07")])
     service = MorosidadHistoricaService(repository, cache=cache)  # type: ignore[arg-type]
 
     response = service.obtener_morosidad_historica(
-        InputMorosidadHistorica(periodo_desde="2026-07", periodo_hasta="2026-07"),
+        InputMorosidadHistorica(
+            periodo_desde="2026-07", periodo_hasta="2026-07", filtrar_diferidos=False
+        ),
         fake_auth_context(date(2026, 7, 22)),
     )
 
@@ -412,13 +429,62 @@ def test_servicio_no_cachea_el_mes_actual() -> None:
     assert repository.calls == 1
     assert repository.cortes == {}
     assert repository.corte_actual == CorteActualMorosidad("20260722", 2026, 7)
+    assert repository.filtros_diferidos == [False]
+    assert cache.periodos_guardados == {}
     assert [item.periodo for item in response.agrupaciones] == ["2026-07"]
+
+
+@pytest.mark.parametrize(("filtro", "marca_historica"), [(True, "SI"), (False, "NO")])
+def test_repositorio_filtra_diferidos_en_ambas_fuentes(
+    filtro: bool, marca_historica: str
+) -> None:
+    database = FakeMongoDatabase()
+    repository = MongoMorosidadHistoricaRepository(database)  # type: ignore[arg-type]
+
+    repository.obtener_morosidad_agrupada(
+        {"20260131": (2026, 1)},
+        CorteActualMorosidad("20260722", 2026, 7),
+        filtrar_diferidos=filtro,
+    )
+
+    match_historico = database.collections["SituacionCrediticia"].pipeline[0]["$match"]
+    match_actual = database.collections["SituacionCrediticiaActual"].pipeline[0]["$match"]
+    assert match_historico["ESDIFERIDO"] == marca_historica
+    assert match_actual["EsDiferido"] is filtro
+
+
+def test_servicio_aisla_cache_historica_por_modo_de_diferidos() -> None:
+    redis = FakeRedisClient({})
+    cache = RedisMorosidadHistoricaCache(redis)  # type: ignore[arg-type]
+    repository = FakeRepository()
+    service = MorosidadHistoricaService(repository, cache=cache)  # type: ignore[arg-type]
+    periodo = "2026-01"
+
+    for filtro, saldo in [(None, 1000), (False, 700), (True, 300)]:
+        repository.datos = [agrupacion(periodo=periodo, saldo_capital=saldo)]
+        request = InputMorosidadHistorica(
+            periodo_desde=periodo, periodo_hasta=periodo, filtrar_diferidos=filtro
+        )
+        respuesta = service.obtener_morosidad_historica(request, fake_auth_context())
+        assert respuesta.agrupaciones[0].saldo_capital == saldo
+
+    assert repository.filtros_diferidos == [None, False, True]
+    assert "cartera:morosidad-historica:v1:2026-01" in redis.valores
+    for filtro, saldo in [(True, 300), (None, 1000), (False, 700)]:
+        request = InputMorosidadHistorica(
+            periodo_desde=periodo, periodo_hasta=periodo, filtrar_diferidos=filtro
+        )
+        respuesta = service.obtener_morosidad_historica(request, fake_auth_context())
+        assert respuesta.agrupaciones[0].saldo_capital == saldo
+    assert repository.calls == 3
 
 
 def test_cache_limpia_solo_las_claves_de_morosidad_historica() -> None:
     valores = {
         "cartera:morosidad-historica:v1:2026-01": "enero",
         "cartera:morosidad-historica:v1:2026-02": "febrero",
+        "cartera:morosidad-historica:v1:solo-diferidos:2026-01": "diferidos",
+        "cartera:morosidad-historica:v1:sin-diferidos:2026-01": "sin diferidos",
         "cartera:colocacion-historica:v1:2026-01": "no eliminar",
         "otra-aplicacion:clave": "no eliminar",
     }
@@ -426,7 +492,7 @@ def test_cache_limpia_solo_las_claves_de_morosidad_historica() -> None:
 
     eliminadas = cache.limpiar_cache()
 
-    assert eliminadas == 2
+    assert eliminadas == 4
     assert valores == {
         "cartera:colocacion-historica:v1:2026-01": "no eliminar",
         "otra-aplicacion:clave": "no eliminar",
@@ -516,22 +582,25 @@ def test_endpoint_requiere_token() -> None:
     assert response.status_code == 401
 
 
-def test_endpoint_devuelve_agrupaciones_con_metricas() -> None:
-    service = MorosidadHistoricaService(  # type: ignore[arg-type]
-        FakeRepository([agrupacion()])
-    )
+@pytest.mark.parametrize(
+    "filtro", [{}, {"filtrar_diferidos": None}, {"filtrar_diferidos": True}, {"filtrar_diferidos": False}]
+)
+def test_endpoint_devuelve_agrupaciones_con_metricas(filtro: dict[str, bool | None]) -> None:
+    repository = FakeRepository([agrupacion()])
+    service = MorosidadHistoricaService(repository)  # type: ignore[arg-type]
     app.dependency_overrides[get_current_auth_context] = fake_auth_context
     app.dependency_overrides[get_morosidad_historica_service] = lambda: service
     try:
         response = client.post(
             "/analytic/cartera-de-credito/morosidad-historica",
-            json={"periodo_desde": "2026-01", "periodo_hasta": "2026-01"},
+            json={"periodo_desde": "2026-01", "periodo_hasta": "2026-01", **filtro},
         )
     finally:
         app.dependency_overrides.pop(get_current_auth_context, None)
         app.dependency_overrides.pop(get_morosidad_historica_service, None)
 
     assert response.status_code == 200
+    assert repository.filtros_diferidos == [filtro.get("filtrar_diferidos")]
     payload = response.json()
     assert set(payload) == {"agrupaciones"}
     assert payload["agrupaciones"][0]["agencia"] == "MATRIZ"

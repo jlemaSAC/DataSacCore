@@ -46,6 +46,7 @@ class MorosidadHistoricaService:
         auth_context: AuthContext,
     ) -> MorosidadHistoricaResponse:
         inicio_total = perf_counter()
+        filtrar_diferidos = input_data.filtrar_diferidos
         try:
             inicio_cortes = perf_counter()
             cortes, corte_actual = self._construir_cortes(input_data, auth_context)
@@ -56,7 +57,9 @@ class MorosidadHistoricaService:
                 for fecha_corte, (anio, mes) in cortes.items()
             }
             inicio_cache = perf_counter()
-            agrupaciones_por_periodo = self.cache.obtener_meses(periodos_por_corte.values())
+            agrupaciones_por_periodo = self.cache.obtener_meses(
+                periodos_por_corte.values(), filtrar_diferidos=filtrar_diferidos
+            )
             cache_ms = (perf_counter() - inicio_cache) * 1000
             cortes_faltantes = {
                 fecha_corte: periodo
@@ -66,13 +69,15 @@ class MorosidadHistoricaService:
 
             inicio_repositorio = perf_counter()
             agrupaciones_faltantes = (
-                self.repository.obtener_morosidad_agrupada(cortes_faltantes)
+                self.repository.obtener_morosidad_agrupada(
+                    cortes_faltantes, filtrar_diferidos=filtrar_diferidos
+                )
                 if cortes_faltantes
                 else []
             )
             if corte_actual is not None:
                 agrupaciones_actuales = self.repository.obtener_morosidad_agrupada(
-                    {}, corte_actual
+                    {}, corte_actual, filtrar_diferidos=filtrar_diferidos
                 )
             else:
                 agrupaciones_actuales = []
@@ -93,7 +98,9 @@ class MorosidadHistoricaService:
                     agrupaciones_faltantes_por_periodo[periodo]
                 )
                 agrupaciones_por_periodo[periodo] = agrupaciones_mes
-                self.cache.guardar_mes(periodo, agrupaciones_mes)
+                self.cache.guardar_mes(
+                    periodo, agrupaciones_mes, filtrar_diferidos=filtrar_diferidos
+                )
 
             respuesta = self._construir_respuesta_por_periodo(
                 agrupaciones_por_periodo,

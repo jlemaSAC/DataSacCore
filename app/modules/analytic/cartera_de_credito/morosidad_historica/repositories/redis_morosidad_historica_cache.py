@@ -18,7 +18,7 @@ class RedisMorosidadHistoricaCacheUnavailable(RuntimeError):
 
 
 class RedisMorosidadHistoricaCache:
-    """Cachea por mes cerrado la respuesta ya normalizada para el contrato HTTP."""
+    """Cachea la respuesta por mes cerrado y filtro de diferidos."""
 
     key_prefix = "cartera:morosidad-historica:v1"
 
@@ -26,7 +26,7 @@ class RedisMorosidadHistoricaCache:
         self.client = client
 
     def obtener_meses(
-        self, periodos: Iterable[str]
+        self, periodos: Iterable[str], *, filtrar_diferidos: bool | None = None
     ) -> dict[str, list[MorosidadHistoricaAgrupacion]]:
         if self.client is None:
             return {}
@@ -36,7 +36,9 @@ class RedisMorosidadHistoricaCache:
             return {}
 
         try:
-            valores = self.client.mget([self._key(periodo) for periodo in periodos_unicos])
+            valores = self.client.mget(
+                [self._key(periodo, filtrar_diferidos) for periodo in periodos_unicos]
+            )
         except RedisError:
             logger.warning("No fue posible leer cache Redis de morosidad historica", exc_info=True)
             return {}
@@ -60,8 +62,11 @@ class RedisMorosidadHistoricaCache:
         return resultado
 
     def guardar_mes(
-        self, periodo: str,
+        self,
+        periodo: str,
         agrupaciones: list[MorosidadHistoricaAgrupacion],
+        *,
+        filtrar_diferidos: bool | None = None,
     ) -> None:
         if self.client is None:
             return
@@ -71,7 +76,7 @@ class RedisMorosidadHistoricaCache:
             separators=(",", ":"),
         )
         try:
-            self.client.set(self._key(periodo), valor)
+            self.client.set(self._key(periodo, filtrar_diferidos), valor)
         except RedisError:
             logger.warning(
                 "No fue posible guardar cache Redis de morosidad historica. periodo=%s",
@@ -104,5 +109,8 @@ class RedisMorosidadHistoricaCache:
             ) from exc
 
     @classmethod
-    def _key(cls, periodo: str) -> str:
-        return f"{cls.key_prefix}:{periodo}"
+    def _key(cls, periodo: str, filtrar_diferidos: bool | None) -> str:
+        if filtrar_diferidos is None:
+            return f"{cls.key_prefix}:{periodo}"
+        modo = "solo-diferidos" if filtrar_diferidos else "sin-diferidos"
+        return f"{cls.key_prefix}:{modo}:{periodo}"
