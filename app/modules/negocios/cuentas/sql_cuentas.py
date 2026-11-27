@@ -67,14 +67,19 @@ PREDICADOS_SALDO = {
 
 # Cada registro conserva el estado anterior. El anterior del siguiente cambio
 # revela el estado resultante; el último se resuelve con el estado actual.
+ESTADO_RESULTANTE = """
+    LEAD(H.CODIGOESTADOCAMBIO, 1, ACTUAL.CODIGOESTADO) OVER (
+        PARTITION BY H.NUMEROCUENTA
+        ORDER BY H.FECHAPROCESO, H.ID
+    )
+"""
+
+
 _SECUENCIA_INACTIVACION = """
     CambiosCuenta AS (
         SELECT H.NUMEROCUENTA, H.FECHA, H.FECHAPROCESO, H.ID,
                H.CODIGOESTADOCAMBIO AS estado_anterior,
-               LEAD(H.CODIGOESTADOCAMBIO, 1, ACTUAL.CODIGOESTADO) OVER (
-                   PARTITION BY H.NUMEROCUENTA
-                   ORDER BY H.FECHAPROCESO, H.ID
-               ) AS estado_resultante
+               {estado_resultante} AS estado_resultante
         FROM AHORROS.CUENTAESTADO_HISTORICO AS H
         INNER JOIN {fuente_cuentas} AS ACTUAL ON ACTUAL.NUMERO = H.NUMEROCUENTA
         WHERE ACTUAL.CODIGOESTADO = N'I'
@@ -124,6 +129,7 @@ def secuencia_inactivacion(fuente_cuentas: str, *, filtrar_agencias: bool = Fals
     return _SECUENCIA_INACTIVACION.format(
         fuente_cuentas=fuente_cuentas,
         filtro_agencias="AND ACTUAL.IDAGENCIA IN :ids_agencia" if filtrar_agencias else "",
+        estado_resultante=ESTADO_RESULTANTE,
     )
 
 
