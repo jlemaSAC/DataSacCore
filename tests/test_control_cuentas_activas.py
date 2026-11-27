@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,7 @@ from app.modules.negocios.cuentas.control_cuentas_activas.dependencies import (
 )
 from app.modules.negocios.cuentas.control_cuentas_activas.repositories.sql_control_cuentas_activas_repository import (
     _AGRUPADOS,
+    _MOVIMIENTO_REACTIVACION,
     SqlControlCuentasActivasRepository,
 )
 from app.modules.negocios.cuentas.control_cuentas_activas.service import ControlCuentasActivasService
@@ -38,9 +40,14 @@ def cliente(monkeypatch):
                     "id_agencia": id_agencia, "agencia": f"Agencia {id_agencia}",
                     "codigo_tipo_cuenta": "002", "tipo_cuenta": "Vista",
                     "codigo_asesor": asesor, "asesor": asesor, "cargo": "CAPTADOR",
-                    "cantidad_cuentas": 1, "cantidad_reactivaciones": cantidad,
+                    "cantidad_cuentas": cuentas, "cantidad_reactivaciones": reactivaciones,
+                    "total_recaudado": Decimal(importe) if importe is not None else None,
                 }
-                for id_agencia, asesor, cantidad in [(2, "ANA", 2), (2, "BEA", 1), (17, "LUIS", 1)]
+                for id_agencia, asesor, cuentas, reactivaciones, importe in [
+                    (2, "ANA", 2, 3, "23.50"),
+                    (2, "BEA", 1, 1, "3.25"),
+                    (17, "LUIS", 1, 1, None),
+                ]
             ]
 
         def obtener_gerentes_oficina(self, agencias):
@@ -48,16 +55,17 @@ def cliente(monkeypatch):
             return [{"IdAgencia": 2, "Cargo": "JEFE DE AGENCIA", "GerenteOficina": "María"}]
 
         def obtener_detalle(self, agencias, inicio, fin, *, cargos, asesores, desplazamiento, tamano_pagina,
-                            codigo_tipo_cuenta):
+                            codigo_tipo_cuenta, sin_paginacion):
             assert (agencias, inicio, fin) == ([2], date(2026, 11, 1), date(2026, 11, 24))
-            assert (desplazamiento, tamano_pagina) == (25, 25)
+            assert (desplazamiento, tamano_pagina) == ((0, 25) if sin_paginacion else (25, 25))
             assert (cargos, asesores) == (["CAPTADOR"], ["ANA"])
             assert codigo_tipo_cuenta == "002"
             return [{
-                "id_reactivacion": 3, "fecha_reactivacion": date(2026, 11, 12),
+                "id_reactivacion": id_reactivacion, "fecha_reactivacion": date(2026, 11, 12),
                 "numero_cuenta": "001", "titular": None, "tipo_cuenta": "Vista", "agencia": "Matriz",
-                "cargo": "CAPTADOR", "asesor": "ANA",
-            }]
+                "asesor": "ANA", "cargo": "CAPTADOR", "transaccion": "DEPOSITO",
+                "valor_transaccion": Decimal("15.50"),
+            } for id_reactivacion in (range(3, 104) if sin_paginacion else [3])]
 
     fuente = Fuente()
     auth = AuthContext.from_token_payload("token", UsuarioTokenPayload(
@@ -70,25 +78,38 @@ def cliente(monkeypatch):
     return TestClient(app)
 
 
-def test_endpoints_devuelven_resumen_consolidado_y_detalle_paginado(cliente):
+@pytest.mark.parametrize("sin_paginacion", [False, True])
+def test_endpoints_devuelven_resumen_consolidado_y_detalle(cliente, sin_paginacion):
     resumen = cliente.post(URL, json={**FILTROS, "id_agencia": 0, "ids_agencia": [17, 2, 17]})
     assert resumen.status_code == 200
-    assert resumen.json()["total"] == {"cantidad_cuentas": 3, "cantidad_reactivaciones": 4}
+    assert resumen.json()["total"] == {
+        "cantidad_cuentas": 4, "cantidad_reactivaciones": 5,
+        "total_recaudado": "26.75",
+    }
     assert [fila["id_agencia"] for fila in resumen.json()["resumen"]] == [2, 17]
-    assert resumen.json()["resumen"][0]["cantidad_cuentas"] == 2
+    assert resumen.json()["resumen"][0]["cantidad_cuentas"] == 3
+    assert resumen.json()["resumen"][0]["total_recaudado"] == "26.75"
     assert resumen.json()["resumen"][0]["cargo_jefe_agencia"] == "JEFE DE AGENCIA"
     assert resumen.json()["resumen"][0]["nombre_jefe_agencia"] == "María"
     assert resumen.json()["resumen"][1]["nombre_jefe_agencia"] is None
-    assert [fila["codigo_asesor"] for fila in resumen.json()["desglose"]] == ["ANA", "BEA", "LUIS"]
+    ana, bea, luis = resumen.json()["desglose"]
+    assert [ana["codigo_asesor"], bea["codigo_asesor"], luis["codigo_asesor"]] == ["ANA", "BEA", "LUIS"]
+    assert ana["total_recaudado"] == "23.50"
+    assert luis["total_recaudado"] is None
 
+    paginacion = {"sin_paginacion": True} if sin_paginacion else {"desplazamiento": 25}
     detalle = cliente.post(URL + "/detalle", json={
-        **FILTROS, "desplazamiento": 25, "cargos": ["CAPTADOR"], "asesores": ["ANA"],
+        **FILTROS, **paginacion, "cargos": ["CAPTADOR"], "asesores": ["ANA"],
         "codigo_tipo_cuenta": "002",
     })
     assert detalle.status_code == 200
+    assert len(detalle.json()["filas"]) == (101 if sin_paginacion else 1)
     assert detalle.json()["filas"][0]["fecha_reactivacion"] == "2026-11-12"
     assert detalle.json()["filas"][0]["id_reactivacion"] == 3
     assert detalle.json()["filas"][0]["asesor"] == "ANA"
+    assert detalle.json()["filas"][0]["transaccion"] == "DEPOSITO"
+    assert detalle.json()["filas"][0]["valor_transaccion"] == "15.50"
+    assert "moneda_transaccion" not in detalle.json()["filas"][0]
 
 
 @pytest.mark.parametrize(("cambios", "estado"), [
@@ -125,7 +146,8 @@ def test_resumen_identifica_transiciones_y_cuentas_unicas_con_el_historial_compl
         """)
         db.exec_driver_sql("""
             CREATE TABLE AHORROS.CUENTAESTADO_HISTORICO (
-                ID INTEGER, NUMEROCUENTA TEXT, CODIGOESTADOCAMBIO TEXT, FECHA TEXT, FECHAPROCESO TEXT
+                ID INTEGER, NUMEROCUENTA TEXT, CODIGOESTADOCAMBIO TEXT, FECHA TEXT,
+                FECHAPROCESO TEXT, CODIGOUSUARIO TEXT DEFAULT 'OPERADOR'
             )
         """)
         db.exec_driver_sql("""
@@ -137,7 +159,11 @@ def test_resumen_identifica_transiciones_y_cuentas_unicas_con_el_historial_compl
             ("otra_agencia", 17, "V", "A"), ("sin_historial", 2, "V", "A"),
             ("fuera_rango", 2, "V", "A"),
         ])
-        db.exec_driver_sql("INSERT INTO AHORROS.CUENTAESTADO_HISTORICO VALUES (?, ?, ?, ?, ?)", [
+        db.exec_driver_sql("""
+            INSERT INTO AHORROS.CUENTAESTADO_HISTORICO
+                (ID, NUMEROCUENTA, CODIGOESTADOCAMBIO, FECHA, FECHAPROCESO)
+            VALUES (?, ?, ?, ?, ?)
+        """, [
             (1, "reincidente", "I", "2026-11-01 00:00:00", "2026-11-01 12:00:00"),
             (2, "reincidente", "A", "2026-11-02 00:00:00", "2026-11-02 12:00:00"),
             (3, "reincidente", "I", "2026-11-05 00:00:00", "2026-11-05 12:00:00"),
@@ -148,21 +174,35 @@ def test_resumen_identifica_transiciones_y_cuentas_unicas_con_el_historial_compl
             (8, "bloqueada", "I", "2026-11-08 00:00:00", "2026-11-08 12:00:00"),
             (9, "otra_agencia", "I", "2026-11-03 00:00:00", "2026-11-03 12:00:00"),
             (10, "fuera_rango", "I", "2026-11-25 00:00:00", "2026-11-25 12:00:00"),
+            (11, "reincidente", "I", "2026-11-05 00:00:00", "2026-11-05 16:00:00"),
+            (12, "reincidente", "A", "2026-11-05 00:00:00", "2026-11-05 16:00:00"),
         ])
 
-        resumen = text(
-            _AGRUPADOS.replace("N'", "'").replace("COUNT_BIG", "COUNT")
-            + "SELECT * FROM Agrupados ORDER BY CODIGOTIPOCUENTA"
-        ).bindparams(AGENCIA_EXPANDIBLE)
-        filas = db.execute(resumen, {
+        movimientos = """
+            LEFT JOIN (
+                SELECT 1 AS id, 0 AS debitos, 0.25 AS creditos
+                UNION ALL SELECT 3, 99, 0
+                UNION ALL SELECT 11, 12.50, 12.50
+            ) AS Mov ON Mov.id = C.ID
+        """
+        ctes = (_AGRUPADOS.replace(_MOVIMIENTO_REACTIVACION, movimientos)
+                .replace("N'", "'").replace("COUNT_BIG", "COUNT")
+                .replace("CAST(FECHA AS date)", "date(FECHA)"))
+        params = {
             "ids_agencia": [2], "fecha_inicio": "2026-11-01", "fecha_hasta_exclusiva": "2026-11-25",
-        }).mappings().all()
+        }
+        resumen = text(ctes + "SELECT * FROM Agrupados ORDER BY CODIGOTIPOCUENTA")
+        filas = db.execute(resumen.bindparams(AGENCIA_EXPANDIBLE), params).mappings().all()
+        ultimas = text(ctes + "SELECT ID FROM Reactivaciones WHERE NUMERO = 'reincidente' ORDER BY FECHA")
+        assert db.execute(ultimas.bindparams(AGENCIA_EXPANDIBLE), params).scalars().all() == [1, 11]
 
     assert [(f["CODIGOTIPOCUENTA"], f["cantidad_cuentas"], f["cantidad_reactivaciones"])
             for f in filas] == [("P", 1, 1), ("V", 2, 3)]
+    assert [f["total_recaudado"] for f in filas] == [None, 12.75]
 
 
-def test_detalle_compila_filtros_de_personal_antes_de_ordenar_y_paginar():
+@pytest.mark.parametrize("sin_paginacion", [False, True])
+def test_detalle_compila_filtros_de_personal_antes_de_ordenar_y_paginar(sin_paginacion):
     class Sesion:
         def execute(self, consulta, parametros):
             self.compilada = consulta.params(**parametros).compile(
@@ -181,6 +221,7 @@ def test_detalle_compila_filtros_de_personal_antes_de_ordenar_y_paginar():
         [2, 17], date(2026, 11, 1), date(2026, 11, 24),
         cargos=["CAPTADOR"], asesores=["ANA"], desplazamiento=25, tamano_pagina=25,
         codigo_tipo_cuenta="002",
+        sin_paginacion=sin_paginacion,
     )
     assert db.compilada.params["ids_agencia_1"] == 2
     assert db.compilada.params["ids_agencia_2"] == 17
@@ -190,5 +231,8 @@ def test_detalle_compila_filtros_de_personal_antes_de_ordenar_y_paginar():
     sql = str(db.compilada)
     assert sql.index("C.CODIGOUSUARIOOFICIAL IN (:asesores_1)") < sql.index("Cambios AS")
     assert sql.index("C.CODIGOTIPOCUENTA = :codigo_tipo_cuenta") < sql.index("Cambios AS")
-    assert "ORDER BY R.FECHA DESC, R.ID DESC" in sql
-    assert "OFFSET :desplazamiento ROWS FETCH NEXT :tamano_pagina ROWS ONLY" in sql
+    assert "ORDER BY C.FECHA DESC, C.FECHAPROCESO DESC, C.ID DESC" in sql
+    if sin_paginacion:
+        assert "OFFSET" not in sql
+    else:
+        assert "OFFSET :desplazamiento ROWS FETCH NEXT :tamano_pagina ROWS ONLY" in sql

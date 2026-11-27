@@ -42,12 +42,12 @@ class ControlCuentasActivasService:
             for fila in self.catalogo.obtener_gerentes_oficina({fila.agencia for fila in desglose})
         }
         por_agencia_tipo: dict[tuple[int, str], ResumenReactivaciones] = {}
+        total = IndicadoresReactivaciones(cantidad_cuentas=0, cantidad_reactivaciones=0)
         for fila in desglose:
+            _acumular(total, fila)
             clave = fila.id_agencia, fila.codigo_tipo_cuenta
             if clave in por_agencia_tipo:
-                grupo = por_agencia_tipo[clave]
-                grupo.cantidad_cuentas += fila.cantidad_cuentas
-                grupo.cantidad_reactivaciones += fila.cantidad_reactivaciones
+                _acumular(por_agencia_tipo[clave], fila)
             else:
                 responsable = responsables.get(fila.id_agencia, {})
                 por_agencia_tipo[clave] = ResumenReactivaciones.model_validate({
@@ -58,10 +58,7 @@ class ControlCuentasActivasService:
         return ConsultaCuentasReactivadasResponse(
             resumen=list(por_agencia_tipo.values()),
             desglose=desglose,
-            total=IndicadoresReactivaciones(
-                cantidad_cuentas=sum(fila.cantidad_cuentas for fila in desglose),
-                cantidad_reactivaciones=sum(fila.cantidad_reactivaciones for fila in desglose),
-            ),
+            total=total,
         )
 
     def detalle(
@@ -73,6 +70,7 @@ class ControlCuentasActivasService:
             cargos=body.cargos, asesores=body.asesores,
             codigo_tipo_cuenta=body.codigo_tipo_cuenta,
             desplazamiento=body.desplazamiento, tamano_pagina=body.tamano_pagina,
+            sin_paginacion=body.sin_paginacion,
         )
         return DetalleCuentasReactivadasResponse(
             filas=[ReactivacionDetalle.model_validate(fila) for fila in filas],
@@ -87,3 +85,10 @@ class ControlCuentasActivasService:
         if not habilitadas.issuperset(agencias):
             raise HTTPException(403, "La consulta incluye agencias que no tienes habilitadas.")
         return agencias
+
+
+def _acumular(destino: IndicadoresReactivaciones, fila: IndicadoresReactivaciones) -> None:
+    destino.cantidad_cuentas += fila.cantidad_cuentas
+    destino.cantidad_reactivaciones += fila.cantidad_reactivaciones
+    if fila.total_recaudado is not None:
+        destino.total_recaudado = (destino.total_recaudado or 0) + fila.total_recaudado

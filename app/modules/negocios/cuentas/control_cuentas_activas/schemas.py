@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
@@ -25,11 +26,13 @@ class DetalleCuentasReactivadasRequest(ConsultaCuentasReactivadas):
     asesores: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(default_factory=list, max_length=2000)
     desplazamiento: int = Field(default=0, ge=0, le=2_147_483_647)
     tamano_pagina: int = Field(default=25, ge=1, le=100)
+    sin_paginacion: bool = False
 
 
 class IndicadoresReactivaciones(BaseModel):
     cantidad_cuentas: int
     cantidad_reactivaciones: int
+    total_recaudado: Decimal | None = None
 
 
 class ResumenReactivaciones(IndicadoresReactivaciones):
@@ -60,8 +63,10 @@ class ReactivacionDetalle(BaseModel):
     titular: str | None
     tipo_cuenta: str
     agencia: str
-    cargo: str
     asesor: str
+    cargo: str
+    transaccion: str | None
+    valor_transaccion: Decimal | None
 
 
 class DetalleCuentasReactivadasResponse(BaseModel):
