@@ -133,9 +133,10 @@ saldos diarios. La respuesta informa las fechas operativas efectivamente usadas.
 
 `comparacion` contiene una fila por usuario oficial, agencia y producto, con clave
 `usuario::agencia::producto`. `CodigoProducto` es `AHORROS.TIPO_CUENTA.CODIGO`
-(por ejemplo, `002`), y `ProductoAhorro` es su nombre. Estos campos permiten
-construir el filtro de productos después de cargar los datos, incluyendo productos
-presentes solo en uno de los cortes. No se devuelve cargo ni se filtra por cargo.
+(por ejemplo, `002`), y `ProductoAhorro` es su nombre. `CodigoUsuario` identifica
+al asesor y `CargoAsesor` corresponde a la nómina actual (`SIN CARGO` si no hay
+un cargo asociado). La pantalla de Ahorro Vista usa estos campos para filtrar
+por producto, cargo y asesor después de cargar los dos cortes.
 
 `ValoresActual` y `ValoresCierreMesAnterior` contienen `Saldo`, `Cuentas`,
 `TasaPromedio` y `SumaTasas`. Después de filtrar, sumar saldo y cuentas y calcular

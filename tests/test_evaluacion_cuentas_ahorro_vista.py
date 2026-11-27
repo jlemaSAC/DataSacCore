@@ -43,14 +43,17 @@ def request(**cambios):
 def fila(**cambios):
     return dict(
         codigo_usuario="ana", id_agencia=2, codigo_producto="002", producto_ahorro="Ahorro Vista",
-        agencia="MATRIZ", nombre="Ana", saldo=Decimal("100.25"), cuentas=3, suma_tasas=6,
+        agencia="MATRIZ", nombre="Ana", cargo="ASESOR", saldo=Decimal("100.25"), cuentas=3, suma_tasas=6,
     ) | cambios
 
 
 class Fuente:
     def __init__(self, actual=None, cierre=None):
         self.actual = actual if actual is not None else [fila(), fila(codigo_producto="005", producto_ahorro="Cuenta Básica", cuentas=1, suma_tasas=8)]
-        self.cierre = cierre if cierre is not None else [fila(saldo=80, cuentas=2, suma_tasas=2), fila(codigo_usuario="saliente")]
+        self.cierre = cierre if cierre is not None else [
+            fila(saldo=80, cuentas=2, suma_tasas=2),
+            fila(codigo_usuario="saliente", cargo="SIN CARGO"),
+        ]
         self.calls = []
         self.fechas_faltantes = set()
         self.gerentes_calls = []
@@ -85,6 +88,7 @@ def test_compara_cortes_y_conserva_productos_nuevos_y_salientes():
     assert basica.valores_cierre_mes_anterior is None
     assert basica.diferencias_cierre_mes_anterior.tasa_promedio is None
     assert saliente.valores_actual is None
+    assert saliente.cargo_asesor == "SIN CARGO"
     assert saliente.diferencias_cierre_mes_anterior.saldo == -100.25
     assert saliente.diferencias_cierre_mes_anterior.cuentas == -3
     assert resultado.faltantes_en_cierre_mes_anterior == ["ana::2::005"]
@@ -176,6 +180,8 @@ def test_endpoint_bearer_contrato_y_validacion():
             "Saldo": 100.25, "Cuentas": 3, "TasaPromedio": 2, "SumaTasas": 6,
         }
         assert datos["comparacion"][0]["CodigoProducto"] == "002"
+        assert datos["comparacion"][0]["CargoAsesor"] == "ASESOR"
+        assert datos["comparacion"][-1]["CargoAsesor"] == "SIN CARGO"
         assert datos["agencias_gerentes_oficina"][0]["GerenteOficina"] == "Responsable"
         assert client.post(URL, json=body | {"cargos": []}).status_code == 422
         assert client.post(URL, json=body | {"fecha_fin": "2026-11-07"}).status_code == 400
@@ -219,6 +225,9 @@ def test_sql_corte_temporal_mismo_universo_y_filtro_temprano(en_linea, id_agenci
     assert "IN (N'A', N'I', N'B')" in sql
     assert "CU.CODIGOTIPOCUENTA <> N'001'" in sql
     assert ("AND CU.IDAGENCIA = :id_agencia" in sql) == bool(id_agencia)
+    assert "OUTER APPLY" in sql
+    assert "WHERE EU.CODIGOUSUARIO = X.codigo_usuario" in sql
+    assert "N'SIN CARGO') AS cargo" in sql
     assert params == {"cierre": cierre, "id_agencia": id_agencia, "es_programado": es_programado}
     assert db.calls[0][1]["hasta_exclusivo"] == (date(2026, 11, 7) if en_linea else date(2026, 11, 1))
 
