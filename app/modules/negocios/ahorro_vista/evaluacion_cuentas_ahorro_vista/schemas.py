@@ -47,6 +47,7 @@ class CuentaAhorroVistaComparacion(BaseModel):
 
     clave: str = Field(alias="Clave", description="Usuario::agencia::tipo de cuenta.")
     codigo_usuario: str = Field(alias="CodigoUsuario")
+    cargo_asesor: str = Field(alias="CargoAsesor", description="Cargo del usuario en la nómina actual.")
     id_agencia: int = Field(alias="IdAgencia")
     codigo_producto: str = Field(alias="CodigoProducto", description="TIPO_CUENTA.CODIGO.")
     producto_ahorro: str = Field(alias="ProductoAhorro")

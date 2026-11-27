@@ -90,6 +90,7 @@ class EvaluacionCuentasAhorroVistaService:
             valores_fin, valores_cierre = _valores(fin), _valores(anterior)
             comparacion.append(CuentaAhorroVistaComparacion(
                 clave=f"{codigo}::{agencia}::{producto}", codigo_usuario=codigo,
+                cargo_asesor=referencia["cargo"],
                 id_agencia=agencia, codigo_producto=producto,
                 producto_ahorro=referencia["producto_ahorro"],
                 nombre_asesor_actual=fin["nombre"] if fin else None,

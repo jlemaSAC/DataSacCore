@@ -158,6 +158,8 @@ class MongoMorosidadHistoricaRepository:
         self,
         cortes: dict[str, tuple[int, int]],
         corte_actual: CorteActualMorosidad | None = None,
+        *,
+        filtrar_diferidos: bool | None = None,
     ) -> list[MorosidadAgrupada]:
         if not cortes and corte_actual is None:
             return []
@@ -230,18 +232,17 @@ class MongoMorosidadHistoricaRepository:
             ]
         ] = []
         if cortes:
+            match_historico: dict[str, Any] = {
+                "fecha_corte": {"$in": list(cortes)},
+                "EstadoPrestamo": {"$ne": "CANCELADO"},
+            }
+            if filtrar_diferidos is not None:
+                match_historico["ESDIFERIDO"] = "SI" if filtrar_diferidos else "NO"
             consultas.append(
                 (
                     "historico",
                     self.collection,
-                    self._construir_pipeline(
-                        dimensiones,
-                        {
-                            "fecha_corte": {"$in": list(cortes)},
-                            "EstadoPrestamo": {"$ne": "CANCELADO"},
-                        },
-                        1,
-                    ),
+                    self._construir_pipeline(dimensiones, match_historico, 1),
                     cortes,
                     {
                         "hint": "fecha_corte_1_estado_prestamo_1",
@@ -250,13 +251,16 @@ class MongoMorosidadHistoricaRepository:
                 )
             )
         if corte_actual is not None:
+            match_actual: dict[str, Any] = {"EstadoPrestamo": {"$ne": "CANCELADO"}}
+            if filtrar_diferidos is not None:
+                match_actual["EsDiferido"] = filtrar_diferidos
             consultas.append(
                 (
                     "actual",
                     self.actual_collection,
                     self._construir_pipeline(
                         dimensiones_actual,
-                        {"EstadoPrestamo": {"$ne": "CANCELADO"}},
+                        match_actual,
                         {"$literal": corte_actual.fecha_corte},
                     ),
                     {

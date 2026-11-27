@@ -26,7 +26,7 @@ router = APIRouter(prefix="/ahorro-vista", tags=["Negocios - Ahorro Vista"])
         "por defecto; true para cuentas restringidas. "
         "Compara el corte final con el cierre del mes anterior; fecha_inicio no limita "
         "la apertura de cuentas. id_agencia=0 consulta el consolidado. "
-        "ProductoAhorro y CodigoProducto permiten filtrar después de cargar los datos. "
+        "CodigoProducto, CargoAsesor y CodigoUsuario permiten filtrar después de cargar los datos. "
         "Reagrupar la tasa como SUM(SumaTasas)/SUM(Cuentas); las diferencias son puntos "
         "porcentuales. Los grupos ausentes son null y un cierre no disponible devuelve 404."
     ),

@@ -14,6 +14,10 @@ class InputMorosidadHistorica(BaseModel):
         examples=["2025-12"],
         description="Ultimo mes incluido, en formato YYYY-MM.",
     )
+    filtrar_diferidos: bool | None = Field(
+        default=None,
+        description="Solo diferidos con true, solo no diferidos explícitos con false y todos con null.",
+    )
 
     @model_validator(mode="after")
     def validar_rango(self) -> "InputMorosidadHistorica":
@@ -56,5 +60,5 @@ class MorosidadHistoricaResponse(BaseModel):
 class MorosidadHistoricaCacheClearResponse(BaseModel):
     claves_eliminadas: int = Field(
         ge=0,
-        description="Numero de meses historicos eliminados de la cache Redis.",
+        description="Número de claves eliminadas de la caché Redis de meses cerrados.",
     )

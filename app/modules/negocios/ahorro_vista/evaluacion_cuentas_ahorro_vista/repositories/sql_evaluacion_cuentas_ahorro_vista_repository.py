@@ -5,6 +5,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.modules.negocios.cuentas.sql_cuentas import CARGO_OFICIAL, NOMBRE_CARGO
+
 
 @dataclass(frozen=True)
 class CorteEvaluacionAhorroVista:
@@ -42,6 +44,7 @@ class SqlEvaluacionCuentasAhorroVistaRepository:
             return None
         temporal = "" if en_linea else "FOR SYSTEM_TIME AS OF :cierre"
         filtro_agencia = "AND CU.IDAGENCIA = :id_agencia" if id_agencia else ""
+        cargo_oficial = CARGO_OFICIAL.format(usuario="X.codigo_usuario")
         # Solo se interpolan cláusulas constantes. Agregar por cuenta antes de
         # unir tasas evita multiplicar saldos y conteos por los ítems y rangos.
         filas = self.db.execute(text(f"""
@@ -91,10 +94,12 @@ class SqlEvaluacionCuentasAhorroVistaRepository:
             SELECT X.*,
                 COALESCE(NULLIF(LTRIM(RTRIM(A.NOMBRE)), N''), N'SIN AGENCIA') AS agencia,
                 COALESCE(NULLIF(LTRIM(RTRIM(U.NOMBRE)), N''), X.codigo_usuario) AS nombre,
+                {NOMBRE_CARGO} AS cargo,
                 COALESCE(NULLIF(LTRIM(RTRIM(TC.NOMBRE)), N''), X.codigo_producto) AS producto_ahorro
             FROM Agrupados AS X
             LEFT JOIN GENERAL.AGENCIA AS A ON A.ID = X.id_agencia
             LEFT JOIN SEGURIDAD.USUARIO AS U ON U.USUARIO = X.codigo_usuario
             INNER JOIN AHORROS.TIPO_CUENTA AS TC ON TC.CODIGO = X.codigo_producto
+            {cargo_oficial}
         """), {"cierre": corte["cierre"], "id_agencia": id_agencia, "es_programado": es_programado}).mappings().all()
         return CorteEvaluacionAhorroVista(fecha_real, [dict(fila) for fila in filas])

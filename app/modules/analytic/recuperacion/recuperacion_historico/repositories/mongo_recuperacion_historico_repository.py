@@ -18,12 +18,12 @@ from app.modules.analytic.recuperacion.recuperacion_historico.schemas import (
     InputRecuperacionHistoricoAgrupado,
     InputRecuperacionHistoricoRango,
 )
+from app.repositories.mongo.recuperacion import filtro_transacciones_recuperacion
 
 
 MongoDocument = dict[str, Any]
 COLECCION_RECUPERACION = "RecuperacionCrediticia"
 COLECCION_RECUPERACION_ACTUAL = "RecuperacionCrediticiaActual"
-TIPO_TRANSACCION_EXCLUIDA = "CASTIGO DE PRÉSTAMO"
 COLECCION_SITUACION = "SituacionCrediticia"
 COLECCION_SITUACION_ACTUAL = "SituacionCrediticiaActual"
 TAMANO_LOTE_PRESTAMOS = 1_000
@@ -417,7 +417,7 @@ class MongoRecuperacionHistoricoRepository:
     ) -> list[dict[str, Any]]:
         pipeline: list[dict[str, Any]] = [
             {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
-            _match_sin_castigo(),
+            {"$match": filtro_transacciones_recuperacion()},
             {
                 "$project": {
                     "numero": {
@@ -664,9 +664,26 @@ class MongoRecuperacionHistoricoRepository:
         incluir_desglose_cobros: bool = False,
         incluir_cubos_filtro: bool = False,
     ) -> list[dict[str, Any]]:
+        filtro_agencia_origen: list[dict[str, Any]] = []
+        if len(agencias) == 1:
+            # La situación crediticia completa la agencia de los movimientos sin ese dato.
+            filtro_agencia_origen.append(
+                {
+                    "$match": {
+                        "$expr": {
+                            "$in": [
+                                _texto_mongo("$AGENCIA"),
+                                {"$literal": [agencias[0], "SIN DATOS"]},
+                            ]
+                        }
+                    }
+                }
+            )
+
         pipeline: list[dict[str, Any]] = [
             {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
-            _match_sin_castigo(),
+            {"$match": filtro_transacciones_recuperacion()},
+            *filtro_agencia_origen,
             {
                 "$project": {
                     "movimiento": "$_id",
@@ -942,7 +959,7 @@ class MongoRecuperacionHistoricoRepository:
     def _construir_pipeline(fecha_desde: str, fecha_hasta: str) -> list[dict[str, Any]]:
         return [
             {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
-            _match_sin_castigo(),
+            {"$match": filtro_transacciones_recuperacion()},
             {
                 "$project": {
                     "fecha_corte": 1,
@@ -1014,7 +1031,7 @@ class MongoRecuperacionHistoricoRepository:
 
         pipeline: list[dict[str, Any]] = [
             {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
-            _match_sin_castigo(),
+            {"$match": filtro_transacciones_recuperacion()},
             {
                 "$project": {
                     "periodo": {"$substrBytes": ["$fecha_corte", 0, 6]},
@@ -1172,7 +1189,7 @@ class MongoRecuperacionHistoricoRepository:
     def _construir_pipeline_diario(fecha_desde: str, fecha_hasta: str) -> list[dict[str, Any]]:
         return [
             {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
-            _match_sin_castigo(),
+            {"$match": filtro_transacciones_recuperacion()},
             {
                 "$project": {
                     "fecha_corte": 1,
@@ -1853,7 +1870,7 @@ def _pipeline_movimientos_detalle(
 ) -> list[dict[str, Any]]:
     return [
         {"$match": {"fecha_corte": {"$gte": fecha_desde, "$lte": fecha_hasta}}},
-        _match_sin_castigo(),
+        {"$match": filtro_transacciones_recuperacion()},
         {
             "$project": {
                 "fecha_corte": 1,
@@ -1898,17 +1915,3 @@ def _pipeline_movimientos_detalle(
             }
         },
     ]
-
-
-def _match_sin_castigo() -> dict[str, Any]:
-    """Excluye castigos usando el nombre actual o el alias legado del campo."""
-    return {
-        "$match": {
-            "$expr": {
-                "$ne": [
-                    {"$ifNull": ["$TIPO_TRANSACCION", "$TipoTransaccion"]},
-                    TIPO_TRANSACCION_EXCLUIDA,
-                ]
-            }
-        }
-    }

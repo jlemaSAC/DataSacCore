@@ -7,9 +7,7 @@ from pymongo.database import Database
 
 from app.modules.negocios.recuperacion.resumen_recuperacion.constants import TIPOS_COBRO
 from app.modules.negocios.recuperacion.resumen_recuperacion.domain import RecuperacionDiaria
-
-
-TIPO_TRANSACCION_EXCLUIDA = "CASTIGO DE PRÉSTAMO"
+from app.repositories.mongo.recuperacion import filtro_transacciones_recuperacion
 
 
 class MongoResumenRecuperacionRepository:
@@ -69,16 +67,7 @@ class MongoResumenRecuperacionRepository:
             validos["agencia_resumen"] = {"$in": agencias}
         return [
             {"$match": filtros[0] if len(filtros) == 1 else {"$or": filtros}},
-            {
-                "$match": {
-                    "$expr": {
-                        "$ne": [
-                            {"$ifNull": ["$TIPO_TRANSACCION", "$TipoTransaccion"]},
-                            TIPO_TRANSACCION_EXCLUIDA,
-                        ]
-                    }
-                }
-            },
+            {"$match": filtro_transacciones_recuperacion()},
             {"$set": normalizados},
             {"$match": validos},
             {"$group": {
